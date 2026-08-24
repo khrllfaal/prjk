@@ -756,6 +756,30 @@ function showTxnDrilldown(title, subtitle, list){
   openModal(title, body, {wide:true, saveLabel:null});
 }
 
+/* Ref No scheme shared by manual entry, the Excel importer, and the
+   embedded seed data: <prefix>-<YYMM>-<sequence>, where prefix is
+   CI/CO (kas in/out) or BI/BO (bank in/out), and the sequence counts
+   ALL existing transactions with that prefix so far (not reset each
+   month — matches the numbering already present in imported/seed
+   data, e.g. "CI-2604-0047" is simply the 47th CI transaction ever). */
+function refPrefix(jenis){
+  var isIn=/masuk$/.test(jenis), isBank=/^bank/.test(jenis);
+  return (isBank?(isIn?'BI':'BO'):(isIn?'CI':'CO'));
+}
+function nextRefFor(jenis, tgl){
+  var pref=refPrefix(jenis);
+  var mo=(tgl||todayISO()).slice(2,4)+(tgl||todayISO()).slice(5,7);
+  // max existing sequence + 1 (not a plain count) so a deleted transaction
+  // in the middle of the run never causes two transactions to share a ref
+  var maxSeq=0;
+  DB.txns.forEach(function(t){
+    if(!t.ref || t.ref.indexOf(pref+'-')!==0) return;
+    var n=parseInt(t.ref.slice(t.ref.lastIndexOf('-')+1), 10);
+    if(!isNaN(n) && n>maxSeq) maxSeq=n;
+  });
+  return pref+'-'+mo+'-'+String(maxSeq+1).padStart(4,'0');
+}
+
 function coaTipe(kode){
   var head=String(kode).split('.')[0];
   return ({'1':'asset','2':'liability','3':'equity','4':'revenue','5':'cogs','6':'expense','7':'other','8':'tax'})[head]||'other';
@@ -1445,17 +1469,19 @@ function financePage(jenis, title, sub){
       var amount=rec?(isIn?rec.debet:rec.kredit):'';
 
       var html='<div class="form-grid">'+
+        '<div class="field"><label>No. Transaksi</label><input type="text" id="f_refPreview" value="'+
+          esc(rec?rec.ref:nextRefFor(jenis, v('tgl',todayISO())))+'" disabled></div>'+
         '<div class="field"><label>Tanggal *</label><input type="date" id="f_tgl" value="'+esc(v('tgl',todayISO()))+'"></div>'+
         '<div class="field"><label>Akun '+(isBank?'Bank':'Kas')+' *</label>'+
           '<div id="f_akunKas_ssel"></div><input type="hidden" id="f_akunKas" value="'+esc(v('akunKas',''))+'"></div>'+
-        '<div class="field full"><label>Akun Lawan *</label>'+
+        '<div class="field"><label>Akun Lawan *</label>'+
           '<div id="f_akunLawan_ssel"></div><input type="hidden" id="f_akunLawan" value="'+esc(v('akunLawan',''))+'"></div>'+
         '<div class="field"><label>Project</label>'+
           '<div id="f_project_ssel"></div><input type="hidden" id="f_project" value="'+esc(v('project',''))+'"></div>'+
         '<div class="field"><label>'+relasiLabel+'</label>'+
           '<div id="f_relasi_ssel"></div><input type="hidden" id="f_relasi" value="'+esc(v('relasi',''))+'"></div>'+
         '<div class="field"><label>Amount (Rp) *</label><input type="number" id="f_amount" value="'+esc(amount)+'"></div>'+
-        '<div class="field full"><label>Description</label><input type="text" id="f_ket" value="'+esc(v('ket',''))+'"></div>'+
+        '<div class="field"><label>Description</label><input type="text" id="f_ket" value="'+esc(v('ket',''))+'"></div>'+
       '</div>';
 
       openModal((id?'Edit ':'Tambah ')+title, html, {wide:true, onSave:function(){
@@ -1475,8 +1501,7 @@ function financePage(jenis, title, sub){
         obj.debet=isIn?amt:0;
         obj.kredit=isIn?0:amt;
         if(!id){
-          var pref=(isBank?(isIn?'BI':'BO'):(isIn?'CI':'CO'));
-          obj.ref=pref+'-'+tgl.slice(2,4)+tgl.slice(5,7)+'-'+String(DB.txns.length+1).padStart(4,'0');
+          obj.ref=nextRefFor(jenis, tgl);
           DB.txns.push(obj);
         }
         saveDB(); syncUpsert('transactions', obj); closeModal(); refresh();
@@ -1490,6 +1515,11 @@ function financePage(jenis, title, sub){
         placeholder:'Cari project…'});
       searchableSelect('f_relasi_ssel','f_relasi',{options:relasiList.map(function(r){ return {value:r.nama,label:r.nama}; }),
         placeholder:'Cari '+relasiLabel.toLowerCase()+'…'});
+      if(!rec){
+        document.getElementById('f_tgl').addEventListener('change', function(){
+          document.getElementById('f_refPreview').value=nextRefFor(jenis, fv('f_tgl'));
+        });
+      }
     }
 
     function del(id){
