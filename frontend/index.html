@@ -577,7 +577,7 @@ function seedDB(){
       project:j.p, relasi:j.r, kategori:j.g, ket:j.k, debet:j.d, kredit:j.c};
   });
 
-  return {customers:customers, vendors:vendors, projects:projects, coa:coa, txns:txns, jurnal:jurnal};
+  return {customers:customers, vendors:vendors, projects:projects, coa:coa, txns:txns, jurnal:jurnal, hutangOverrides:{}};
 }
 
 /* "Pemberi Proyek" — inferred once from the project name so the
@@ -720,11 +720,16 @@ function computeHutangDagangRows(){
     });
   });
 
+  var overrides=DB.hutangOverrides||{};
   return notas.map(function(n){
-    var sisa=Math.max(0, n.amount-n.paid);
-    var status=sisa<=0.5?'LUNAS':(n.paid>0?'SEBAGIAN':'BELUM_BAYAR');
+    var ov=overrides[n.id];
+    // A manual override is a standalone correction for this one nota — it
+    // does not re-run FIFO allocation for the vendor's other notas.
+    var paid=ov?ov.paid:n.paid;
+    var sisa=Math.max(0, n.amount-paid);
+    var status=ov?ov.status:(sisa<=0.5?'LUNAS':(paid>0?'SEBAGIAN':'BELUM_BAYAR'));
     return {id:n.id, tgl:n.tgl, ref:n.ref, vendor:n.vendor, project:n.project, ket:n.ket,
-      amount:n.amount, paid:n.paid, sisa:sisa, status:status};
+      amount:n.amount, paid:paid, sisa:sisa, status:status, manual:!!ov};
   });
 }
 function hutangStatusInfo(status){
@@ -761,7 +766,10 @@ function loadDB(){
     var raw=localStorage.getItem(STORE_KEY);
     if(raw){
       var parsed=JSON.parse(raw);
-      if(parsed && parsed.txns && parsed.coa) return parsed;
+      if(parsed && parsed.txns && parsed.coa){
+        if(!parsed.hutangOverrides) parsed.hutangOverrides={}; // back-compat with older saves
+        return parsed;
+      }
     }
   }catch(e){ console.warn('load failed',e); }
   return seedDB();
@@ -2101,7 +2109,10 @@ function registerPages(){
         {key:'sisa',label:'Sisa',num:true,render:function(r){ return r.sisa?'<b class="neg">'+num0(r.sisa)+'</b>':num0(0); },
          foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){ return a+b.sisa; },0))+'</b>'; }},
         {key:'status',label:'Status',cls:function(r){ return 'status-'+hutangStatusInfo(r.status).cls; },
-          render:function(r){ return esc(hutangStatusInfo(r.status).label); }}
+          render:function(r){ return esc(hutangStatusInfo(r.status).label)+(r.manual?' <span class="faint-italic" style="font-size:10.5px;">(manual)</span>':''); }},
+        {key:'_act',label:'Aksi',sort:false,render:function(r){
+          return '<button type="button" class="btn btn-warn btn-sm" data-upd-hutang="'+esc(r.id)+'">Update</button>';
+        }}
       ], rows, {searchFn:function(r){ return r.vendor+' '+r.project+' '+r.ket; }, countId:'cnt', perPage:15,
         defaultSort:'tgl', defaultDir:'desc', showFoot:true,
         emptyText:'Tidak ada nota Hutang Dagang pada rentang/filter ini.',
@@ -2116,8 +2127,42 @@ function registerPages(){
               showTxnDrilldown('Pembayaran Hutang — '+vendor, 'Seluruh pembayaran kas/bank ke vendor ini untuk Hutang Dagang', list);
             };
           });
+          document.querySelectorAll('#tblHutang [data-upd-hutang]').forEach(function(b){
+            b.onclick=function(){ openHutangUpdateModal(b.getAttribute('data-upd-hutang')); };
+          });
         }});
       bindSearch('q', tbl);
+    }
+
+    function openHutangUpdateModal(notaId){
+      var row=allRows.find(function(r){ return r.id===notaId; });
+      if(!row) return;
+      var html='<div class="form-grid">'+
+        '<div class="field full"><label>Nota</label><div style="padding:8px 0;font-size:13px;">'+
+          esc(row.vendor)+' — '+esc(row.ket||'')+' <span class="faint-italic">('+fmtDate(row.tgl)+', '+num0(row.amount)+')</span></div></div>'+
+        '<div class="field"><label>Sudah Dibayar (Rp)</label><input type="number" id="f_hutangPaid" value="'+esc(row.paid)+'"></div>'+
+      '</div>'+
+      '<div class="btn-row" style="margin-top:10px;">'+
+        '<button type="button" class="btn btn-success btn-sm" id="hutangMarkLunas">Tandai Lunas</button>'+
+        '<button type="button" class="btn btn-ghost btn-sm" id="hutangMarkBelum">Tandai Belum Dibayar</button>'+
+        (row.manual?'<button type="button" class="btn btn-ghost btn-sm" id="hutangResetAuto">Kembalikan ke Otomatis</button>':'')+
+      '</div>';
+      openModal('Update Status Hutang', html, {saveLabel:'Simpan', onSave:function(){
+        var paid=fnum('f_hutangPaid');
+        if(paid<0){ toast('Jumlah dibayar tidak boleh negatif.','danger'); return; }
+        var status=paid<=0?'BELUM_BAYAR':(paid>=row.amount-0.5?'LUNAS':'SEBAGIAN');
+        DB.hutangOverrides[notaId]={paid:paid, status:status};
+        saveDB(); closeModal(); allRows=computeHutangDagangRows(); refresh();
+        toast('Status hutang diperbarui.','success');
+      }});
+      document.getElementById('hutangMarkLunas').onclick=function(){ document.getElementById('f_hutangPaid').value=row.amount; };
+      document.getElementById('hutangMarkBelum').onclick=function(){ document.getElementById('f_hutangPaid').value=0; };
+      var resetBtn=document.getElementById('hutangResetAuto');
+      if(resetBtn) resetBtn.onclick=function(){
+        delete DB.hutangOverrides[notaId];
+        saveDB(); closeModal(); allRows=computeHutangDagangRows(); refresh();
+        toast('Dikembalikan ke perhitungan otomatis.','success');
+      };
     }
     refresh();
     document.getElementById('btnFilter').onclick=refresh;

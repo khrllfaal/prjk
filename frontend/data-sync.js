@@ -79,6 +79,9 @@ async function fetchAllData(){
     coa: coa.data.map(coaFromDb),
     txns: txns.data.map(txnFromDb),
     jurnal: jurnal.data.map(jurnalFromDb),
+    // Trial Hutang manual overrides aren't backed by a Supabase table yet,
+    // so carry over whatever was cached locally rather than losing them.
+    hutangOverrides: (loadDB().hutangOverrides || {}),
   };
 }
 
