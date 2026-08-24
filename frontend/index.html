@@ -196,9 +196,15 @@ table.dtab thead th.num, table.dtab td.num{text-align:right;}
 table.dtab thead th.nosort{cursor:default;}
 table.dtab thead th .arrow{opacity:.45; font-size:9px; margin-left:3px;}
 table.dtab thead th.sorted .arrow{opacity:1;}
-table.dtab tbody td{padding:9px 12px; border-bottom:1px solid var(--line); white-space:nowrap;}
-table.dtab tbody td.num{font-family:var(--font-mono); text-align:right;}
-table.dtab tbody td.wrap{white-space:normal; min-width:200px;}
+/* Wrap by default so long project/vendor/description text breaks onto
+   a second line instead of forcing the whole table wider than the
+   screen — short columns (dates, ref no, status) stay on one line
+   naturally since they rarely reach the column's width anyway. Amount
+   columns are the one thing that should never wrap. */
+table.dtab tbody td{padding:9px 12px; border-bottom:1px solid var(--line); white-space:normal;}
+table.dtab tbody td.num{font-family:var(--font-mono); text-align:right; white-space:nowrap;}
+table.dtab tbody td.wrap{min-width:140px;}
+table.dtab tbody td.nowrap{white-space:nowrap;}
 table.dtab tbody tr:hover{background:#F6F9FD;}
 table.dtab tbody tr:last-child td{border-bottom:none;}
 table.dtab tbody td .no{color:var(--text-faint); font-family:var(--font-mono); font-size:11px;}
@@ -1467,7 +1473,7 @@ function financePage(jenis, title, sub){
       '</div>';
 
     var cols=[
-      {key:'_no', label:'No', sort:false, render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
+      {key:'_no', label:'No', sort:false, cls:'nowrap', render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
       {key:'tgl', label:'Tanggal', render:function(r){ return fmtDate(r.tgl); }},
       {key:'ref', label:'Ref No', render:function(r){ return '<span class="mono" style="font-size:11.5px;">'+esc(r.ref)+'</span>'; }},
       {key:'akunKas', label:'Akun '+(isBank?'Bank':'Kas'), render:function(r){ return esc(r.akunKas); }},
