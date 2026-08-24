@@ -671,6 +671,56 @@ function projectCostTxns(projectNama, kind){
   return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
 }
 
+var HUTANG_DAGANG_CODE='2.1.1';
+
+/* Trial Hutang: per-nota (invoice-level) payable status. A "nota" is a
+   jurnal umum entry crediting Hutang Dagang (the accrual when goods/
+   services are received on credit); it's paid off later by a kas/bank
+   keluar transaction whose akun lawan is also Hutang Dagang. Payments
+   are matched to notas per vendor, oldest nota first (FIFO) — this is
+   a best-effort auto-link (the books don't record nota-to-payment
+   references directly), so a vendor with several open notas may show
+   an earlier one as paid before a later one if payments don't state
+   which nota they cover. Adjust manually if that ordering is wrong for
+   a specific case.  */
+function computeHutangDagangRows(){
+  var notas=DB.jurnal.filter(function(j){
+    return akunKodeOf(j.akun)===HUTANG_DAGANG_CODE && j.kredit>0;
+  }).map(function(j){
+    return {id:j.id, tgl:j.tgl, ref:j.ref, vendor:j.relasi||'(Tanpa Vendor)', project:j.project||'',
+      ket:j.ket, amount:j.kredit, paid:0};
+  }).sort(function(a,b){ return a.tgl<b.tgl?-1:1; });
+
+  var paymentsByVendor={};
+  DB.txns.forEach(function(t){
+    if(!/keluar$/.test(t.jenis) || akunKodeOf(t.akunLawan)!==HUTANG_DAGANG_CODE) return;
+    var v=t.relasi||'(Tanpa Vendor)';
+    paymentsByVendor[v]=(paymentsByVendor[v]||0)+t.kredit;
+  });
+
+  var byVendor={};
+  notas.forEach(function(n){ (byVendor[n.vendor]=byVendor[n.vendor]||[]).push(n); });
+  Object.keys(byVendor).forEach(function(v){
+    var pool=paymentsByVendor[v]||0;
+    byVendor[v].forEach(function(n){
+      var take=Math.min(pool, n.amount);
+      n.paid=take; pool-=take;
+    });
+  });
+
+  return notas.map(function(n){
+    var sisa=Math.max(0, n.amount-n.paid);
+    var status=sisa<=0.5?'LUNAS':(n.paid>0?'SEBAGIAN':'BELUM_BAYAR');
+    return {id:n.id, tgl:n.tgl, ref:n.ref, vendor:n.vendor, project:n.project, ket:n.ket,
+      amount:n.amount, paid:n.paid, sisa:sisa, status:status};
+  });
+}
+function hutangStatusInfo(status){
+  if(status==='LUNAS') return {cls:'safe', label:'Lunas'};
+  if(status==='SEBAGIAN') return {cls:'warn', label:'Dibayar Sebagian'};
+  return {cls:'danger', label:'Belum Dibayar'};
+}
+
 /* Generic read-only drill-down: click an amount/label anywhere in the
    app -> see the list of transactions behind it (Cash Flow, Laba Rugi,
    Dashboard progress, Trial Hutang, etc). list items: {tgl,ref,ket,amount}. */
@@ -1007,6 +1057,7 @@ var NAV=[
   ]},
   {sec:'Laporan', items:[
     {id:'lap_hutang', label:'Laporan Hutang', ic:'○'},
+    {id:'trial_hutang', label:'Trial Hutang', ic:'○'},
     {id:'lap_piutang', label:'Laporan Piutang', ic:'○'},
     {id:'lap_prive', label:'Laporan Prive', ic:'○'},
     {id:'mutasi', label:'Mutasi Kas / Bank', ic:'○'},
@@ -1892,6 +1943,100 @@ function registerPages(){
     match:function(e){ return akunHead(e.akun)==='2'; },
     sign:function(e){ return e.kredit-e.debet; }
   });
+
+  PAGES.trial_hutang=function(c){
+    var allRows=computeHutangDagangRows();
+    var vendorList=Array.from(new Set(allRows.map(function(r){ return r.vendor; }))).sort();
+    var projectList=Array.from(new Set(allRows.map(function(r){ return r.project; }).filter(Boolean))).sort();
+
+    c.innerHTML = pageHead('Trial Hutang','Status bayar per nota — dari jurnal umum (Hutang Dagang) dicocokkan dengan pembayaran kas/bank',
+        exportBtns('exp'))+
+      '<div class="filterbar">'+
+        '<div class="field"><label>Dari Tanggal</label><input type="date" id="fFrom"></div>'+
+        '<div class="field"><label>Sampai Tanggal</label><input type="date" id="fTo"></div>'+
+        '<div class="field"><label>Status</label><select id="fStatus"><option value="">Semua Status</option>'+
+          '<option value="BELUM_BAYAR">Belum Dibayar</option><option value="SEBAGIAN">Dibayar Sebagian</option>'+
+          '<option value="LUNAS">Lunas</option></select></div>'+
+        '<div class="field"><label>Vendor</label><select id="fVendor"><option value="">Semua Vendor</option>'+
+          vendorList.map(function(v){ return '<option>'+esc(v)+'</option>'; }).join('')+'</select></div>'+
+        '<div class="field grow"><label>Project</label><select id="fProject"><option value="">Semua Project</option>'+
+          projectList.map(function(p){ return '<option>'+esc(p)+'</option>'; }).join('')+'</select></div>'+
+        '<button class="btn btn-steel" id="btnFilter">Terapkan Filter</button>'+
+        '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
+      '</div>'+
+      '<div class="kpi-grid" id="kpiHutang" style="margin-bottom:14px;"></div>'+
+      '<div class="panel"><div class="toolbar">'+
+        '<div class="search-box"><span class="ic">⌕</span><input type="text" id="q" placeholder="Cari vendor / project / keterangan…"></div>'+
+        '<span class="result-count" id="cnt"></span></div>'+
+        '<div class="table-scroll"><div id="tblHutang"></div></div></div>';
+
+    var tbl;
+    function currentRows(){
+      var from=fv('fFrom'), to=fv('fTo'), status=fv('fStatus'), vendor=fv('fVendor'), project=fv('fProject');
+      return allRows.filter(function(r){
+        if(!inRange(r.tgl,from,to)) return false;
+        if(status && r.status!==status) return false;
+        if(vendor && r.vendor!==vendor) return false;
+        if(project && r.project!==project) return false;
+        return true;
+      });
+    }
+
+    function refresh(){
+      var rows=currentRows();
+      var totalNota=rows.reduce(function(a,b){ return a+b.amount; },0);
+      var totalSisa=rows.reduce(function(a,b){ return a+b.sisa; },0);
+      var belumCount=rows.filter(function(r){ return r.status!=='LUNAS'; }).length;
+      document.getElementById('kpiHutang').innerHTML=[
+        kpiCard('Jumlah Nota', num0(rows.length), 'Sesuai filter aktif', 'accent'),
+        kpiCard('Total Nilai Nota', rp(totalNota), 'Sesuai filter aktif', 'accent'),
+        kpiCard('Sisa Belum Dibayar', rp(totalSisa), belumCount+' nota belum lunas', totalSisa>0?'danger':'safe')
+      ].join('');
+
+      tbl=DataTable('tblHutang',[
+        {key:'_no',label:'No',sort:false,render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
+        {key:'tgl',label:'Tanggal',render:function(r){ return fmtDate(r.tgl); }},
+        {key:'ref',label:'Ref No',render:function(r){ return '<span class="mono" style="font-size:11.5px;">'+esc(r.ref)+'</span>'; }},
+        {key:'vendor',label:'Vendor',render:function(r){ return esc(r.vendor); }},
+        {key:'project',label:'Project',render:function(r){ return r.project?esc(r.project):'<span class="faint-italic">–</span>'; }},
+        {key:'ket',label:'Description',cls:'wrap',render:function(r){ return esc(r.ket||'–'); }},
+        {key:'amount',label:'Jumlah Nota',num:true,render:function(r){ return num0(r.amount); },
+         foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){ return a+b.amount; },0))+'</b>'; }},
+        {key:'paid',label:'Sudah Dibayar',num:true,render:function(r){
+          if(!r.paid) return '<span class="faint-italic">–</span>';
+          return '<button type="button" class="linklike" data-drill-vendor="'+esc(r.vendor)+'">'+num0(r.paid)+'</button>';
+        }, foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){ return a+b.paid; },0))+'</b>'; }},
+        {key:'sisa',label:'Sisa',num:true,render:function(r){ return r.sisa?'<b class="neg">'+num0(r.sisa)+'</b>':num0(0); },
+         foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){ return a+b.sisa; },0))+'</b>'; }},
+        {key:'status',label:'Status',cls:function(r){ return 'status-'+hutangStatusInfo(r.status).cls; },
+          render:function(r){ return esc(hutangStatusInfo(r.status).label); }}
+      ], rows, {searchFn:function(r){ return r.vendor+' '+r.project+' '+r.ket; }, countId:'cnt', perPage:15,
+        defaultSort:'tgl', defaultDir:'desc', showFoot:true,
+        emptyText:'Tidak ada nota Hutang Dagang pada rentang/filter ini.',
+        onRender:function(){
+          document.querySelectorAll('#tblHutang [data-drill-vendor]').forEach(function(b){
+            b.onclick=function(){
+              var vendor=b.getAttribute('data-drill-vendor');
+              var list=DB.txns.filter(function(t){
+                return /keluar$/.test(t.jenis) && akunKodeOf(t.akunLawan)===HUTANG_DAGANG_CODE && (t.relasi||'(Tanpa Vendor)')===vendor;
+              }).map(function(t){ return {tgl:t.tgl, ref:t.ref, ket:t.ket+(t.project?' — '+t.project:''), amount:t.kredit}; })
+                .sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+              showTxnDrilldown('Pembayaran Hutang — '+vendor, 'Seluruh pembayaran kas/bank ke vendor ini untuk Hutang Dagang', list);
+            };
+          });
+        }});
+      bindSearch('q', tbl);
+    }
+    refresh();
+    document.getElementById('btnFilter').onclick=refresh;
+    document.getElementById('btnReset').onclick=function(){
+      ['fFrom','fTo','fStatus','fVendor','fProject'].forEach(function(id){ document.getElementById(id).value=''; });
+      refresh();
+    };
+    bindExport('exp','Trial_Hutang',['Tanggal','Ref No','Vendor','Project','Description','Jumlah Nota','Sudah Dibayar','Sisa','Status'],
+      function(){ return tbl.getFiltered().map(function(r){
+        return [r.tgl,r.ref,r.vendor,r.project,r.ket,r.amount,r.paid,r.sisa,hutangStatusInfo(r.status).label]; }); });
+  };
 
   PAGES.lap_piutang=relasiReport({
     title:'Laporan Piutang', sub:'Saldo piutang per customer berdasarkan akun piutang (1.1.11 / 1.1.12)',
