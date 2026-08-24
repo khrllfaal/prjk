@@ -891,6 +891,9 @@ function fnum(id){ var v=fv(id).replace(/[^\d.-]/g,''); return v?parseFloat(v):0
 function exportCSV(filename, headers, rows){
   var esc2=function(v){
     var s=String(v==null?'':v);
+    // neutralise CSV/formula injection: a cell starting with =+-@ can be
+    // read as a formula by Excel/Sheets when the file is opened later
+    if(/^[=+\-@]/.test(s)) s="'"+s;
     if(/[",\n;]/.test(s)) return '"'+s.replace(/"/g,'""')+'"';
     return s;
   };
