@@ -2331,7 +2331,7 @@ function registerPages(){
       function saveOverride(paid){
         var status=paid<=0?'BELUM_BAYAR':(paid>=row.amount-0.5?'LUNAS':'SEBAGIAN');
         DB.hutangOverrides[notaId]={paid:paid, status:status};
-        saveDB(); closeModal(); allRows=computeHutangDagangRows(); refresh();
+        saveDB(); syncHutangOverride(notaId, paid, status); closeModal(); allRows=computeHutangDagangRows(); refresh();
         toast('Status hutang diperbarui.','success');
       }
 
@@ -2367,7 +2367,7 @@ function registerPages(){
       var resetBtn=document.getElementById('hutangResetAuto');
       if(resetBtn) resetBtn.onclick=function(){
         delete DB.hutangOverrides[notaId];
-        saveDB(); closeModal(); allRows=computeHutangDagangRows(); refresh();
+        saveDB(); syncHutangOverrideDelete(notaId); closeModal(); allRows=computeHutangDagangRows(); refresh();
         toast('Dikembalikan ke perhitungan otomatis.','success');
       };
     }
@@ -2895,6 +2895,7 @@ function registerPages(){
 
 <script src="vendor/supabase.min.js"></script>
 <script src="supabase-config.js"></script>
+<script src="backend-config.js"></script>
 <script src="data-sync.js"></script>
 <script src="auth.js"></script>
 </body>
