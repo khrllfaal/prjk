@@ -34,6 +34,20 @@ h1,h2,h3,h4{font-family:var(--font-display); margin:0; letter-spacing:-0.01em;}
 .linklike{background:none; border:none; padding:0; margin:0; color:var(--steel); font:inherit;
   font-variant-numeric:tabular-nums; cursor:pointer; text-decoration:none;}
 .linklike:hover{text-decoration:underline;}
+
+/* ============ CASH FLOW (KAS MASUK/KELUAR) ============ */
+.cf-section{margin-bottom:16px; border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; background:var(--card);}
+.cf-bar{padding:10px 16px; font-weight:700; font-size:12.5px; letter-spacing:.03em; color:#fff;}
+.cf-bar.cf-in{background:var(--safe);}
+.cf-bar.cf-out{background:var(--danger);}
+.cf-row{display:flex; justify-content:space-between; gap:12px; align-items:center; padding:10px 16px;
+  border-bottom:1px solid var(--line); font-size:13px;}
+.cf-row:last-child{border-bottom:none;}
+.cf-row.alt{background:var(--paper);}
+.cf-row.cf-total{background:var(--paper);}
+.cf-amt{font-variant-numeric:tabular-nums; white-space:nowrap;}
+.cf-net{display:flex; justify-content:space-between; padding:14px 16px; border:1px solid var(--line);
+  border-radius:var(--radius); background:var(--card); font-size:14px;}
 ::selection{background:var(--steel-soft);}
 button,input,select,textarea{font-family:inherit;}
 
@@ -2235,60 +2249,94 @@ function registerPages(){
 
   /* ---------------- CASH FLOW ---------------- */
   PAGES.cashflow=function(c){
-    reportShell(c,'Cash Flow','Arus kas masuk dan keluar dikelompokkan per aktivitas');
-    function refresh(){
-      var from=fv('fFrom'), to=fv('fTo');
-      var ops={}, inv={}, fin={};
-      var masuk=0, keluar=0;
-      DB.txns.forEach(function(t){
-        if(!inRange(t.tgl,from,to)) return;
-        masuk+=t.debet; keluar+=t.kredit;
-        var h=akunHead(t.akunLawan);
-        var bucket = (h==='1'&&/^1\.2/.test(akunKode(t.akunLawan))) ? inv
-                   : (h==='2'||h==='3') ? fin : ops;
-        var a=akunLabel(t.akunLawan);
-        if(!bucket[a]) bucket[a]={akun:a,val:0};
-        bucket[a].val += t.debet-t.kredit;
+    c.innerHTML = pageHead('Laporan Cash Flow','Rincian kas masuk dan kas keluar per akun lawan',
+      '<button class="btn btn-success btn-sm" id="cfExcel">▤ Excel</button>'+
+      '<button class="btn btn-danger btn-sm" id="cfPdf">▤ PDF</button>')+
+      '<div class="filterbar">'+
+        '<div class="field"><label>Tanggal Awal</label><input type="date" id="fFrom"></div>'+
+        '<div class="field"><label>Tanggal Akhir</label><input type="date" id="fTo"></div>'+
+        '<div class="field grow"><label>Project</label><select id="fProject"><option value="">ALL PROJECT</option>'+
+          DB.projects.map(function(p){ return '<option>'+esc(p.nama)+'</option>'; }).join('')+'</select></div>'+
+        '<button class="btn btn-steel" id="btnFilter">Terapkan Filter</button>'+
+        '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
+      '</div>'+
+      '<div id="cfBody"></div>';
+
+    function akunNamaOnly(s){ return String(s||'').replace(/^[\d.]+-/,'').trim()||'(Tanpa Akun)'; }
+
+    function groupByAkun(list, isIn){
+      var map={}, order=[];
+      list.forEach(function(t){
+        if(/masuk$/.test(t.jenis)!==isIn) return;
+        var label=akunNamaOnly(t.akunLawan);
+        if(!map[label]){ map[label]={label:label, akunLawan:t.akunLawan, amount:0}; order.push(label); }
+        map[label].amount += isIn?t.debet:t.kredit;
       });
-      var toRows=function(o){
-        var rows=Object.keys(o).map(function(k){ return o[k]; })
-          .filter(function(r){ return Math.abs(r.val)>0.5; })
-          .sort(function(a,b){ return Math.abs(b.val)-Math.abs(a.val); });
-        return {rows:rows,total:rows.reduce(function(a,b){ return a+b.val; },0)};
-      };
-      var o=toRows(ops), i=toRows(inv), f=toRows(fin);
-      var net=masuk-keluar;
-
-      document.getElementById('reportBody').innerHTML=
-        '<div class="kpi-grid" style="margin-bottom:14px;">'+
-          kpiCard('Kas Masuk',rp(masuk),'Semua akun kas & bank','accent')+
-          kpiCard('Kas Keluar',rp(keluar),'Semua akun kas & bank','accent')+
-          kpiCard('Arus Kas Bersih',rp(net),net<0?'Defisit periode':'Surplus periode',net<0?'danger':'safe')+
-        '</div><div class="panel"><h3>Rincian Arus Kas per Aktivitas</h3>'+
-        '<div class="panel-desc">Nilai positif menambah kas, negatif mengurangi kas</div><div id="cfTable"></div></div>';
-
-      statementTable('cfTable',[
-        {label:'AKTIVITAS OPERASI',rows:o.rows,total:o.total},
-        {label:'AKTIVITAS INVESTASI',rows:i.rows,total:i.total},
-        {label:'AKTIVITAS PENDANAAN',rows:f.rows,total:f.total}
-      ],function(r){ return r.val; });
-
-      var t=document.querySelector('#cfTable table');
-      if(t){
-        var tf=document.createElement('tfoot');
-        tf.innerHTML='<tr><td>KENAIKAN / PENURUNAN KAS BERSIH</td><td class="num" style="color:'+
-          (net<0?'var(--danger)':'var(--safe)')+'">'+numSigned(net)+'</td></tr>';
-        t.appendChild(tf);
-      }
+      return order.map(function(k){ return map[k]; }).sort(function(a,b){ return b.amount-a.amount; });
     }
-    refresh(); bindReportFilter(refresh);
-    bindExport('exp','Cash_Flow',['Keterangan','Jumlah'],function(){
-      var out=[]; document.querySelectorAll('#cfTable tr').forEach(function(tr){
-        var td=tr.querySelectorAll('td');
-        if(td.length===2) out.push([td[0].textContent.trim(), td[1].textContent.trim()]);
+
+    function sectionHTML(title, barClass, rows, totalLabel, kind){
+      var total=rows.reduce(function(a,b){ return a+b.amount; },0);
+      return '<div class="cf-section">'+
+        '<div class="cf-bar '+barClass+'">'+esc(title)+'</div>'+
+        '<div class="cf-table">'+
+        (rows.length?rows.map(function(r,i){
+          return '<div class="cf-row'+(i%2?' alt':'')+'">'+
+            '<button type="button" class="linklike" data-cf-akun="'+esc(r.akunLawan)+'" data-cf-kind="'+kind+'">'+esc(r.label)+'</button>'+
+            '<span class="cf-amt">'+num0(r.amount)+'</span></div>';
+        }).join(''):'<div class="cf-row"><span class="faint-italic">Tidak ada transaksi pada periode ini.</span></div>')+
+        '<div class="cf-row cf-total"><b>'+esc(totalLabel)+'</b><b>'+num0(total)+'</b></div>'+
+        '</div></div>';
+    }
+
+    var lastMasuk=[], lastKeluar=[], lastFrom='', lastTo='', lastProj='';
+    function refresh(){
+      var from=fv('fFrom'), to=fv('fTo'), proj=fv('fProject');
+      lastFrom=from; lastTo=to; lastProj=proj;
+      var list=DB.txns.filter(function(t){
+        if(!inRange(t.tgl,from,to)) return false;
+        if(proj && t.project!==proj) return false;
+        return true;
       });
-      return out;
-    });
+      lastMasuk=groupByAkun(list,true);
+      lastKeluar=groupByAkun(list,false);
+      var totalMasuk=lastMasuk.reduce(function(a,b){ return a+b.amount; },0);
+      var totalKeluar=lastKeluar.reduce(function(a,b){ return a+b.amount; },0);
+      var net=totalMasuk-totalKeluar;
+
+      document.getElementById('cfBody').innerHTML=
+        sectionHTML('KAS MASUK','cf-in',lastMasuk,'Total Kas Masuk','in')+
+        sectionHTML('KAS KELUAR','cf-out',lastKeluar,'Total Kas Keluar','out')+
+        '<div class="cf-net"><b>Selisih Kas Masuk – Kas Keluar</b>'+
+          '<b class="'+(net<0?'neg':'pos')+'">'+numSigned(net)+'</b></div>';
+
+      document.querySelectorAll('#cfBody [data-cf-akun]').forEach(function(b){
+        b.onclick=function(){
+          var akun=b.getAttribute('data-cf-akun'), kind=b.getAttribute('data-cf-kind');
+          var sub=list.filter(function(t){ return t.akunLawan===akun && (/masuk$/.test(t.jenis)===(kind==='in')); })
+            .map(function(t){ return {tgl:t.tgl, ref:t.ref, ket:t.ket+(t.project?' — '+t.project:''), amount:kind==='in'?t.debet:t.kredit}; })
+            .sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+          showTxnDrilldown(akunNamaOnly(akun), 'Rincian transaksi kas/bank'+(proj?' — Project: '+proj:''), sub);
+        };
+      });
+    }
+    refresh();
+    document.getElementById('btnFilter').onclick=refresh;
+    document.getElementById('btnReset').onclick=function(){
+      ['fFrom','fTo','fProject'].forEach(function(id){ document.getElementById(id).value=''; });
+      refresh();
+    };
+    document.getElementById('cfExcel').onclick=function(){
+      var rows=[];
+      rows.push(['KAS MASUK','']);
+      lastMasuk.forEach(function(r){ rows.push([r.label, r.amount]); });
+      rows.push(['Total Kas Masuk', lastMasuk.reduce(function(a,b){ return a+b.amount; },0)]);
+      rows.push(['KAS KELUAR','']);
+      lastKeluar.forEach(function(r){ rows.push([r.label, r.amount]); });
+      rows.push(['Total Kas Keluar', lastKeluar.reduce(function(a,b){ return a+b.amount; },0)]);
+      exportCSV('Cash_Flow', ['Keterangan','Jumlah'], rows);
+    };
+    document.getElementById('cfPdf').onclick=printPage;
   };
 
   /* ---------------- ANALISA PENGELUARAN ---------------- */
