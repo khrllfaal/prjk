@@ -779,6 +779,15 @@ function nextRefFor(jenis, tgl){
   });
   return pref+'-'+mo+'-'+String(maxSeq+1).padStart(4,'0');
 }
+function nextJurnalRef(){
+  var maxSeq=0;
+  DB.jurnal.forEach(function(j){
+    if(!j.ref || j.ref.indexOf('JU-')!==0) return;
+    var n=parseInt(j.ref.slice(3), 10);
+    if(!isNaN(n) && n>maxSeq) maxSeq=n;
+  });
+  return 'JU-'+String(maxSeq+1).padStart(4,'0');
+}
 
 function coaTipe(kode){
   var head=String(kode).split('.')[0];
@@ -1393,7 +1402,7 @@ function financePage(jenis, title, sub){
           '<option value="">Semua</option>'+kasAkun.map(function(a){ return '<option>'+esc(a)+'</option>'; }).join('')+
         '</select></div>'+
         '<div class="field grow"><label>Project</label><select id="fProject"><option value="">Semua</option>'+
-          DB.projects.map(function(p){ return '<option>'+esc(p.nama)+'</option>'; }).join('')+'</select></div>'+
+          DB.projects.map(function(p){ return '<option value="'+esc(p.ledgerName||p.nama)+'">'+esc(p.nama)+'</option>'; }).join('')+'</select></div>'+
         '<button class="btn btn-steel" id="btnFilter">Terapkan Filter</button>'+
         '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
       '</div>'+
@@ -1511,7 +1520,7 @@ function financePage(jenis, title, sub){
         placeholder:'Cari akun '+(isBank?'bank':'kas')+'…'});
       searchableSelect('f_akunLawan_ssel','f_akunLawan',{options:lawanOpts.map(function(a){ return {value:a,label:a}; }),
         placeholder:'Cari kode / nama akun…'});
-      searchableSelect('f_project_ssel','f_project',{options:DB.projects.map(function(p){ return {value:p.nama,label:p.nama}; }),
+      searchableSelect('f_project_ssel','f_project',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
         placeholder:'Cari project…'});
       searchableSelect('f_relasi_ssel','f_relasi',{options:relasiList.map(function(r){ return {value:r.nama,label:r.nama}; }),
         placeholder:'Cari '+relasiLabel.toLowerCase()+'…'});
@@ -1972,7 +1981,8 @@ function registerPages(){
   PAGES.bank_keluar=financePage('bank_keluar','Data Bank Keluar','Pengeluaran melalui rekening bank');
 
   PAGES.jurnal=function(c){
-    c.innerHTML = pageHead('Jurnal Umum','Pencatatan jurnal di luar transaksi kas & bank', exportBtns('exp'))+
+    c.innerHTML = pageHead('Jurnal Umum','Pencatatan jurnal di luar transaksi kas & bank',
+      '<button class="btn btn-primary" id="btnAdd">+ Tambah Jurnal</button>'+exportBtns('exp'))+
       '<div class="filterbar">'+
         '<div class="field"><label>Dari Tanggal</label><input type="date" id="fFrom"></div>'+
         '<div class="field"><label>Sampai Tanggal</label><input type="date" id="fTo"></div>'+
@@ -1999,13 +2009,88 @@ function registerPages(){
         {key:'debet',label:'Debet',num:true,render:function(r){ return r.debet?num0(r.debet):'<span class="faint-italic">–</span>'; },
          foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+b.debet;},0))+'</b>'; }},
         {key:'kredit',label:'Kredit',num:true,render:function(r){ return r.kredit?num0(r.kredit):'<span class="faint-italic">–</span>'; },
-         foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+b.kredit;},0))+'</b>'; }}
+         foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+b.kredit;},0))+'</b>'; }},
+        {key:'_act',label:'Aksi',sort:false,render:function(r){
+          return '<div class="btn-row"><button class="btn btn-warn btn-sm" data-edit="'+r.id+'">Edit</button>'+
+            '<button class="btn btn-danger btn-sm" data-del="'+r.id+'">Hapus</button></div>';
+        }}
       ], rows, {defaultSort:'tgl',defaultDir:'desc',perPage:15,showFoot:true,countId:'cnt',
         searchFn:function(r){ return [r.ket,r.akun,r.project,r.relasi].join(' '); },
-        emptyText:'Belum ada jurnal pada rentang ini.'});
+        emptyText:'Belum ada jurnal pada rentang ini.',
+        onRender:function(){
+          document.querySelectorAll('[data-edit]').forEach(function(b){ b.onclick=function(){ form(b.getAttribute('data-edit')); }; });
+          document.querySelectorAll('[data-del]').forEach(function(b){ b.onclick=function(){ del(b.getAttribute('data-del')); }; });
+        }});
       bindSearch('q',tbl);
     }
+
+    function form(id){
+      var rec=id?DB.jurnal.find(function(x){ return x.id===id; }):null;
+      var akunOpts=DB.coa.filter(function(a){ return a.level>=3; }).map(function(a){ return a.kode+'-'+a.nama; });
+      var relasiOpts=DB.customers.concat(DB.vendors).map(function(r){ return r.nama; });
+      var kategoriSet={}; DB.jurnal.forEach(function(j){ if(j.kategori) kategoriSet[j.kategori]=1; });
+      var kategoriOpts=Object.keys(kategoriSet);
+      var v=function(k,d){ return rec?(rec[k]!==undefined?rec[k]:d):d; };
+      var jenisAwal=rec?(rec.debet>0?'debet':'kredit'):'debet';
+      var amountAwal=rec?(rec.debet>0?rec.debet:rec.kredit):'';
+
+      var html='<div class="form-grid">'+
+        '<div class="field"><label>Ref</label><input type="text" id="f_refPreview" value="'+
+          esc(rec?rec.ref:nextJurnalRef())+'" disabled></div>'+
+        '<div class="field"><label>Tanggal *</label><input type="date" id="f_tgl" value="'+esc(v('tgl',todayISO()))+'"></div>'+
+        '<div class="field full"><label>Akun *</label>'+
+          '<div id="f_akun_ssel"></div><input type="hidden" id="f_akun" value="'+esc(v('akun',''))+'"></div>'+
+        '<div class="field"><label>Project</label>'+
+          '<div id="f_project_ssel"></div><input type="hidden" id="f_project" value="'+esc(v('project',''))+'"></div>'+
+        '<div class="field"><label>Relasi (Customer/Vendor)</label>'+
+          '<div id="f_relasi_ssel"></div><input type="hidden" id="f_relasi" value="'+esc(v('relasi',''))+'"></div>'+
+        '<div class="field"><label>Kategori</label>'+
+          '<div id="f_kategori_ssel"></div><input type="hidden" id="f_kategori" value="'+esc(v('kategori',''))+'"></div>'+
+        '<div class="field"><label>Jenis *</label><select id="f_jenis">'+
+          '<option value="debet"'+(jenisAwal==='debet'?' selected':'')+'>Debet</option>'+
+          '<option value="kredit"'+(jenisAwal==='kredit'?' selected':'')+'>Kredit</option></select></div>'+
+        '<div class="field"><label>Jumlah (Rp) *</label><input type="number" id="f_amount" value="'+esc(amountAwal)+'"></div>'+
+        '<div class="field full"><label>Keterangan</label><input type="text" id="f_ket" value="'+esc(v('ket',''))+'"></div>'+
+      '</div>';
+
+      openModal((id?'Edit ':'Tambah ')+'Jurnal Umum', html, {wide:true, onSave:function(){
+        var tgl=fv('f_tgl'), akun=fv('f_akun'), amt=fnum('f_amount'), jenisPilih=fv('f_jenis');
+        if(!tgl){ toast('Tanggal wajib diisi.','danger'); return; }
+        if(!akun){ toast('Akun wajib dipilih.','danger'); return; }
+        if(!amt || amt<=0){ toast('Jumlah harus lebih besar dari 0.','danger'); return; }
+        var obj=rec||{id:uid('j')};
+        obj.tgl=tgl; obj.akun=akun; obj.project=fv('f_project'); obj.relasi=fv('f_relasi');
+        obj.kategori=fv('f_kategori'); obj.ket=fv('f_ket');
+        obj.debet=jenisPilih==='debet'?amt:0;
+        obj.kredit=jenisPilih==='kredit'?amt:0;
+        if(!id){ obj.ref=nextJurnalRef(); DB.jurnal.push(obj); }
+        saveDB(); syncUpsert('jurnal_umum', obj); closeModal(); refresh();
+        toast(id?'Jurnal diperbarui.':'Jurnal ditambahkan.','success');
+      }});
+      searchableSelect('f_akun_ssel','f_akun',{options:akunOpts.map(function(a){ return {value:a,label:a}; }), placeholder:'Cari kode / nama akun…'});
+      searchableSelect('f_project_ssel','f_project',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }), placeholder:'Cari project…'});
+      searchableSelect('f_relasi_ssel','f_relasi',{options:relasiOpts.map(function(r){ return {value:r,label:r}; }), allowCustom:true, placeholder:'Cari / ketik relasi…'});
+      searchableSelect('f_kategori_ssel','f_kategori',{options:kategoriOpts.map(function(k){ return {value:k,label:k}; }), allowCustom:true, placeholder:'Cari / ketik kategori…'});
+      if(!rec){
+        document.getElementById('f_tgl').addEventListener('change', function(){
+          document.getElementById('f_refPreview').value=nextJurnalRef();
+        });
+      }
+    }
+
+    function del(id){
+      var rec=DB.jurnal.find(function(x){ return x.id===id; });
+      confirmModal('Hapus jurnal','Hapus jurnal <b>'+esc(rec.ref)+'</b> — <b>'+esc(rec.akun)+'</b> senilai <b>'+rp(rec.debet||rec.kredit)+'</b>?'+
+        ' Kalau ini nota Hutang Dagang, statusnya di Trial Hutang ikut hilang.',function(){
+        DB.jurnal=DB.jurnal.filter(function(x){ return x.id!==id; });
+        delete DB.hutangOverrides[id];
+        saveDB(); syncDelete('jurnal_umum', id); refresh();
+        toast('Jurnal dihapus.','success');
+      });
+    }
+
     refresh();
+    document.getElementById('btnAdd').onclick=function(){ form(null); };
     bindReportFilter(refresh);
     bindExport('exp','Jurnal_Umum',['Tanggal','Ref','Akun','Project','Relasi','Keterangan','Debet','Kredit'],
       function(){ return tbl.getFiltered().map(function(r){
@@ -2571,7 +2656,7 @@ function registerPages(){
         '<div class="field"><label>Tanggal Awal</label><input type="date" id="fFrom"></div>'+
         '<div class="field"><label>Tanggal Akhir</label><input type="date" id="fTo"></div>'+
         '<div class="field grow"><label>Project</label><select id="fProject"><option value="">ALL PROJECT</option>'+
-          DB.projects.map(function(p){ return '<option>'+esc(p.nama)+'</option>'; }).join('')+'</select></div>'+
+          DB.projects.map(function(p){ return '<option value="'+esc(p.ledgerName||p.nama)+'">'+esc(p.nama)+'</option>'; }).join('')+'</select></div>'+
         '<button class="btn btn-steel" id="btnFilter">Terapkan Filter</button>'+
         '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
       '</div>'+

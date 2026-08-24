@@ -46,6 +46,10 @@ function jurnalFromDb(r){
   return {id:r.id, tgl:r.tgl, ref:r.ref, akun:r.akun, project:r.project||'', relasi:r.relasi||'',
     kategori:r.kategori||'', ket:r.ket||'', debet:Number(r.debet)||0, kredit:Number(r.kredit)||0};
 }
+function jurnalToDb(obj){
+  return {id:obj.id, tgl:obj.tgl, ref:obj.ref, akun:obj.akun, project:obj.project||'', relasi:obj.relasi||'',
+    kategori:obj.kategori||'', ket:obj.ket||'', debet:obj.debet||0, kredit:obj.kredit||0};
+}
 
 var TABLE_MAP = {
   customers: {from:relasiFromDb, to:relasiToDb},
@@ -53,7 +57,7 @@ var TABLE_MAP = {
   projects:  {from:projectFromDb, to:projectToDb},
   coa:       {from:coaFromDb, to:coaToDb},
   transactions: {from:txnFromDb, to:txnToDb},
-  jurnal_umum:  {from:jurnalFromDb},
+  jurnal_umum:  {from:jurnalFromDb, to:jurnalToDb},
 };
 
 /* Fetch everything into the shape seedDB()/loadDB() already produce,
