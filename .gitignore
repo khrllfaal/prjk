@@ -3,6 +3,7 @@
 *.xls
 *.csv
 scripts/data/
+frontend/data.local.js
 
 # local tooling
 node_modules/

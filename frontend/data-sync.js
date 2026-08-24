@@ -85,6 +85,7 @@ async function fetchAllData(){
 /* Called right alongside the existing saveDB() at every mutation site.
    Table name is one of: customers, vendors, projects, coa, transactions. */
 async function syncUpsert(table, obj){
+  if(!isBackendConfigured()) return; // local mode — saveDB() already persisted it
   try{
     var mapper = TABLE_MAP[table];
     var row = mapper.to(obj);
@@ -99,6 +100,7 @@ async function syncUpsert(table, obj){
   }
 }
 async function syncDelete(table, id){
+  if(!isBackendConfigured()) return; // local mode — saveDB() already persisted it
   try{
     var sb = getSupabase();
     var res = await sb.from(table).delete().eq('id', id);

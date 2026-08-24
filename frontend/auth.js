@@ -5,6 +5,23 @@
 
 var CURRENT_PROFILE = null;
 
+/* Backend (Supabase/MySQL) is optional for now — until it's configured,
+   the app runs the same way the original ACCV2 did: local-only, data in
+   this browser's localStorage. Once supabase-config.js has real
+   credentials, the login gate below takes over automatically. */
+function isBackendConfigured(){
+  return !!(window.SUPABASE_URL && window.SUPABASE_URL.indexOf('YOUR-PROJECT-REF')===-1);
+}
+function bootLocalMode(){
+  DB = loadDB();
+  document.getElementById('tbUserName').textContent = 'Mode Lokal (belum terhubung server)';
+  document.getElementById('tbAvatar').textContent = 'LC';
+  document.getElementById('btnLogout').style.display = 'none';
+  hideLogin();
+  var start=(location.hash||'').replace('#/','');
+  go(PAGES[start]?start:'dashboard');
+}
+
 function showLogin(msg){
   document.getElementById('loginScreen').style.display='flex';
   document.getElementById('appRoot').classList.add('pre-auth');
@@ -55,6 +72,10 @@ async function bootAfterLogin(session){
 }
 
 function initAuthGate(){
+  if(!isBackendConfigured()){
+    bootLocalMode();
+    return;
+  }
   var sb;
   try{
     sb=getSupabase();
