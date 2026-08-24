@@ -1,0 +1,10 @@
+{
+  "name": "accv2-smoke-tests",
+  "private": true,
+  "scripts": {
+    "test": "node smoke.test.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.45.0"
+  }
+}

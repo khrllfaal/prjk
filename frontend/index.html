@@ -2050,6 +2050,7 @@ function registerPages(){
         '<button class="btn btn-steel" id="btnFilter">Terapkan</button>'+
         '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
       '</div>'+
+      '<div class="kpi-grid" id="kpiJurnal" style="margin-bottom:14px;"></div>'+
       '<div class="panel"><div class="toolbar">'+
         '<div class="search-box"><span class="ic">⌕</span><input type="text" id="q" placeholder="Cari keterangan / akun / project…"></div>'+
         '<span class="result-count" id="cnt"></span></div><div id="tbl"></div></div>';
@@ -2059,6 +2060,18 @@ function registerPages(){
       var from=fv('fFrom'), to=fv('fTo');
       var rows=DB.jurnal.filter(function(j){ return inRange(j.tgl,from,to); })
         .sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+
+      var totDebet=rows.reduce(function(a,b){ return a+b.debet; },0);
+      var totKredit=rows.reduce(function(a,b){ return a+b.kredit; },0);
+      var selisih=totDebet-totKredit;
+      var balanced=Math.abs(selisih)<=0.5;
+      document.getElementById('kpiJurnal').innerHTML=[
+        kpiCard('Total Debet', rp(totDebet), 'Sesuai filter aktif', 'accent'),
+        kpiCard('Total Kredit', rp(totKredit), 'Sesuai filter aktif', 'accent'),
+        kpiCard('Selisih Debet – Kredit', rp(selisih),
+          balanced?'Balance':'⚠ Tidak balance — cek entri jurnal pada rentang ini', balanced?'safe':'danger')
+      ].join('');
+
       tbl=DataTable('tbl',[
         {key:'_no',label:'No',sort:false,render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
         {key:'tgl',label:'Tanggal',render:function(r){ return fmtDate(r.tgl); }},
