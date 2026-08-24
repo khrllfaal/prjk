@@ -140,7 +140,14 @@ CREATE TABLE IF NOT EXISTS audit_log (
   entity      VARCHAR(40) NOT NULL,   -- e.g. 'transactions', 'projects'
   entity_id   VARCHAR(40) NOT NULL,
   detail      TEXT NULL,              -- short human-readable summary
+  ip_address  VARCHAR(45) NULL,       -- IPv4 or IPv6
+  user_agent  VARCHAR(255) NULL,
   created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_audit_entity (entity, entity_id),
   INDEX idx_audit_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Safe to re-run against a database created before ip_address/user_agent
+-- existed (MariaDB 10.0.2+ / MySQL 8.0.29+ — Hostinger's stack qualifies).
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45) NULL AFTER detail;
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS user_agent VARCHAR(255) NULL AFTER ip_address;

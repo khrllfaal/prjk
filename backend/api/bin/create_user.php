@@ -25,6 +25,10 @@ if (!$email || !$password || !$nama || !in_array($role, ['admin', 'owner'], true
     fwrite(STDERR, "Usage: php create_user.php <email> <password> <nama> <admin|owner>\n");
     exit(1);
 }
+if (strlen($password) < 10) {
+    fwrite(STDERR, "Password terlalu pendek — minimal 10 karakter.\n");
+    exit(1);
+}
 
 $hash = password_hash($password, PASSWORD_BCRYPT);
 $id = 'u' . bin2hex(random_bytes(6));

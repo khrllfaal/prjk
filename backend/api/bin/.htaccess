@@ -1,0 +1,8 @@
+# Defense in depth: these scripts already refuse to run outside the CLI
+# SAPI, but deny HTTP access to this whole directory too in case that
+# check is ever weakened or removed.
+Require all denied
+<IfModule !mod_authz_core.c>
+  Order deny,allow
+  Deny from all
+</IfModule>

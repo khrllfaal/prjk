@@ -2,6 +2,24 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 
+// Never let an uncaught exception (bad DB creds, an invalid ENUM value,
+// a duplicate-key race, etc.) reach the client as a raw PHP error page —
+// on a misconfigured host that could leak the DSN, table names, or
+// filesystem paths. Log the real error server-side and hand back a
+// generic JSON 500 instead, so every response stays JSON and every
+// endpoint's error handling in the frontend keeps working.
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+set_exception_handler(function (Throwable $e): void {
+    error_log('[accv2] Unhandled ' . get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+    }
+    echo json_encode(['error' => 'Terjadi kesalahan pada server.']);
+    exit;
+});
+
 function cfg(): array {
     static $cfg = null;
     if ($cfg === null) $cfg = require __DIR__ . '/config.php';
@@ -15,9 +33,11 @@ function start_session(): void {
         'path' => '/',
         'httponly' => true,
         'samesite' => 'Lax',
-        // 'secure' is left off in local dev (plain http); a production
-        // deploy behind HTTPS should force this true (see index.php).
-        'secure' => !empty($_SERVER['HTTPS']),
+        // Plain $_SERVER['HTTPS'] isn't set when TLS is terminated by a
+        // reverse proxy/load balancer in front of PHP (common on shared
+        // hosting) — fall back to the standard forwarded-proto header so
+        // the cookie still gets marked secure on a real HTTPS deploy.
+        'secure' => !empty($_SERVER['HTTPS']) || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https'),
     ]);
     session_name('accv2_session');
     session_start();
@@ -79,7 +99,11 @@ function require_login(): array {
 function audit(string $action, string $entity, string $entityId, string $detail = ''): void {
     $u = current_user();
     $stmt = db()->prepare(
-        'INSERT INTO audit_log (user_id, user_email, action, entity, entity_id, detail) VALUES (?,?,?,?,?,?)'
+        'INSERT INTO audit_log (user_id, user_email, action, entity, entity_id, detail, ip_address, user_agent) VALUES (?,?,?,?,?,?,?,?)'
     );
-    $stmt->execute([$u['id'] ?? null, $u['email'] ?? null, $action, $entity, $entityId, $detail]);
+    $stmt->execute([
+        $u['id'] ?? null, $u['email'] ?? null, $action, $entity, $entityId, $detail,
+        $_SERVER['REMOTE_ADDR'] ?? null,
+        substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255) ?: null,
+    ]);
 }
