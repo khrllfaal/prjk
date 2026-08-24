@@ -188,11 +188,19 @@ button,input,select,textarea{font-family:inherit;}
 .search-box .ic{position:absolute; left:10px; top:50%; transform:translateY(-50%); font-size:12px; color:var(--text-faint);}
 .result-count{font-size:11px; color:var(--text-faint); margin-left:auto; font-family:var(--font-mono);}
 
-.table-scroll{overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--card);}
-table.dtab{width:100%; border-collapse:collapse; font-size:12.3px; min-width:640px;}
+/* CSS forces overflow-y to 'auto' the moment overflow-x isn't
+   'visible' (can't have one axis truly visible and the other
+   scrolling) — so a header can only be sticky *within this box's own
+   scrollport*, not against the page. Give the box a max-height so it
+   becomes its own bounded, independently-scrolling data grid, and the
+   header sticks to the top of that. */
+.table-scroll{overflow:auto; max-height:68vh; border:1px solid var(--line); border-radius:var(--radius); background:var(--card);}
+/* border-spacing:0 + separate (not collapse) — sticky positioning on
+   <th> is unreliable with collapsed table borders in some engines */
+table.dtab{width:100%; border-collapse:separate; border-spacing:0; font-size:12.3px; min-width:640px;}
 table.dtab thead th{background:var(--navy); color:#fff; text-align:left; font-weight:600; font-size:10.6px;
   text-transform:uppercase; letter-spacing:.03em; padding:10px 12px; white-space:nowrap; cursor:pointer; user-select:none;
-  position:sticky; top:0;}
+  position:sticky; top:0; z-index:5;}
 table.dtab thead th.num, table.dtab td.num{text-align:right;}
 table.dtab thead th.nosort{cursor:default;}
 table.dtab thead th .arrow{opacity:.45; font-size:9px; margin-left:3px;}
@@ -893,6 +901,14 @@ function searchableSelect(containerId, hiddenId, opts){
 }
 
 var _modalOnSave=null;
+var _modalInitialSnapshot=null;
+function snapshotModalInputs(){
+  var vals=[];
+  document.querySelectorAll('#modalBody input, #modalBody select, #modalBody textarea').forEach(function(el){
+    vals.push(el.id+'='+((el.type==='checkbox'||el.type==='radio')?el.checked:el.value));
+  });
+  return vals.join('|');
+}
 function openModal(title, bodyHTML, opts){
   opts=opts||{};
   document.getElementById('modalTitle').textContent=title;
@@ -903,13 +919,26 @@ function openModal(title, bodyHTML, opts){
     (opts.saveLabel===null?'':'<button class="btn btn-primary" id="mSave">'+esc(opts.saveLabel||'Simpan')+'</button>');
   document.getElementById('modalBack').classList.add('on');
   _modalOnSave=opts.onSave||null;
-  document.getElementById('mCancel').onclick=closeModal;
+  _modalInitialSnapshot=snapshotModalInputs();
+  document.getElementById('mCancel').onclick=requestCloseModal;
   var sv=document.getElementById('mSave');
   if(sv) sv.onclick=function(){ if(_modalOnSave) _modalOnSave(); };
 }
 function closeModal(){
   document.getElementById('modalBack').classList.remove('on');
   _modalOnSave=null;
+  _modalInitialSnapshot=null;
+}
+/* Use this (instead of closeModal directly) for anything the user
+   triggers to dismiss a form WITHOUT saving — X button, Batal, click
+   outside — so an in-progress edit isn't lost by a stray click. Code
+   paths that already saved (onSave handlers) still call closeModal()
+   straight after persisting, which is correct — nothing to lose there. */
+function requestCloseModal(){
+  if(_modalInitialSnapshot!==null && snapshotModalInputs()!==_modalInitialSnapshot){
+    if(!confirm('Ada perubahan yang belum disimpan. Tutup tanpa menyimpan?')) return;
+  }
+  closeModal();
 }
 function confirmModal(title,msg,onYes){
   openModal(title,'<p style="font-size:13px;line-height:1.6;color:var(--text-mute);margin:0;">'+msg+'</p>',
@@ -919,6 +948,29 @@ function confirmModal(title,msg,onYes){
 }
 function fv(id){ var e=document.getElementById(id); return e?e.value.trim():''; }
 function fnum(id){ var v=fv(id).replace(/[^\d.-]/g,''); return v?parseFloat(v):0; }
+
+/* Rupiah amount inputs: plain <input type=number> gives no thousands
+   grouping, so a typo like 1000000 vs 10000000 is easy to miss while
+   typing. bindCurrencyInput turns a text input into a live-formatted
+   "1.234.567" field (digits only, "." as thousands separator — Rupiah
+   has no cents here); fnumC reads the numeric value back out. */
+function formatThousands(digits){
+  digits=String(digits||'').replace(/\D/g,'');
+  return digits?digits.replace(/\B(?=(\d{3})+(?!\d))/g,'.'):'';
+}
+function bindCurrencyInput(id){
+  var el=document.getElementById(id);
+  if(!el) return;
+  el.value=formatThousands(el.value);
+  el.addEventListener('input', function(){
+    var pos=el.selectionStart, lenBefore=el.value.length;
+    el.value=formatThousands(el.value);
+    var lenAfter=el.value.length;
+    var newPos=Math.max(0, pos+(lenAfter-lenBefore));
+    el.setSelectionRange(newPos, newPos);
+  });
+}
+function fnumC(id){ var v=fv(id).replace(/\D/g,''); return v?parseInt(v,10):0; }
 
 /* ---------------- CSV export ---------------- */
 function exportCSV(filename, headers, rows){
@@ -1261,11 +1313,11 @@ document.addEventListener('DOMContentLoaded', function(){
 
   document.getElementById('hamburger').onclick=openSidebar;
   document.getElementById('sbBackdrop').onclick=closeSidebar;
-  document.getElementById('modalClose').onclick=closeModal;
+  document.getElementById('modalClose').onclick=requestCloseModal;
   document.getElementById('modalBack').onclick=function(e){
-    if(e.target===document.getElementById('modalBack')) closeModal();
+    if(e.target===document.getElementById('modalBack')) requestCloseModal();
   };
-  document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeModal(); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') requestCloseModal(); });
 
   document.getElementById('navSearch').addEventListener('input',function(e){
     var q=e.target.value.toLowerCase();
@@ -1339,6 +1391,10 @@ function masterPage(cfg){
           return '<div class="field'+(f.width==='full'?' full':'')+'"><label>'+esc(f.label)+'</label>'+
             '<div id="f_'+f.key+'_ssel"></div><input type="hidden" id="f_'+f.key+'" value="'+esc(val)+'"></div>';
         }
+        if(f.type==='currency'){
+          return '<div class="field'+(f.width==='full'?' full':'')+'"><label>'+esc(f.label)+'</label>'+
+            '<input id="f_'+f.key+'" type="text" inputmode="numeric" value="'+esc(val)+'"></div>';
+        }
         return '<div class="field'+(f.width==='full'?' full':'')+'"><label>'+esc(f.label)+
           (f.required?' *':'')+'</label><input id="f_'+f.key+'" type="'+(f.type||'text')+'" value="'+esc(val)+'"></div>';
       }).join('')+'</div>';
@@ -1349,17 +1405,21 @@ function masterPage(cfg){
           var f=cfg.fields[i];
           var v=fv('f_'+f.key);
           if(f.required && !v){ toast('Kolom "'+f.label+'" wajib diisi.','danger'); return; }
-          obj[f.key]=(f.type==='number')?(parseFloat(v.replace(/[^\d.-]/g,''))||0):v;
+          obj[f.key]=(f.type==='number')?(parseFloat(v.replace(/[^\d.-]/g,''))||0):
+            (f.type==='currency')?fnumC('f_'+f.key):v;
         }
         if(!id) DB[cfg.coll].push(obj);
         saveDB(); syncUpsert(cfg.coll, obj); closeModal(); refresh();
         toast(id?'Data berhasil diperbarui.':'Data baru ditambahkan.','success');
       }});
       cfg.fields.forEach(function(f){
-        if(f.type!=='combo') return;
-        searchableSelect('f_'+f.key+'_ssel','f_'+f.key,{
-          options:f.options.map(function(o){ return {value:o,label:o}; }),
-          allowCustom:true, placeholder:'Pilih atau ketik '+f.label.toLowerCase()+'…'});
+        if(f.type==='combo'){
+          searchableSelect('f_'+f.key+'_ssel','f_'+f.key,{
+            options:f.options.map(function(o){ return {value:o,label:o}; }),
+            allowCustom:true, placeholder:'Pilih atau ketik '+f.label.toLowerCase()+'…'});
+        } else if(f.type==='currency'){
+          bindCurrencyInput('f_'+f.key);
+        }
       });
     }
 
@@ -1489,12 +1549,12 @@ function financePage(jenis, title, sub){
           '<div id="f_project_ssel"></div><input type="hidden" id="f_project" value="'+esc(v('project',''))+'"></div>'+
         '<div class="field"><label>'+relasiLabel+'</label>'+
           '<div id="f_relasi_ssel"></div><input type="hidden" id="f_relasi" value="'+esc(v('relasi',''))+'"></div>'+
-        '<div class="field"><label>Amount (Rp) *</label><input type="number" id="f_amount" value="'+esc(amount)+'"></div>'+
+        '<div class="field"><label>Amount (Rp) *</label><input type="text" inputmode="numeric" id="f_amount" value="'+esc(amount)+'"></div>'+
         '<div class="field"><label>Description</label><input type="text" id="f_ket" value="'+esc(v('ket',''))+'"></div>'+
       '</div>';
 
       openModal((id?'Edit ':'Tambah ')+title, html, {wide:true, onSave:function(){
-        var tgl=fv('f_tgl'), amt=fnum('f_amount');
+        var tgl=fv('f_tgl'), amt=fnumC('f_amount');
         if(!tgl){ toast('Tanggal wajib diisi.','danger'); return; }
         if(!amt || amt<=0){ toast('Amount harus lebih besar dari 0.','danger'); return; }
         var obj=rec||{id:uid('t'), jenis:jenis};
@@ -1529,6 +1589,7 @@ function financePage(jenis, title, sub){
           document.getElementById('f_refPreview').value=nextRefFor(jenis, fv('f_tgl'));
         });
       }
+      bindCurrencyInput('f_amount');
     }
 
     function del(id){
@@ -1862,10 +1923,10 @@ function registerPages(){
     fields:[{key:'nama',label:'Nama Project',required:true,width:'full'},
             {key:'pemberiProyek',label:'Pemberi Proyek',type:'combo',options:PEMBERI_PROYEK_LIST},
             {key:'ledgerName',label:'Nama di Transaksi Kas/Bank/Jurnal (kosongkan jika sama)'},
-            {key:'kontrak',label:'Nilai Kontrak (Rp)',type:'number'},
-            {key:'rap',label:'Nilai RAP (Rp)',type:'number'},
-            {key:'costCenter',label:'Cost Center / Overhead (Rp)',type:'number'},
-            {key:'admFee',label:'Adm Fee (Rp)',type:'number'},
+            {key:'kontrak',label:'Nilai Kontrak (Rp)',type:'currency'},
+            {key:'rap',label:'Nilai RAP (Rp)',type:'currency'},
+            {key:'costCenter',label:'Cost Center / Overhead (Rp)',type:'currency'},
+            {key:'admFee',label:'Adm Fee (Rp)',type:'currency'},
             {key:'progress',label:'Progress Lapangan (0–1, mis. 0.6)',type:'number'}],
     searchFn:function(r){ return r.nama+' '+(r.pemberiProyek||''); },
     columns:[
@@ -2049,12 +2110,12 @@ function registerPages(){
         '<div class="field"><label>Jenis *</label><select id="f_jenis">'+
           '<option value="debet"'+(jenisAwal==='debet'?' selected':'')+'>Debet</option>'+
           '<option value="kredit"'+(jenisAwal==='kredit'?' selected':'')+'>Kredit</option></select></div>'+
-        '<div class="field"><label>Jumlah (Rp) *</label><input type="number" id="f_amount" value="'+esc(amountAwal)+'"></div>'+
+        '<div class="field"><label>Jumlah (Rp) *</label><input type="text" inputmode="numeric" id="f_amount" value="'+esc(amountAwal)+'"></div>'+
         '<div class="field full"><label>Keterangan</label><input type="text" id="f_ket" value="'+esc(v('ket',''))+'"></div>'+
       '</div>';
 
       openModal((id?'Edit ':'Tambah ')+'Jurnal Umum', html, {wide:true, onSave:function(){
-        var tgl=fv('f_tgl'), akun=fv('f_akun'), amt=fnum('f_amount'), jenisPilih=fv('f_jenis');
+        var tgl=fv('f_tgl'), akun=fv('f_akun'), amt=fnumC('f_amount'), jenisPilih=fv('f_jenis');
         if(!tgl){ toast('Tanggal wajib diisi.','danger'); return; }
         if(!akun){ toast('Akun wajib dipilih.','danger'); return; }
         if(!amt || amt<=0){ toast('Jumlah harus lebih besar dari 0.','danger'); return; }
@@ -2076,6 +2137,7 @@ function registerPages(){
           document.getElementById('f_refPreview').value=nextJurnalRef();
         });
       }
+      bindCurrencyInput('f_amount');
     }
 
     function del(id){
@@ -2255,26 +2317,43 @@ function registerPages(){
     function openHutangUpdateModal(notaId){
       var row=allRows.find(function(r){ return r.id===notaId; });
       if(!row) return;
-      var html='<div class="form-grid">'+
-        '<div class="field full"><label>Nota</label><div style="padding:8px 0;font-size:13px;">'+
-          esc(row.vendor)+' — '+esc(row.ket||'')+' <span class="faint-italic">('+fmtDate(row.tgl)+', '+num0(row.amount)+')</span></div></div>'+
-        '<div class="field"><label>Sudah Dibayar (Rp)</label><input type="number" id="f_hutangPaid" value="'+esc(row.paid)+'"></div>'+
-      '</div>'+
-      '<div class="btn-row" style="margin-top:10px;">'+
-        '<button type="button" class="btn btn-success btn-sm" id="hutangMarkLunas">Tandai Lunas</button>'+
-        '<button type="button" class="btn btn-ghost btn-sm" id="hutangMarkBelum">Tandai Belum Dibayar</button>'+
-        (row.manual?'<button type="button" class="btn btn-ghost btn-sm" id="hutangResetAuto">Kembalikan ke Otomatis</button>':'')+
-      '</div>';
-      openModal('Update Status Hutang', html, {saveLabel:'Simpan', onSave:function(){
-        var paid=fnum('f_hutangPaid');
-        if(paid<0){ toast('Jumlah dibayar tidak boleh negatif.','danger'); return; }
+
+      function saveOverride(paid){
         var status=paid<=0?'BELUM_BAYAR':(paid>=row.amount-0.5?'LUNAS':'SEBAGIAN');
         DB.hutangOverrides[notaId]={paid:paid, status:status};
         saveDB(); closeModal(); allRows=computeHutangDagangRows(); refresh();
         toast('Status hutang diperbarui.','success');
-      }});
-      document.getElementById('hutangMarkLunas').onclick=function(){ document.getElementById('f_hutangPaid').value=row.amount; };
-      document.getElementById('hutangMarkBelum').onclick=function(){ document.getElementById('f_hutangPaid').value=0; };
+      }
+
+      var html='<div class="field full"><label>Nota</label><div style="padding:8px 0;font-size:13px;">'+
+          esc(row.vendor)+' — '+esc(row.ket||'')+' <span class="faint-italic">('+fmtDate(row.tgl)+', '+num0(row.amount)+')</span></div></div>'+
+        '<div class="btn-row" style="margin-top:6px;flex-wrap:wrap;">'+
+          '<button type="button" class="btn btn-success" id="hutangChooseLunas">✓ Lunas</button>'+
+          '<button type="button" class="btn btn-warn" id="hutangChooseSebagian">◐ Dibayar Sebagian</button>'+
+          (row.paid>0?'<button type="button" class="btn btn-ghost" id="hutangChooseBelum">Belum Dibayar</button>':'')+
+          (row.manual?'<button type="button" class="btn btn-ghost" id="hutangResetAuto">Kembalikan ke Otomatis</button>':'')+
+        '</div>'+
+        '<div id="hutangPartialWrap" style="display:none;margin-top:14px;">'+
+          '<div class="field"><label>Jumlah Dibayar (Rp)</label>'+
+          '<input type="text" inputmode="numeric" id="f_hutangPaid" value="'+esc(row.paid||'')+'"></div>'+
+          '<button type="button" class="btn btn-primary btn-sm" id="hutangSavePartial" style="margin-top:10px;">Simpan</button>'+
+        '</div>';
+      openModal('Update Status Hutang', html, {saveLabel:null});
+
+      document.getElementById('hutangChooseLunas').onclick=function(){ saveOverride(row.amount); };
+      var belumBtn=document.getElementById('hutangChooseBelum');
+      if(belumBtn) belumBtn.onclick=function(){ saveOverride(0); };
+      document.getElementById('hutangChooseSebagian').onclick=function(){
+        document.getElementById('hutangPartialWrap').style.display='block';
+        bindCurrencyInput('f_hutangPaid');
+        document.getElementById('f_hutangPaid').focus();
+      };
+      document.getElementById('hutangSavePartial').onclick=function(){
+        var paid=fnumC('f_hutangPaid');
+        if(paid<=0){ toast('Isi jumlah yang sudah dibayar.','danger'); return; }
+        if(paid>=row.amount-0.5){ toast('Jumlah ini sudah senilai lunas — pakai tombol Lunas.','danger'); return; }
+        saveOverride(paid);
+      };
       var resetBtn=document.getElementById('hutangResetAuto');
       if(resetBtn) resetBtn.onclick=function(){
         delete DB.hutangOverrides[notaId];
