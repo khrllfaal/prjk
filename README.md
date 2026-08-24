@@ -39,7 +39,8 @@ scripts/
   import_excel_supabase.py import Excel -> Supabase (jalur alternatif)
 
 docs/
-  SETUP.md             panduan setup jalur Supabase
+  SETUP.md              panduan setup jalur Supabase
+  DEPLOY_HOSTINGER.md   panduan deploy jalur utama (PHP + MySQL) ke Hostinger
 ```
 
 ## Prinsip desain
