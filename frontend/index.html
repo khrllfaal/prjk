@@ -31,6 +31,9 @@ html,body{margin:0;padding:0;height:100%;}
 body{background:var(--paper); color:var(--text); font-family:var(--font-body); font-size:14px; line-height:1.45; -webkit-font-smoothing:antialiased;}
 h1,h2,h3,h4{font-family:var(--font-display); margin:0; letter-spacing:-0.01em;}
 .mono{font-family:var(--font-mono); font-variant-numeric:tabular-nums;}
+.linklike{background:none; border:none; padding:0; margin:0; color:var(--steel); font:inherit;
+  font-variant-numeric:tabular-nums; cursor:pointer; text-decoration:none;}
+.linklike:hover{text-decoration:underline;}
 ::selection{background:var(--steel-soft);}
 button,input,select,textarea{font-family:inherit;}
 
@@ -499,26 +502,27 @@ function seedDB(){
     }
   });
 
+  // names actually used on kas/bank/jurnal entries — a project's display
+  // name doesn't always match these 1:1 (see guessLedgerName above)
+  var ledgerNameSet={};
+  SEED.txns.forEach(function(t){ if(t.p) ledgerNameSet[t.p]=1; });
+  (SEED.jurnal||[]).forEach(function(j){ if(j.p) ledgerNameSet[j.p]=1; });
+  var knownLedgerNames=Object.keys(ledgerNameSet);
+
   // projects: dashboard rows (with values) + master list + names seen in transactions
   var projects=[], seen={}, pi=1;
+  function pushProject(nama, kontrak, rap, progress){
+    var key=nama.toLowerCase();
+    if(seen[key]) return; seen[key]=1;
+    var ledgerName=ledgerNameSet[nama]?nama:guessLedgerName(nama, knownLedgerNames);
+    projects.push({id:'p'+pi++, nama:nama, ledgerName:ledgerName, kontrak:kontrak||0, rap:rap||0,
+      progress:progress, pemberiProyek:guessPemberiProyek(nama), costCenter:0, admFee:0});
+  }
   (SEED.progress.rows||[]).forEach(function(r){
-    var key=r.nama.toLowerCase();
-    if(seen[key]) return; seen[key]=1;
-    projects.push({id:'p'+pi++, nama:r.nama, kontrak:r.kontrak||0, rap:r.rap||0,
-      progress:(typeof r.progress_lapangan==='number')?r.progress_lapangan:0});
+    pushProject(r.nama, r.kontrak, r.rap, (typeof r.progress_lapangan==='number')?r.progress_lapangan:null);
   });
-  (SEED.projmaster||[]).forEach(function(nm){
-    var key=nm.toLowerCase();
-    if(seen[key]) return; seen[key]=1;
-    projects.push({id:'p'+pi++, nama:nm, kontrak:0, rap:0, progress:0});
-  });
-  var txnProjects={};
-  SEED.txns.forEach(function(t){ if(t.p) txnProjects[t.p]=1; });
-  Object.keys(txnProjects).forEach(function(nm){
-    var key=nm.toLowerCase();
-    if(seen[key]) return; seen[key]=1;
-    projects.push({id:'p'+pi++, nama:nm, kontrak:0, rap:0, progress:0});
-  });
+  (SEED.projmaster||[]).forEach(function(nm){ pushProject(nm, 0, 0, null); });
+  knownLedgerNames.forEach(function(nm){ pushProject(nm, 0, 0, null); });
 
   var coa=SEED.coa.map(function(c,i){
     return {id:'a'+(i+1), kode:c.kode, nama:c.nama, level:c.level, tipe:coaTipe(c.kode)};
@@ -548,6 +552,127 @@ function seedDB(){
   });
 
   return {customers:customers, vendors:vendors, projects:projects, coa:coa, txns:txns, jurnal:jurnal};
+}
+
+/* "Pemberi Proyek" — inferred once from the project name so the
+   Dashboard filter has something to work with; editable per-project
+   afterwards via Master Project (task: filter proyek by pemberi). */
+var PEMBERI_PROYEK_LIST=['Kemhan','Bina Marga','PUPR','Korem','Kodim','Koramil','BJB','Dinas','Diknas'];
+function guessPemberiProyek(nama){
+  var low=(nama||'').toLowerCase();
+  for(var i=0;i<PEMBERI_PROYEK_LIST.length;i++){
+    var p=PEMBERI_PROYEK_LIST[i];
+    if(low.indexOf(p.toLowerCase())>-1) return p;
+  }
+  return 'Lainnya';
+}
+
+/* Some project display names (e.g. "Kemhan Bangun Rumdis Cimahi") don't
+   match the shorter name actually used on kas/bank/jurnal entries (e.g.
+   "Rumdis Cimahi") — this maps a display name to the closest known
+   ledger name so transactions can still be found & totalled. Picks the
+   longest known ledger name that appears inside the display name (case
+   insensitive); returns '' when nothing matches so it's obvious in the
+   UI that the link needs a manual fix via Master Project. */
+function guessLedgerName(displayName, knownLedgerNames){
+  var low=(displayName||'').toLowerCase();
+  var best='';
+  knownLedgerNames.forEach(function(k){
+    if(!k) return;
+    if(low.indexOf(k.toLowerCase())>-1 && k.length>best.length) best=k;
+  });
+  return best;
+}
+
+/* RAP cost categories, matched by COA code prefix on akunLawan/akun
+   (format "kode-nama"), used by the Dashboard "Rincian Progress per
+   Proyek" table to total Biaya Bahan / Upah / Akomodasi per project. */
+var RAP_COST_CODES={bahan:['5.1.1'], upah:['5.1.2','5.1.9'], akomodasi:['5.1.26','6.2.36']};
+function akunKodeOf(akunStr){ return (akunStr||'').split('-')[0]; }
+function matchesRapCost(akunStr, kind){ return RAP_COST_CODES[kind].indexOf(akunKodeOf(akunStr))>-1; }
+
+/* Live per-project progress/RAP figures, computed from current
+   DB.txns + DB.jurnal (not a static snapshot) — powers the Dashboard
+   "Rincian Progress per Proyek" table. Biaya Bahan/Upah/Akomodasi are
+   real cost postings against that project (cash ledger + jurnal umum
+   accrual entries); Cost Center & Adm Fee are entered manually per
+   project (Master Project) since they're overhead allocations, not
+   something derivable from the ledger alone. */
+function computeProjectProgressRows(){
+  return DB.projects.map(function(p, i){
+    var ledger=p.ledgerName||p.nama;
+    var bahan=0, upah=0, akomodasi=0;
+    DB.txns.forEach(function(t){
+      if(t.project!==ledger || !/keluar$/.test(t.jenis)) return;
+      if(matchesRapCost(t.akunLawan,'bahan')) bahan+=t.kredit;
+      else if(matchesRapCost(t.akunLawan,'upah')) upah+=t.kredit;
+      else if(matchesRapCost(t.akunLawan,'akomodasi')) akomodasi+=t.kredit;
+    });
+    DB.jurnal.forEach(function(j){
+      if(j.project!==ledger) return;
+      if(matchesRapCost(j.akun,'bahan')) bahan+=j.debet;
+      else if(matchesRapCost(j.akun,'upah')) upah+=j.debet;
+      else if(matchesRapCost(j.akun,'akomodasi')) akomodasi+=j.debet;
+    });
+    var totalRap=bahan+upah+akomodasi;
+    var sisaRap=(p.rap||0)-totalRap;
+    var ratio=p.rap?totalRap/p.rap:null;
+    var statusRap=ratio===null?'':(ratio>1?'MELEBIHI':(ratio>0.9?'HAMPIR':'AMAN'));
+    var costCenter=p.costCenter||0, admFee=p.admFee||0;
+    var totalPengeluaran=totalRap+costCenter+admFee;
+    var hasilUsaha=(p.kontrak||0)-totalPengeluaran;
+    return {
+      no:i+1, id:p.id, nama:p.nama, ledgerName:ledger, linked:!!ledger,
+      pemberiProyek:p.pemberiProyek||'Lainnya',
+      kontrak:p.kontrak||0, rap:p.rap||0,
+      bahan:bahan, bahanPct:totalRap?bahan/totalRap:0,
+      upah:upah, upahPct:totalRap?upah/totalRap:0,
+      akomodasi:akomodasi, akomodasiPct:totalRap?akomodasi/totalRap:0,
+      totalRap:totalRap, totalRapPct:p.rap?totalRap/p.rap:0,
+      sisaRap:sisaRap, sisaRapPct:p.rap?sisaRap/p.rap:0,
+      statusRap:statusRap,
+      costCenter:costCenter, admFee:admFee,
+      totalPengeluaran:totalPengeluaran, totalPengeluaranPct:p.kontrak?totalPengeluaran/p.kontrak:0,
+      hasilUsaha:hasilUsaha, hasilUsahaPct:p.kontrak?hasilUsaha/p.kontrak:0,
+      progressLapangan:(typeof p.progress==='number')?p.progress:null,
+    };
+  });
+}
+
+/* Underlying kas/bank + jurnal umum postings behind a project's RAP cost
+   figure — feeds the generic drill-down modal (task: klik angka untuk
+   lihat riwayat transaksi). kind is 'bahan' | 'upah' | 'akomodasi' | 'all'. */
+function projectCostTxns(projectNama, kind){
+  var kinds = kind==='all' ? ['bahan','upah','akomodasi'] : [kind];
+  function matchesAny(akun){ return kinds.some(function(k){ return matchesRapCost(akun,k); }); }
+  var list=[];
+  DB.txns.forEach(function(t){
+    if(t.project!==projectNama || !/keluar$/.test(t.jenis) || !matchesAny(t.akunLawan)) return;
+    list.push({tgl:t.tgl, ref:t.ref, ket:t.ket+' — '+t.akunLawan, amount:t.kredit});
+  });
+  DB.jurnal.forEach(function(j){
+    if(j.project!==projectNama || !matchesAny(j.akun)) return;
+    list.push({tgl:j.tgl, ref:j.ref, ket:j.ket+' — '+j.akun, amount:j.debet});
+  });
+  return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+}
+
+/* Generic read-only drill-down: click an amount/label anywhere in the
+   app -> see the list of transactions behind it (Cash Flow, Laba Rugi,
+   Dashboard progress, Trial Hutang, etc). list items: {tgl,ref,ket,amount}. */
+function showTxnDrilldown(title, subtitle, list){
+  var total=list.reduce(function(a,b){ return a+(b.amount||0); },0);
+  var body=(subtitle?'<div class="panel-desc" style="margin-bottom:10px;">'+esc(subtitle)+'</div>':'')+
+    '<div class="table-scroll"><table class="dtab"><thead><tr>'+
+    '<th>Tanggal</th><th>Ref No</th><th>Description</th><th style="text-align:right;">Amount</th>'+
+    '</tr></thead><tbody>'+
+    (list.length?list.map(function(r){
+      return '<tr><td>'+fmtDate(r.tgl)+'</td><td class="mono" style="font-size:11.5px;">'+esc(r.ref||'–')+'</td>'+
+        '<td class="wrap">'+esc(r.ket||'–')+'</td><td style="text-align:right;">'+num0(r.amount)+'</td></tr>';
+    }).join(''):'<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:18px;">Tidak ada transaksi.</td></tr>')+
+    '</tbody><tfoot><tr><td colspan="3"><b>Total</b></td><td style="text-align:right;"><b>'+num0(total)+'</b></td></tr></tfoot>'+
+    '</table></div>';
+  openModal(title, body, {wide:true, saveLabel:null});
 }
 
 function coaTipe(kode){
@@ -1252,7 +1377,17 @@ function registerPages(){
 
   /* ---------------- DASHBOARD ---------------- */
   PAGES.dashboard=function(c){
-    var pr=SEED.progress, rows=pr.rows;
+    var progRows=computeProjectProgressRows();
+    var proyekAktif=DB.projects.length;
+    var totalKontrak=DB.projects.reduce(function(a,p){ return a+(p.kontrak||0); },0);
+    var rows=progRows.map(function(r){
+      return {no:r.no, nama:r.nama, kontrak:r.kontrak, rap:r.rap,
+        pengeluaran_bahan_upah:r.totalRap,
+        progress_keuangan:r.rap?r.totalRap/r.rap:0,
+        progress_lapangan:(r.progressLapangan===null)?'Belum Lapor':r.progressLapangan,
+        selisih:(r.progressLapangan===null)?null:((r.rap?r.totalRap/r.rap:0)-r.progressLapangan),
+        sisa_rap:r.sisaRap, status_rap:r.statusRap};
+    });
     var belum=rows.filter(function(r){ return r.progress_lapangan==='Belum Lapor'; });
     var sudah=rows.filter(function(r){ return typeof r.progress_lapangan==='number'; });
     var bermasalah=rows.filter(function(r){ var x=statusInfo(r.status_rap).cls; return x==='danger'||x==='warn'; });
@@ -1285,8 +1420,8 @@ function registerPages(){
       '<div class="section-head"><h2><span class="icon-chip">◔</span>Progress &amp; Status RAP</h2>'+
         '<span class="desc">Snapshot 13 Agustus 2026 · '+rows.length+' proyek</span></div>'+
       '<div class="kpi-grid">'+
-        kpiCard('Proyek Aktif', String(pr.proyek_aktif),'Dipantau minggu ini','accent')+
-        kpiCard('Total Nilai Kontrak', rp(pr.total_kontrak),'Seluruh proyek','accent')+
+        kpiCard('Proyek Aktif', String(proyekAktif),'Dipantau minggu ini','accent')+
+        kpiCard('Total Nilai Kontrak', rp(totalKontrak),'Seluruh proyek','accent')+
         kpiCard('Status RAP ⚠ Melebihi / Hampir Habis', String(bermasalah.length),'dari '+rows.length+' proyek',
           bermasalah.length?'danger':'safe')+
       '</div>'+
@@ -1303,7 +1438,10 @@ function registerPages(){
         '<span class="desc">Klik header kolom untuk mengurutkan</span></div>'+
       '<div class="panel"><div class="toolbar">'+
         '<div class="search-box"><span class="ic">⌕</span><input type="text" id="qProg" placeholder="Cari proyek…"></div>'+
-        '<span class="result-count" id="cntProg"></span></div><div id="tblProg"></div></div>';
+        '<div class="field" style="min-width:200px;"><label style="font-size:11px;">Pemberi Proyek</label>'+
+        '<select id="fPemberi"><option value="">Semua Pemberi Proyek</option></select></div>'+
+        '<span class="result-count" id="cntProg"></span></div>'+
+        '<div class="table-scroll"><div id="tblProg"></div></div></div>';
 
     /* --- period logic --- */
     var curId=SEED.periods[SEED.periods.length-1].id;
@@ -1422,24 +1560,65 @@ function registerPages(){
             Math.min(100,Math.round(r.progress_lapangan*100))+'%;"></div></div><span class="dval">'+pct(r.progress_lapangan)+'</span></div></div>';
       }).join('')) : '<p style="color:var(--text-faint);font-size:12.5px;">Belum ada proyek dengan progress lapangan yang dilaporkan.</p>';
 
-    var progTbl=DataTable('tblProg',[
-      {key:'no',label:'No',sort:false,render:function(r){ return '<span class="no">'+r.no+'</span>'; }},
-      {key:'nama',label:'Nama Proyek',cls:'wrap',render:function(r){ return esc(r.nama); }},
-      {key:'kontrak',label:'Nilai Kontrak',num:true,render:function(r){ return num0(r.kontrak); }},
-      {key:'rap',label:'Nilai RAP (60%)',num:true,render:function(r){ return num0(r.rap); }},
-      {key:'pengeluaran_bahan_upah',label:'Pengeluaran Bahan & Upah',num:true,render:function(r){ return num0(r.pengeluaran_bahan_upah); }},
-      {key:'progress_keuangan',label:'Progress Keuangan',num:true,render:function(r){ return pct(r.progress_keuangan); }},
-      {key:'progress_lapangan',label:'Progress Lapangan',num:true,
-        sortVal:function(r){ return typeof r.progress_lapangan==='number'?r.progress_lapangan:-1; },
-        render:function(r){ return typeof r.progress_lapangan==='number'?pct(r.progress_lapangan):'<span class="faint-italic">Belum Lapor</span>'; }},
-      {key:'selisih',label:'Selisih Progress*',num:true,sortVal:function(r){ return r.selisih===null?-Infinity:r.selisih; },
-        render:function(r){ return (r.selisih===null||r.selisih===undefined)?'<span class="faint-italic">–</span>':
-          '<span class="mono '+(r.selisih<0?'neg':'pos')+'">'+pct(r.selisih,{signed:true})+'</span>'; }},
-      {key:'sisa_rap',label:'Sisa RAP',num:true,render:function(r){ return num0(r.sisa_rap); }},
-      {key:'status_rap',label:'Status RAP',cls:function(r){ return statusCellClass(r.status_rap); },
-        render:function(r){ return statusCellText(r.status_rap); }}
-    ], rows, {defaultSort:'kontrak',defaultDir:'desc',perPage:15,searchFn:function(r){ return r.nama; },countId:'cntProg'});
-    bindSearch('qProg', progTbl);
+    var pemberiSel=document.getElementById('fPemberi');
+    var pemberiList=Array.from(new Set(progRows.map(function(r){ return r.pemberiProyek; }))).sort();
+    pemberiSel.innerHTML='<option value="">Semua Pemberi Proyek</option>'+
+      pemberiList.map(function(p){ return '<option value="'+esc(p)+'">'+esc(p)+'</option>'; }).join('');
+
+    function drillCell(amount, r, kind){
+      if(!amount) return '<span class="faint-italic">–</span>';
+      return '<button type="button" class="linklike" data-drill-ledger="'+esc(r.ledgerName)+'" '+
+        'data-drill-label="'+esc(r.nama)+'" data-drill-kind="'+kind+'">'+num0(amount)+'</button>';
+    }
+
+    var progTbl;
+    function drawProgTbl(){
+      var pemberi=fv('fPemberi');
+      var data=pemberi?progRows.filter(function(r){ return r.pemberiProyek===pemberi; }):progRows;
+      progTbl=DataTable('tblProg',[
+        {key:'no',label:'No',sort:false,render:function(r){ return '<span class="no">'+r.no+'</span>'; }},
+        {key:'nama',label:'Nama Proyek',cls:'wrap',render:function(r){
+          return esc(r.nama)+'<div class="faint-italic" style="font-size:11px;">'+esc(r.pemberiProyek)+
+            (r.linked?'':' · <span style="color:var(--danger);">⚠ belum tertaut ke transaksi — atur di Master Project</span>')+
+            '</div>'; }},
+        {key:'kontrak',label:'Nilai Kontrak',num:true,render:function(r){ return num0(r.kontrak); }},
+        {key:'rap',label:'Nilai RAP (60%)',num:true,render:function(r){ return num0(r.rap); }},
+        {key:'bahan',label:'Biaya Bahan',num:true,render:function(r){ return drillCell(r.bahan,r,'bahan'); }},
+        {key:'bahanPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.bahanPct):'–'; }},
+        {key:'upah',label:'Biaya Upah',num:true,render:function(r){ return drillCell(r.upah,r,'upah'); }},
+        {key:'upahPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.upahPct):'–'; }},
+        {key:'akomodasi',label:'Biaya Akomodasi',num:true,render:function(r){ return drillCell(r.akomodasi,r,'akomodasi'); }},
+        {key:'akomodasiPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.akomodasiPct):'–'; }},
+        {key:'totalRap',label:'Total Pengeluaran RAP',num:true,render:function(r){ return drillCell(r.totalRap,r,'all'); }},
+        {key:'totalRapPct',label:'%',num:true,render:function(r){ return r.rap?pct(r.totalRapPct):'–'; }},
+        {key:'sisaRap',label:'Sisa RAP',num:true,render:function(r){ return num0(r.sisaRap); }},
+        {key:'sisaRapPct',label:'%',num:true,render:function(r){ return r.rap?pct(r.sisaRapPct):'–'; }},
+        {key:'statusRap',label:'Status RAP',cls:function(r){ return statusCellClass(r.statusRap); },
+          render:function(r){ return statusCellText(r.statusRap); }},
+        {key:'costCenter',label:'Cost Center',num:true,render:function(r){ return num0(r.costCenter); }},
+        {key:'admFee',label:'Adm Fee',num:true,render:function(r){ return r.admFee?num0(r.admFee):'<span class="faint-italic">–</span>'; }},
+        {key:'totalPengeluaran',label:'Total Pengeluaran',num:true,render:function(r){ return num0(r.totalPengeluaran); }},
+        {key:'totalPengeluaranPct',label:'%',num:true,render:function(r){ return r.kontrak?pct(r.totalPengeluaranPct):'–'; }},
+        {key:'hasilUsaha',label:'Hasil Usaha',num:true,render:function(r){
+          return '<b class="'+(r.hasilUsaha<0?'neg':'pos')+'">'+num0(r.hasilUsaha)+'</b>'; }},
+        {key:'hasilUsahaPct',label:'%',num:true,render:function(r){ return r.kontrak?pct(r.hasilUsahaPct):'–'; }}
+      ], data, {defaultSort:'kontrak',defaultDir:'desc',perPage:15,
+        searchFn:function(r){ return r.nama+' '+r.pemberiProyek; }, countId:'cntProg',
+        onRender:function(){
+          document.querySelectorAll('#tblProg [data-drill-ledger]').forEach(function(b){
+            b.onclick=function(){
+              var ledger=b.getAttribute('data-drill-ledger'), label=b.getAttribute('data-drill-label');
+              var kind=b.getAttribute('data-drill-kind');
+              var kindLabel={bahan:'Biaya Bahan',upah:'Biaya Upah',akomodasi:'Biaya Akomodasi',all:'Total Pengeluaran RAP'}[kind];
+              showTxnDrilldown(kindLabel+' — '+label, 'Rincian transaksi & jurnal yang membentuk angka ini',
+                projectCostTxns(ledger, kind));
+            };
+          });
+        }});
+      bindSearch('qProg', progTbl);
+    }
+    drawProgTbl();
+    pemberiSel.addEventListener('change', drawProgTbl);
   };
 
   /* ---------------- MASTER DATA ---------------- */
@@ -1474,18 +1653,23 @@ function registerPages(){
   PAGES.project=masterPage({
     title:'Data Project', sub:'Master proyek beserta nilai kontrak, RAP, dan progress lapangan', coll:'projects', addLabel:'Tambah Project',
     fields:[{key:'nama',label:'Nama Project',required:true,width:'full'},
+            {key:'pemberiProyek',label:'Pemberi Proyek (mis. Kemhan, Bina Marga, PUPR)'},
+            {key:'ledgerName',label:'Nama di Transaksi Kas/Bank/Jurnal (kosongkan jika sama)'},
             {key:'kontrak',label:'Nilai Kontrak (Rp)',type:'number'},
             {key:'rap',label:'Nilai RAP (Rp)',type:'number'},
+            {key:'costCenter',label:'Cost Center / Overhead (Rp)',type:'number'},
+            {key:'admFee',label:'Adm Fee (Rp)',type:'number'},
             {key:'progress',label:'Progress Lapangan (0–1, mis. 0.6)',type:'number'}],
-    searchFn:function(r){ return r.nama; },
+    searchFn:function(r){ return r.nama+' '+(r.pemberiProyek||''); },
     columns:[
       {key:'nama',label:'Nama Project',cls:'wrap',render:function(r){ return '<b>'+esc(r.nama)+'</b>'; }},
+      {key:'pemberiProyek',label:'Pemberi Proyek',render:function(r){ return r.pemberiProyek?esc(r.pemberiProyek):'<span class="faint-italic">–</span>'; }},
       {key:'kontrak',label:'Nilai Kontrak',num:true,render:function(r){ return num0(r.kontrak); },
        foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+(b.kontrak||0);},0))+'</b>'; }},
       {key:'rap',label:'Nilai RAP',num:true,render:function(r){ return num0(r.rap); },
        foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+(b.rap||0);},0))+'</b>'; }},
       {key:'progress',label:'Progress Lapangan',num:true,render:function(r){
-        return r.progress?pct(r.progress):'<span class="faint-italic">0%</span>'; }}
+        return typeof r.progress==='number'?pct(r.progress):'<span class="faint-italic">Belum Lapor</span>'; }}
     ]
   });
 
