@@ -12,3 +12,4 @@ __pycache__/
 .venv/
 .env
 backend/api/config.php
+backend/backups/*.sql.gz
