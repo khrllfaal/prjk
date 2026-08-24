@@ -1,9 +1,10 @@
-# Setup — Prakasa Group ACC v2 (backend + login foundation)
+# Setup — Prakasa Group ACC v2, jalur Supabase (alternatif)
 
-Status: **Phase 1 — fondasi** (backend, login multi-device, model data,
-relasi customer/vendor pada form kas). Perbaikan tampilan Cash Flow,
-Dashboard, drill-down riwayat transaksi, dan menu Trial Hutang menyusul
-di iterasi berikutnya.
+> Backend utama sekarang adalah **PHP + MySQL** (`backend/mysql/schema.sql`
+> + `backend/api/`), dipilih karena cocok langsung dengan hosting shared
+> Hostinger. Panduan di file ini untuk jalur **Supabase**, yang tetap
+> didukung sebagai alternatif. Untuk deploy ke Hostinger dengan MySQL,
+> lihat docs/DEPLOY_HOSTINGER.md.
 
 ## 0. Sebelum mulai — repo harus private
 
@@ -60,9 +61,9 @@ diimpor langsung dari Excel ke database — **tidak pernah lewat git**.
 cd scripts
 pip install -r requirements.txt
 export DATABASE_URL="postgresql://postgres:<password>@<host>:5432/postgres"
-python3 import_excel.py --dry-run "/path/ke/LAPORAN_KEUANGAN_2026_KONTRUKSI_april_rev_2.xlsx"
+python3 import_excel_supabase.py --dry-run "/path/ke/LAPORAN_KEUANGAN_2026_KONTRUKSI_april_rev_2.xlsx"
 # kalau jumlah baris di atas terlihat wajar, jalankan sungguhan:
-python3 import_excel.py "/path/ke/LAPORAN_KEUANGAN_2026_KONTRUKSI_april_rev_2.xlsx"
+python3 import_excel_supabase.py "/path/ke/LAPORAN_KEUANGAN_2026_KONTRUKSI_april_rev_2.xlsx"
 ```
 
 Import bisa dijalankan ulang dengan aman (pakai `on conflict do nothing`);
