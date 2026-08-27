@@ -1,13 +1,13 @@
 # Deploy ke Hostinger — backend PHP + MySQL
 
-Panduan ini untuk jalur backend **utama** (PHP 8 + MySQL/MariaDB),
-dirancang khusus untuk hosting shared/business Hostinger — tidak perlu
-proses Node.js terpisah, karena PHP + MySQL sudah tersedia langsung di
-paket hosting Hostinger mana pun.
+Panduan ini untuk backend PHP 8 + MySQL/MariaDB, dirancang khusus untuk
+hosting shared/business Hostinger — tidak perlu proses Node.js
+terpisah, karena PHP + MySQL sudah tersedia langsung di paket hosting
+Hostinger mana pun.
 
-Kalau Anda memakai jalur Supabase (alternatif), lihat
-[docs/SETUP.md](SETUP.md) — bagian di bawah ini tidak berlaku untuk
-jalur itu.
+Kalau belum pernah setup sama sekali dan ingin coba dulu di komputer
+sendiri sebelum ke Hostinger, mulai dari
+[docs/PANDUAN_LOKAL_KE_HOSTINGER.md](PANDUAN_LOKAL_KE_HOSTINGER.md).
 
 ## Yang Anda butuhkan
 

@@ -1,36 +1,17 @@
 /* Bridges the app's in-memory DB object (unchanged shape, see seedDB()
-   in index.html) to whichever backend is configured. Two backends are
-   supported — pick one by filling in its config file:
-     - backend-config.js  -> API_BASE_URL set  => PHP + MySQL (primary)
-     - supabase-config.js -> SUPABASE_URL set   => Supabase (optional alt.)
-   Neither configured => local mode (localStorage only), same as the
-   original app. Loaded after supabase-js + supabase-config.js +
+   in index.html) to the PHP + MySQL backend. Set API_BASE_URL in
+   backend-config.js to point at it; leave it empty to stay in local
+   mode (localStorage only), same as the original app. Loaded after
    backend-config.js, before auth.js. */
 
 function isMysqlConfigured(){
   return !!(window.API_BASE_URL && window.API_BASE_URL.length);
 }
-function isSupabaseConfigured(){
-  return !!(window.SUPABASE_URL && window.SUPABASE_URL.indexOf('YOUR-PROJECT-REF')===-1);
-}
 function isBackendConfigured(){
-  return isMysqlConfigured() || isSupabaseConfigured();
+  return isMysqlConfigured();
 }
 function activeBackend(){
-  if(isMysqlConfigured()) return 'mysql';
-  if(isSupabaseConfigured()) return 'supabase';
-  return null;
-}
-
-var supabaseClient = null;
-function getSupabase(){
-  if(!window.supabase || !window.supabase.createClient){
-    throw new Error('Library Supabase gagal dimuat (cek koneksi internet / CDN diblokir), atau supabase-config.js belum diisi.');
-  }
-  if(!supabaseClient){
-    supabaseClient = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
-  }
-  return supabaseClient;
+  return isMysqlConfigured() ? 'mysql' : null;
 }
 
 /* ---- PHP/MySQL fetch client ---- */
@@ -45,9 +26,7 @@ async function apiFetch(path, opts){
   return data;
 }
 
-/* ---- db row (snake_case) <-> app row (camelCase) mapping ----
-   Shared by both backends — the PHP API and the Supabase schema use
-   the same column names on purpose. */
+/* ---- db row (snake_case) <-> app row (camelCase) mapping ---- */
 function txnFromDb(r){
   return {id:r.id, jenis:r.jenis, tgl:r.tgl, ref:r.ref, akunKas:r.akun_kas, akunLawan:r.akun_lawan,
     project:r.project||'', relasi:r.relasi||'', customerId:r.customer_id, vendorId:r.vendor_id,
@@ -103,43 +82,17 @@ var MYSQL_ENDPOINT = {
    so the rest of the app (buildNav/registerPages/all PAGES.*) needs
    zero changes. */
 async function fetchAllData(){
-  if(activeBackend()==='mysql'){
-    var m = await Promise.all([
-      apiFetch('/customers.php'), apiFetch('/vendors.php'), apiFetch('/projects.php'),
-      apiFetch('/coa.php'), apiFetch('/transactions.php'), apiFetch('/jurnal_umum.php'),
-      apiFetch('/hutang_overrides.php'),
-    ]);
-    var hutangOverrides={};
-    m[6].forEach(function(o){ hutangOverrides[o.nota_id]={paid:Number(o.paid), status:o.status}; });
-    return {
-      customers: m[0].map(relasiFromDb), vendors: m[1].map(relasiFromDb), projects: m[2].map(projectFromDb),
-      coa: m[3].map(coaFromDb), txns: m[4].map(txnFromDb), jurnal: m[5].map(jurnalFromDb),
-      hutangOverrides: hutangOverrides,
-    };
-  }
-
-  var sb = getSupabase();
-  var [customers, vendors, projects, coa, txns, jurnal] = await Promise.all([
-    sb.from('customers').select('*').order('kode'),
-    sb.from('vendors').select('*').order('kode'),
-    sb.from('projects').select('*').order('nama'),
-    sb.from('coa').select('*').order('kode'),
-    sb.from('transactions').select('*').order('tgl', {ascending:false}),
-    sb.from('jurnal_umum').select('*').order('tgl', {ascending:false}),
+  var m = await Promise.all([
+    apiFetch('/customers.php'), apiFetch('/vendors.php'), apiFetch('/projects.php'),
+    apiFetch('/coa.php'), apiFetch('/transactions.php'), apiFetch('/jurnal_umum.php'),
+    apiFetch('/hutang_overrides.php'),
   ]);
-  [customers, vendors, projects, coa, txns, jurnal].forEach(function(r){
-    if(r.error) throw r.error;
-  });
+  var hutangOverrides={};
+  m[6].forEach(function(o){ hutangOverrides[o.nota_id]={paid:Number(o.paid), status:o.status}; });
   return {
-    customers: customers.data.map(relasiFromDb),
-    vendors: vendors.data.map(relasiFromDb),
-    projects: projects.data.map(projectFromDb),
-    coa: coa.data.map(coaFromDb),
-    txns: txns.data.map(txnFromDb),
-    jurnal: jurnal.data.map(jurnalFromDb),
-    // Trial Hutang manual overrides aren't backed by a Supabase table yet,
-    // so carry over whatever was cached locally rather than losing them.
-    hutangOverrides: (loadDB().hutangOverrides || {}),
+    customers: m[0].map(relasiFromDb), vendors: m[1].map(relasiFromDb), projects: m[2].map(projectFromDb),
+    coa: m[3].map(coaFromDb), txns: m[4].map(txnFromDb), jurnal: m[5].map(jurnalFromDb),
+    hutangOverrides: hutangOverrides,
   };
 }
 
@@ -151,15 +104,7 @@ async function syncUpsert(table, obj){
   try{
     var mapper = TABLE_MAP[table];
     var row = mapper.to(obj);
-    if(activeBackend()==='mysql'){
-      await apiFetch(MYSQL_ENDPOINT[table], {method:'POST', body:JSON.stringify(row)});
-      return;
-    }
-    var sb = getSupabase();
-    var session = (await sb.auth.getSession()).data.session;
-    if(table==='transactions' && session) row.created_by = session.user.id;
-    var res = await sb.from(table).upsert(row);
-    if(res.error) throw res.error;
+    await apiFetch(MYSQL_ENDPOINT[table], {method:'POST', body:JSON.stringify(row)});
   }catch(e){
     console.error('syncUpsert failed', table, e);
     toast('Gagal menyimpan ke server: '+(e.message||e)+'. Perubahan tersimpan lokal saja.', 'danger');
@@ -168,13 +113,7 @@ async function syncUpsert(table, obj){
 async function syncDelete(table, id){
   if(!isBackendConfigured()) return; // local mode — saveDB() already persisted it
   try{
-    if(activeBackend()==='mysql'){
-      await apiFetch(MYSQL_ENDPOINT[table]+'?id='+encodeURIComponent(id), {method:'DELETE'});
-      return;
-    }
-    var sb = getSupabase();
-    var res = await sb.from(table).delete().eq('id', id);
-    if(res.error) throw res.error;
+    await apiFetch(MYSQL_ENDPOINT[table]+'?id='+encodeURIComponent(id), {method:'DELETE'});
   }catch(e){
     console.error('syncDelete failed', table, e);
     toast('Gagal menghapus di server: '+(e.message||e)+'. Perubahan tersimpan lokal saja.', 'danger');
@@ -184,7 +123,7 @@ async function syncDelete(table, id){
 /* Trial Hutang manual overrides — separate from TABLE_MAP since it's a
    small side table keyed by nota_id, not one of the main resources. */
 async function syncHutangOverride(notaId, paid, status){
-  if(activeBackend()!=='mysql') return; // local mode / Supabase: stays localStorage-only for now
+  if(!isBackendConfigured()) return; // local mode: stays localStorage-only
   try{
     await apiFetch('/hutang_overrides.php', {method:'POST',
       body:JSON.stringify({nota_id:notaId, paid:paid, status:status})});
@@ -194,7 +133,7 @@ async function syncHutangOverride(notaId, paid, status){
   }
 }
 async function syncHutangOverrideDelete(notaId){
-  if(!isBackendConfigured() || activeBackend()!=='mysql') return;
+  if(!isBackendConfigured()) return;
   try{
     await apiFetch('/hutang_overrides.php?id='+encodeURIComponent(notaId), {method:'DELETE'});
   }catch(e){
