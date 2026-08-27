@@ -39,8 +39,10 @@ scripts/
   import_excel_supabase.py import Excel -> Supabase (jalur alternatif)
 
 docs/
-  SETUP.md              panduan setup jalur Supabase
-  DEPLOY_HOSTINGER.md   panduan deploy jalur utama (PHP + MySQL) ke Hostinger
+  PANDUAN_LOKAL_KE_HOSTINGER.md  mulai dari nol: install XAMPP, coba di
+                                  localhost, sampai pindah ke Hostinger
+  DEPLOY_HOSTINGER.md            detail lengkap tahap deploy ke Hostinger
+  SETUP.md                       panduan setup jalur Supabase (alternatif)
 ```
 
 ## Prinsip desain
