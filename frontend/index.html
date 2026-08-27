@@ -876,7 +876,13 @@ function searchableSelect(containerId, hiddenId, opts){
     });
   }
   input.value=hidden.value?labelFor(hidden.value):'';
-  input.addEventListener('focus', function(){ render(''); list.classList.add('open'); });
+  input.addEventListener('focus', function(){
+    render('');
+    list.classList.add('open');
+    // Select whatever's already there so fixing a wrong pick is one
+    // keystroke (type to overwrite) instead of deleting it all first.
+    input.select();
+  });
   input.addEventListener('input', function(){ render(input.value); list.classList.add('open'); });
   input.addEventListener('keydown', function(e){
     if(e.key==='Enter'){
@@ -898,14 +904,6 @@ function searchableSelect(containerId, hiddenId, opts){
 }
 
 var _modalOnSave=null;
-var _modalInitialSnapshot=null;
-function snapshotModalInputs(){
-  var vals=[];
-  document.querySelectorAll('#modalBody input, #modalBody select, #modalBody textarea').forEach(function(el){
-    vals.push(el.id+'='+((el.type==='checkbox'||el.type==='radio')?el.checked:el.value));
-  });
-  return vals.join('|');
-}
 function openModal(title, bodyHTML, opts){
   opts=opts||{};
   document.getElementById('modalTitle').textContent=title;
@@ -916,26 +914,13 @@ function openModal(title, bodyHTML, opts){
     (opts.saveLabel===null?'':'<button class="btn btn-primary" id="mSave">'+esc(opts.saveLabel||'Simpan')+'</button>');
   document.getElementById('modalBack').classList.add('on');
   _modalOnSave=opts.onSave||null;
-  _modalInitialSnapshot=snapshotModalInputs();
-  document.getElementById('mCancel').onclick=requestCloseModal;
+  document.getElementById('mCancel').onclick=closeModal;
   var sv=document.getElementById('mSave');
   if(sv) sv.onclick=function(){ if(_modalOnSave) _modalOnSave(); };
 }
 function closeModal(){
   document.getElementById('modalBack').classList.remove('on');
   _modalOnSave=null;
-  _modalInitialSnapshot=null;
-}
-/* Use this (instead of closeModal directly) for anything the user
-   triggers to dismiss a form WITHOUT saving — X button, Batal, click
-   outside — so an in-progress edit isn't lost by a stray click. Code
-   paths that already saved (onSave handlers) still call closeModal()
-   straight after persisting, which is correct — nothing to lose there. */
-function requestCloseModal(){
-  if(_modalInitialSnapshot!==null && snapshotModalInputs()!==_modalInitialSnapshot){
-    if(!confirm('Ada perubahan yang belum disimpan. Tutup tanpa menyimpan?')) return;
-  }
-  closeModal();
 }
 function confirmModal(title,msg,onYes){
   openModal(title,'<p style="font-size:13px;line-height:1.6;color:var(--text-mute);margin:0;">'+msg+'</p>',
@@ -959,6 +944,7 @@ function bindCurrencyInput(id){
   var el=document.getElementById(id);
   if(!el) return;
   el.value=formatThousands(el.value);
+  el.addEventListener('focus', function(){ el.select(); });
   el.addEventListener('input', function(){
     var pos=el.selectionStart, lenBefore=el.value.length;
     el.value=formatThousands(el.value);
@@ -1310,11 +1296,11 @@ document.addEventListener('DOMContentLoaded', function(){
 
   document.getElementById('hamburger').onclick=openSidebar;
   document.getElementById('sbBackdrop').onclick=closeSidebar;
-  document.getElementById('modalClose').onclick=requestCloseModal;
+  document.getElementById('modalClose').onclick=closeModal;
   document.getElementById('modalBack').onclick=function(e){
-    if(e.target===document.getElementById('modalBack')) requestCloseModal();
+    if(e.target===document.getElementById('modalBack')) closeModal();
   };
-  document.addEventListener('keydown',function(e){ if(e.key==='Escape') requestCloseModal(); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') closeModal(); });
 
   document.getElementById('navSearch').addEventListener('input',function(e){
     var q=e.target.value.toLowerCase();

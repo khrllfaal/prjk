@@ -16,3 +16,10 @@ Options -Indexes
     Header set X-Content-Type-Options "nosniff"
     Header set X-Frame-Options "DENY"
 </IfModule>
+
+# JSON compresses very well (often 80%+ smaller) — this API's biggest
+# response is the full transaction list fetched once at login, so
+# compressing it is a real, noticeable speed win, especially on mobile.
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE application/json
+</IfModule>
