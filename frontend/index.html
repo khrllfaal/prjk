@@ -51,7 +51,11 @@ h1,h2,h3,h4{font-family:var(--font-display); margin:0; letter-spacing:-0.01em;}
 
 /* ============ SEARCHABLE COMBOBOX ============ */
 .ssel{position:relative;}
-.ssel-input{width:100%; padding:8px 11px; border-radius:8px; border:1px solid var(--line); font-size:13px;}
+.ssel-input{width:100%; padding:8px 28px 8px 11px; border-radius:8px; border:1px solid var(--line); font-size:13px;}
+.ssel-clear{display:none; position:absolute; right:4px; top:50%; transform:translateY(-50%);
+  width:22px; height:22px; border:none; background:none; cursor:pointer; font-size:16px;
+  line-height:1; color:var(--text-faint); border-radius:6px;}
+.ssel-clear:hover{background:var(--paper); color:var(--text-mute);}
 .ssel-list{display:none; position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:80;
   max-height:220px; overflow-y:auto; background:var(--card); border:1px solid var(--line);
   border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.12);}
@@ -851,18 +855,32 @@ function searchableSelect(containerId, hiddenId, opts){
   if(!root||!hidden) return;
   root.className=(root.className?root.className+' ':'')+'ssel';
   root.innerHTML='<input type="text" class="ssel-input" autocomplete="off" placeholder="'+
-    esc(opts.placeholder||'Cari…')+'"><div class="ssel-list"></div>';
+    esc(opts.placeholder||'Cari…')+'"><button type="button" class="ssel-clear" tabindex="-1" title="Hapus isian">&times;</button><div class="ssel-list"></div>';
   var input=root.querySelector('.ssel-input');
   var list=root.querySelector('.ssel-list');
+  var clearBtn=root.querySelector('.ssel-clear');
 
   function labelFor(val){
     var o=options.find(function(o){ return o.value===val; });
     return o?o.label:val;
   }
+  function updateClearBtn(){ clearBtn.style.display=input.value?'block':'none'; }
   function setValue(v){
     hidden.value=v||'';
     input.value=v?labelFor(v):'';
+    updateClearBtn();
   }
+  // Explicit clear button — typing-then-blur can't always tell "user
+  // wants this field empty" from "user is mid-correction", so blur
+  // snaps back to the last valid pick (see below) rather than losing
+  // data on a stray click. This button is the unambiguous way to clear.
+  clearBtn.addEventListener('mousedown', function(e){ e.preventDefault(); });
+  clearBtn.addEventListener('click', function(){
+    setValue('');
+    input.focus();
+    render('');
+    list.classList.add('open');
+  });
   function render(filter){
     var f=(filter||'').toLowerCase();
     var filtered=f?options.filter(function(o){ return o.label.toLowerCase().indexOf(f)>-1; }):options;
@@ -876,6 +894,7 @@ function searchableSelect(containerId, hiddenId, opts){
     });
   }
   input.value=hidden.value?labelFor(hidden.value):'';
+  updateClearBtn();
   input.addEventListener('focus', function(){
     render('');
     list.classList.add('open');
@@ -883,7 +902,7 @@ function searchableSelect(containerId, hiddenId, opts){
     // keystroke (type to overwrite) instead of deleting it all first.
     input.select();
   });
-  input.addEventListener('input', function(){ render(input.value); list.classList.add('open'); });
+  input.addEventListener('input', function(){ render(input.value); list.classList.add('open'); updateClearBtn(); });
   input.addEventListener('keydown', function(e){
     if(e.key==='Enter'){
       e.preventDefault();
