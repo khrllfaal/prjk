@@ -2758,10 +2758,11 @@ function registerPages(){
 
     function akunNamaOnly(s){ return String(s||'').replace(/^[\d.]+-/,'').trim()||'(Tanpa Akun)'; }
 
-    function groupByAkun(list, isIn){
+    function groupByAkun(list, jenis){
+      var isIn=/masuk$/.test(jenis);
       var map={}, order=[];
       list.forEach(function(t){
-        if(/masuk$/.test(t.jenis)!==isIn) return;
+        if(t.jenis!==jenis) return;
         var label=akunNamaOnly(t.akunLawan);
         if(!map[label]){ map[label]={label:label, akunLawan:t.akunLawan, amount:0}; order.push(label); }
         map[label].amount += isIn?t.debet:t.kredit;
@@ -2783,7 +2784,7 @@ function registerPages(){
         '</div></div>';
     }
 
-    var lastMasuk=[], lastKeluar=[], lastFrom='', lastTo='', lastProj='';
+    var lastByJenis={}, lastFrom='', lastTo='', lastProj='';
     function refresh(){
       var from=fv('fFrom'), to=fv('fTo'), proj=fv('fProject');
       lastFrom=from; lastTo=to; lastProj=proj;
@@ -2792,25 +2793,34 @@ function registerPages(){
         if(proj && t.project!==proj) return false;
         return true;
       });
-      lastMasuk=groupByAkun(list,true);
-      lastKeluar=groupByAkun(list,false);
-      var totalMasuk=lastMasuk.reduce(function(a,b){ return a+b.amount; },0);
-      var totalKeluar=lastKeluar.reduce(function(a,b){ return a+b.amount; },0);
-      var net=totalMasuk-totalKeluar;
+      lastByJenis={
+        kas_masuk: groupByAkun(list,'kas_masuk'), kas_keluar: groupByAkun(list,'kas_keluar'),
+        bank_masuk: groupByAkun(list,'bank_masuk'), bank_keluar: groupByAkun(list,'bank_keluar'),
+      };
+      function sum(rows){ return rows.reduce(function(a,b){ return a+b.amount; },0); }
+      var kasNet=sum(lastByJenis.kas_masuk)-sum(lastByJenis.kas_keluar);
+      var bankNet=sum(lastByJenis.bank_masuk)-sum(lastByJenis.bank_keluar);
 
       document.getElementById('cfBody').innerHTML=
-        sectionHTML('KAS MASUK','cf-in',lastMasuk,'Total Kas Masuk','in')+
-        sectionHTML('KAS KELUAR','cf-out',lastKeluar,'Total Kas Keluar','out')+
+        sectionHTML('KAS MASUK','cf-in',lastByJenis.kas_masuk,'Total Kas Masuk','kas_masuk')+
+        sectionHTML('KAS KELUAR','cf-out',lastByJenis.kas_keluar,'Total Kas Keluar','kas_keluar')+
         '<div class="cf-net"><b>Selisih Kas Masuk – Kas Keluar</b>'+
-          '<b class="'+(net<0?'neg':'pos')+'">'+numSigned(net)+'</b></div>';
+          '<b class="'+(kasNet<0?'neg':'pos')+'">'+numSigned(kasNet)+'</b></div>'+
+        sectionHTML('BANK MASUK','cf-in',lastByJenis.bank_masuk,'Total Bank Masuk','bank_masuk')+
+        sectionHTML('BANK KELUAR','cf-out',lastByJenis.bank_keluar,'Total Bank Keluar','bank_keluar')+
+        '<div class="cf-net"><b>Selisih Bank Masuk – Bank Keluar</b>'+
+          '<b class="'+(bankNet<0?'neg':'pos')+'">'+numSigned(bankNet)+'</b></div>'+
+        '<div class="cf-net"><b>Selisih Total (Kas + Bank)</b>'+
+          '<b class="'+((kasNet+bankNet)<0?'neg':'pos')+'">'+numSigned(kasNet+bankNet)+'</b></div>';
 
       document.querySelectorAll('#cfBody [data-cf-akun]').forEach(function(b){
         b.onclick=function(){
-          var akun=b.getAttribute('data-cf-akun'), kind=b.getAttribute('data-cf-kind');
-          var sub=list.filter(function(t){ return t.akunLawan===akun && (/masuk$/.test(t.jenis)===(kind==='in')); })
-            .map(function(t){ return {tgl:t.tgl, ref:t.ref, ket:t.ket+(t.project?' — '+t.project:''), amount:kind==='in'?t.debet:t.kredit}; })
+          var akun=b.getAttribute('data-cf-akun'), jenis=b.getAttribute('data-cf-kind');
+          var isIn=/masuk$/.test(jenis);
+          var sub=list.filter(function(t){ return t.akunLawan===akun && t.jenis===jenis; })
+            .map(function(t){ return {tgl:t.tgl, ref:t.ref, ket:t.ket+(t.project?' — '+t.project:''), amount:isIn?t.debet:t.kredit}; })
             .sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
-          showTxnDrilldown(akunNamaOnly(akun), 'Rincian transaksi kas/bank'+(proj?' — Project: '+proj:''), sub);
+          showTxnDrilldown(akunNamaOnly(akun), 'Rincian transaksi'+(proj?' — Project: '+proj:''), sub);
         };
       });
     }
@@ -2822,12 +2832,14 @@ function registerPages(){
     };
     document.getElementById('cfExcel').onclick=function(){
       var rows=[];
-      rows.push(['KAS MASUK','']);
-      lastMasuk.forEach(function(r){ rows.push([r.label, r.amount]); });
-      rows.push(['Total Kas Masuk', lastMasuk.reduce(function(a,b){ return a+b.amount; },0)]);
-      rows.push(['KAS KELUAR','']);
-      lastKeluar.forEach(function(r){ rows.push([r.label, r.amount]); });
-      rows.push(['Total Kas Keluar', lastKeluar.reduce(function(a,b){ return a+b.amount; },0)]);
+      [['KAS MASUK','kas_masuk','Total Kas Masuk'],['KAS KELUAR','kas_keluar','Total Kas Keluar'],
+       ['BANK MASUK','bank_masuk','Total Bank Masuk'],['BANK KELUAR','bank_keluar','Total Bank Keluar']]
+      .forEach(function(sec){
+        var list=lastByJenis[sec[1]]||[];
+        rows.push([sec[0],'']);
+        list.forEach(function(r){ rows.push([r.label, r.amount]); });
+        rows.push([sec[2], list.reduce(function(a,b){ return a+b.amount; },0)]);
+      });
       exportCSV('Cash_Flow', ['Keterangan','Jumlah'], rows);
     };
     document.getElementById('cfPdf').onclick=printPage;
