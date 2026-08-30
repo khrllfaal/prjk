@@ -674,6 +674,105 @@ function computeProjectProgressRows(){
   });
 }
 
+/* Weekly + all-time cash position for the Dashboard's "Posisi Kas — Per
+   Periode" widget, computed live from DB.txns. Weeks run Monday-Sunday,
+   anchored to today's real date. Replaces the old SEED.periods, which
+   was one hand-written example week and never reflected real imported
+   data regardless of backend. */
+function computeCashPeriods(){
+  function addDays(iso, n){
+    var d=new Date(iso+'T00:00:00');
+    d.setDate(d.getDate()+n);
+    return d.toISOString().slice(0,10);
+  }
+  function mondayOf(iso){
+    var d=new Date(iso+'T00:00:00');
+    var dow=(d.getDay()+6)%7; // 0=Mon..6=Sun
+    return addDays(iso,-dow);
+  }
+  function isMasuk(t){ return /masuk$/.test(t.jenis); }
+  function sumRange(from,to){
+    var masuk=0, keluar=0;
+    DB.txns.forEach(function(t){
+      if(t.tgl<from||t.tgl>to) return;
+      if(isMasuk(t)) masuk+=t.debet; else keluar+=t.kredit;
+    });
+    return {masuk:masuk, keluar:keluar};
+  }
+  function saldoAwal(before){
+    var s=0;
+    DB.txns.forEach(function(t){
+      if(t.tgl>=before) return;
+      s += isMasuk(t)?t.debet:-t.kredit;
+    });
+    return s;
+  }
+  function komposisi(from,to){
+    var map={}, order=[];
+    DB.txns.forEach(function(t){
+      if(t.tgl<from||t.tgl>to||!isMasuk(t)) return;
+      var label=akunNamaOnly(t.akunLawan);
+      if(!map[label]){ map[label]={sumber:label, jumlah:0}; order.push(label); }
+      map[label].jumlah+=t.debet;
+    });
+    return order.map(function(k){ return map[k]; }).sort(function(a,b){ return b.jumlah-a.jumlah; }).slice(0,8);
+  }
+  function projectBreakdown(from,to){
+    var map={}, order=[];
+    DB.txns.forEach(function(t){
+      if(t.tgl<from||t.tgl>to) return;
+      var key=t.project||'(Tanpa Project)';
+      if(!map[key]){ map[key]={nama:key, masuk:0, keluar:0}; order.push(key); }
+      if(isMasuk(t)) map[key].masuk+=t.debet; else map[key].keluar+=t.kredit;
+    });
+    return order.map(function(k){ return map[k]; });
+  }
+  function kumulatifUpTo(endIso){
+    var yr=endIso.slice(0,4), from=yr+'-01-01';
+    var r=sumRange(from,endIso);
+    return {label:'Kumulatif '+yr+' s/d '+fmtDate(endIso), masuk:r.masuk, keluar:r.keluar,
+      saldo:r.masuk-r.keluar, komposisi:komposisi(from,endIso)};
+  }
+  function weekPeriod(id, weekStart, tag){
+    var weekEnd=addDays(weekStart,6);
+    var r=sumRange(weekStart,weekEnd);
+    var awal=saldoAwal(weekStart);
+    return {
+      id:id, tag:tag, short:tag,
+      label:fmtDate(weekStart)+' s/d '+fmtDate(weekEnd),
+      saldo_awal:awal, uang_masuk:r.masuk, uang_keluar:r.keluar, saldo_akhir:awal+r.masuk-r.keluar,
+      komposisi_masuk:komposisi(weekStart,weekEnd),
+      kumulatif:kumulatifUpTo(weekEnd),
+      projects:projectBreakdown(weekStart,weekEnd),
+    };
+  }
+
+  var today=todayISO();
+  var thisMonday=mondayOf(today);
+  var allDates=DB.txns.map(function(t){ return t.tgl; }).filter(Boolean).sort();
+  var allFrom=allDates.length?allDates[0]:today;
+  var allTo=allDates.length?allDates[allDates.length-1]:today;
+  var allR=sumRange(allFrom,allTo);
+
+  var periods=[
+    weekPeriod('w2', addDays(thisMonday,-14), '2 Minggu Lalu'),
+    weekPeriod('w1', addDays(thisMonday,-7), '1 Minggu Lalu'),
+    weekPeriod('w0', thisMonday, 'Minggu Ini'),
+    {
+      id:'all', tag:'Keseluruhan', short:'Semua',
+      label:fmtDate(allFrom)+' s/d '+fmtDate(allTo),
+      saldo_awal:0, uang_masuk:allR.masuk, uang_keluar:allR.keluar, saldo_akhir:allR.masuk-allR.keluar,
+      komposisi_masuk:komposisi(allFrom,allTo),
+      kumulatif:kumulatifUpTo(allTo),
+      projects:projectBreakdown(allFrom,allTo),
+    },
+  ];
+  // Default to the most recent week that actually has activity, else "all"
+  // — freshly imported historical data usually has nothing in "this week".
+  var withActivity=periods.slice(0,3).reverse().find(function(p){ return p.uang_masuk||p.uang_keluar; });
+  return {list:periods, defaultId: withActivity?withActivity.id:'all'};
+}
+
 /* Underlying kas/bank + jurnal umum postings behind a project's RAP cost
    figure — feeds the generic drill-down modal (task: klik angka untuk
    lihat riwayat transaksi). kind is 'bahan' | 'upah' | 'akomodasi' | 'all'. */
@@ -1208,6 +1307,7 @@ function akunHead(namaAkun){
 function akunLabel(namaAkun){
   return String(namaAkun||'').trim()||'(Tanpa Akun)';
 }
+function akunNamaOnly(s){ return String(s||'').replace(/^[\d.]+-/,'').trim()||'(Tanpa Akun)'; }
 
 /* ============================================================
    ROUTER
@@ -1714,15 +1814,15 @@ function registerPages(){
         '<div class="table-scroll"><div id="tblProg"></div></div></div>';
 
     /* --- period logic --- */
-    var curId=SEED.periods[SEED.periods.length-1].id;
-    function period(){ return SEED.periods.find(function(p){ return p.id===curId; }); }
+    var cashPeriods=computeCashPeriods();
+    var curId=cashPeriods.defaultId;
+    function period(){ return cashPeriods.list.find(function(p){ return p.id===curId; }); }
 
     function drawPeriodSel(){
       var el=document.getElementById('periodSel');
-      el.innerHTML=SEED.periods.map(function(p,i){
-        var tag=i===SEED.periods.length-1?'Minggu terbaru':(i===SEED.periods.length-2?'Minggu sebelumnya':'Minggu lalu');
+      el.innerHTML=cashPeriods.list.map(function(p){
         return '<button class="seg-btn'+(p.id===curId?' on':'')+'" data-pid="'+p.id+'">'+esc(p.short)+
-          '<span class="seg-sub">'+tag+'</span></button>';
+          '<span class="seg-sub">'+esc(p.tag)+'</span></button>';
       }).join('');
       el.querySelectorAll('.seg-btn').forEach(function(b){
         b.onclick=function(){
@@ -1754,7 +1854,7 @@ function registerPages(){
           valueFn:function(d){return d.jumlah;},colorFn:function(){return 'var(--safe)';},formatFn:rpShort});
       } else {
         kD.textContent='';
-        kEl.innerHTML='<div class="na-box">Rincian sumber uang masuk tidak tersedia pada rekap minggu ini — sheet sumber untuk periode ini hanya mencatat total.</div>';
+        kEl.innerHTML='<div class="na-box">Tidak ada transaksi pemasukan pada periode ini.</div>';
       }
 
       var totKeluar=p.projects.reduce(function(a,b){ return a+b.keluar; },0);
@@ -2755,8 +2855,6 @@ function registerPages(){
         '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
       '</div>'+
       '<div id="cfBody"></div>';
-
-    function akunNamaOnly(s){ return String(s||'').replace(/^[\d.]+-/,'').trim()||'(Tanpa Akun)'; }
 
     function groupByAkun(list, jenis){
       var isIn=/masuk$/.test(jenis);
