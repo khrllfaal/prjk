@@ -675,8 +675,9 @@ function computeProjectProgressRows(){
 }
 
 /* Weekly + all-time cash position for the Dashboard's "Posisi Kas — Per
-   Periode" widget, computed live from DB.txns. Weeks run Monday-Sunday,
-   anchored to today's real date. Replaces the old SEED.periods, which
+   Periode" widget, computed live from DB.txns. Weeks run Friday-Thursday
+   (how this company counts a week), anchored to today's real date.
+   Replaces the old SEED.periods, which
    was one hand-written example week and never reflected real imported
    data regardless of backend. */
 function computeCashPeriods(){
@@ -685,9 +686,10 @@ function computeCashPeriods(){
     d.setDate(d.getDate()+n);
     return d.toISOString().slice(0,10);
   }
-  function mondayOf(iso){
+  function fridayOf(iso){
+    // Week runs Friday -> Thursday (per how this company counts a week).
     var d=new Date(iso+'T00:00:00');
-    var dow=(d.getDay()+6)%7; // 0=Mon..6=Sun
+    var dow=(d.getDay()+2)%7; // 0=Fri..6=Thu
     return addDays(iso,-dow);
   }
   function isMasuk(t){ return /masuk$/.test(t.jenis); }
@@ -748,16 +750,16 @@ function computeCashPeriods(){
   }
 
   var today=todayISO();
-  var thisMonday=mondayOf(today);
+  var thisFriday=fridayOf(today);
   var allDates=DB.txns.map(function(t){ return t.tgl; }).filter(Boolean).sort();
   var allFrom=allDates.length?allDates[0]:today;
   var allTo=allDates.length?allDates[allDates.length-1]:today;
   var allR=sumRange(allFrom,allTo);
 
   var periods=[
-    weekPeriod('w2', addDays(thisMonday,-14), '2 Minggu Lalu'),
-    weekPeriod('w1', addDays(thisMonday,-7), '1 Minggu Lalu'),
-    weekPeriod('w0', thisMonday, 'Minggu Ini'),
+    weekPeriod('w2', addDays(thisFriday,-14), '2 Minggu Lalu'),
+    weekPeriod('w1', addDays(thisFriday,-7), '1 Minggu Lalu'),
+    weekPeriod('w0', thisFriday, 'Minggu Ini'),
     {
       id:'all', tag:'Keseluruhan', short:'Semua',
       label:fmtDate(allFrom)+' s/d '+fmtDate(allTo),
