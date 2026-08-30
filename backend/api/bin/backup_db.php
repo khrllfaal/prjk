@@ -77,7 +77,20 @@ if (!is_dir($backupDir) && !mkdir($backupDir, 0750, true) && !is_dir($backupDir)
 }
 
 $pdo = db();
-$tables = $pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
+// SET FOREIGN_KEY_CHECKS=0 (below) only suppresses FK checks on DML
+// (INSERT/UPDATE/DELETE) — MySQL still refuses to CREATE TABLE with a
+// foreign key pointing at a table that doesn't exist yet, regardless
+// of that flag. SHOW TABLES returns alphabetical order, which puts
+// hutang_overrides (FK -> jurnal_umum, users) before either of them,
+// so a restore into a fresh/empty database would fail with errno 150
+// on CREATE TABLE. Dump in the same dependency order schema.sql
+// creates them in instead, then append anything not in that list
+// (future tables) so a schema change can't silently go undumped.
+$knownOrder = ['users', 'customers', 'vendors', 'projects', 'coa',
+    'transactions', 'jurnal_umum', 'hutang_overrides', 'audit_log'];
+$existing = $pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
+$tables = array_values(array_intersect($knownOrder, $existing));
+$tables = array_merge($tables, array_diff($existing, $tables));
 
 $filename = 'backup-' . date('Ymd-His') . '.sql.gz';
 $path = "$backupDir/$filename";
