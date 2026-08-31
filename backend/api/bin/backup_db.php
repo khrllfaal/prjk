@@ -8,12 +8,22 @@ declare(strict_types=1);
  *
  * Usage (CLI only — refuses to run over HTTP):
  *   php backup_db.php
+ *   php backup_db.php --exclude=users
  *
  * On Hostinger, schedule this from hPanel -> Advanced -> Cron Job as a
  * daily command, e.g.:
  *   php /home/USERNAME/domains/yourdomain.com/backend/api/bin/backup_db.php
  * See docs/DEPLOY_HOSTINGER.md for the full walkthrough, including why
  * `backup_dir` in config.php must point outside public_html.
+ *
+ * --exclude=table1,table2 skips those tables entirely (no DROP/CREATE/
+ * INSERT for them) — use this for a dump that's meant to hand off a
+ * data update (e.g. a corrected report import) without also
+ * overwriting the target database's real `users` table and its
+ * accounts/passwords. Excluding `users` is safe even though
+ * hutang_overrides has a foreign key to it: that FK is only checked
+ * against whatever `users` table already exists on the restore
+ * target, which this flag deliberately leaves untouched.
  */
 if (PHP_SAPI !== 'cli') {
     http_response_code(403);
@@ -91,6 +101,16 @@ $knownOrder = ['users', 'customers', 'vendors', 'projects', 'coa',
 $existing = $pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
 $tables = array_values(array_intersect($knownOrder, $existing));
 $tables = array_merge($tables, array_diff($existing, $tables));
+
+$exclude = [];
+foreach ($argv as $arg) {
+    if (preg_match('/^--exclude=(.+)$/', $arg, $m)) {
+        $exclude = array_map('trim', explode(',', $m[1]));
+    }
+}
+if ($exclude) {
+    $tables = array_values(array_diff($tables, $exclude));
+}
 
 $filename = 'backup-' . date('Ymd-His') . '.sql.gz';
 $path = "$backupDir/$filename";
