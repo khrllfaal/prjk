@@ -101,7 +101,15 @@ if ($gz === false) {
 }
 
 gzwrite($gz, "-- ACCv2 MySQL backup — " . date('c') . "\n");
-gzwrite($gz, "SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS=0;\n");
+// sql_literal() below escapes a quote/backslash the standard MySQL way
+// (backslash-escaped) — that only works while NO_BACKSLASH_ESCAPES is
+// off. A restore target's own default sql_mode can differ from this
+// dump's source server (common between a Linux dev box and a Windows
+// XAMPP/MariaDB install), which would silently corrupt any INSERT
+// containing a quote or backslash and abort the import. Pin sql_mode
+// for the duration of this restore so escaping behaves the same
+// regardless of the target's global default.
+gzwrite($gz, "SET NAMES utf8mb4;\nSET SESSION sql_mode='';\nSET FOREIGN_KEY_CHECKS=0;\n");
 
 $totalRows = 0;
 foreach ($tables as $table) {
