@@ -6,7 +6,15 @@
 <title>Prakasa Group — Sistem Akuntansi</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<!-- Non-blocking: on a slow/blocked connection to Google Fonts (a
+     restrictive office firewall, a flaky field connection) the app must
+     still load instantly with its system-font fallback (see
+     --font-display/--font-mono below) rather than stall waiting for
+     this stylesheet. media="print" defers browser CSS application
+     until onload swaps it to "all"; noscript covers JS-disabled. -->
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700&display=swap"
+  rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600;700&display=swap" rel="stylesheet"></noscript>
 <style>
 /* ============ TOKENS ============ */
 :root{
