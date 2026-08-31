@@ -1856,8 +1856,8 @@ function registerPages(){
         '<div class="search-box"><span class="ic">⌕</span><input type="text" id="qProg" placeholder="Cari proyek…"></div>'+
         '<div class="field" style="min-width:200px;"><label style="font-size:11px;">Pemberi Proyek</label>'+
         '<select id="fPemberi"><option value="">Semua Pemberi Proyek</option></select></div>'+
-        '<div class="field" style="min-width:160px;"><label style="font-size:11px;">Periode Biaya</label>'+
-        '<select id="fProgPeriode"><option value="all">Semua</option><option value="w0">Minggu Ini</option></select></div>'+
+        '<div class="field"><label style="font-size:11px;">Dari Tanggal</label><input type="date" id="fProgFrom"></div>'+
+        '<div class="field"><label style="font-size:11px;">Sampai Tanggal</label><input type="date" id="fProgTo"></div>'+
         exportBtns('prog')+
         '<span class="result-count" id="cntProg"></span></div>'+
         '<div class="panel-desc" id="progPeriodDesc" style="padding:0 16px 8px;"></div>'+
@@ -2002,19 +2002,21 @@ function registerPages(){
     }
     var KIND_LABEL={bahan:'Biaya Bahan',upah:'Biaya Upah',costCenter:'Cost Center',admFee:'Adm Fee',all:'Total Pengeluaran RAP'};
 
-    var progPeriodSel=document.getElementById('fProgPeriode');
+    // Rincian Progress per Proyek is inherently cumulative (sejak awal
+    // proyek sampai tanggal tertentu), so it uses a plain Dari/Sampai
+    // Tanggal filter like every other report page — no dependency on
+    // Posisi Kas's week logic needed here.
     var progRows, progFrom, progTo;
     var progTbl;
     function drawProgTbl(){
-      var periodId=fv('fProgPeriode')||'all';
-      var w0=cashPeriods.list.find(function(p){ return p.id==='w0'; });
-      progFrom = (periodId==='w0' && w0) ? w0.from : null;
-      progTo = (periodId==='w0' && w0) ? w0.to : null;
+      progFrom = fv('fProgFrom')||null;
+      progTo = fv('fProgTo')||null;
       progRows = computeProjectProgressRows(progFrom, progTo);
-      document.getElementById('progPeriodDesc').textContent = progFrom
-        ? 'Biaya Bahan/Upah/Cost Center/Adm Fee di bawah ini untuk periode '+fmtDate(progFrom)+' s/d '+fmtDate(progTo)+
-          ' saja. Nilai Kontrak dan Nilai RAP selalu total sejak awal proyek.'
-        : 'Menampilkan total biaya sejak awal setiap proyek.';
+      document.getElementById('progPeriodDesc').textContent = (progFrom||progTo)
+        ? 'Biaya Bahan/Upah/Cost Center/Adm Fee di bawah ini untuk periode '+
+          (progFrom?fmtDate(progFrom):'awal')+' s/d '+(progTo?fmtDate(progTo):'sekarang')+
+          '. Nilai Kontrak dan Nilai RAP selalu total sejak awal proyek.'
+        : 'Menampilkan total biaya sejak awal setiap proyek sampai sekarang.';
 
       var pemberi=fv('fPemberi');
       var data=pemberi?progRows.filter(function(r){ return r.pemberiProyek===pemberi; }):progRows;
@@ -2066,7 +2068,8 @@ function registerPages(){
     }
     drawProgTbl();
     pemberiSel.addEventListener('change', drawProgTbl);
-    progPeriodSel.addEventListener('change', drawProgTbl);
+    document.getElementById('fProgFrom').addEventListener('change', drawProgTbl);
+    document.getElementById('fProgTo').addEventListener('change', drawProgTbl);
   };
 
   /* ---------------- MASTER DATA ---------------- */
