@@ -509,7 +509,10 @@ function fmtDate(iso){
   if(p.length!==3) return iso;
   return p[2]+'-'+p[1]+'-'+p[0];
 }
-function todayISO(){ return new Date().toISOString().slice(0,10); }
+function todayISO(){
+  var d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
 
 /* ---------------- status ---------------- */
 function statusInfo(raw){
@@ -631,7 +634,7 @@ function guessLedgerName(displayName, knownLedgerNames){
    (accrual postings there keep the "kode-nama" format, e.g.
    "5.1.1-Biaya Bahan") — the real kas/bank ledger below uses the exact
    account-name matching in matchesPlainCost() instead. */
-var RAP_COST_CODES={bahan:['5.1.1'], upah:['5.1.2','5.1.9']};
+var RAP_COST_CODES={bahan:['5.1.1'], upah:['5.1.2','5.1.9'], akomodasi:['5.1.26','6.2.36']};
 function akunKodeOf(akunStr){ return (akunStr||'').split('-')[0]; }
 function matchesRapCost(akunStr, kind){ return RAP_COST_CODES[kind].indexOf(akunKodeOf(akunStr))>-1; }
 
@@ -639,13 +642,14 @@ function matchesRapCost(akunStr, kind){ return RAP_COST_CODES[kind].indexOf(akun
    prefix (manual entry via the app's own form always writes
    "kode-nama") or as plain text (the bulk report imports) — strip any
    code prefix first via akunNamaOnly() so both forms match the same
-   way. Bahan/Upah/Adm Fee are matched by exact name; everything else
-   charged to a project falls into Cost Center (a residual "other"
-   bucket) — per owner's explicit categorization. */
+   way. Bahan/Upah/Akomodasi/Adm Fee are matched by exact name;
+   everything else charged to a project falls into Cost Center (a
+   residual "other" bucket) — per owner's explicit categorization. */
 function matchesPlainCost(akunLawan, kind){
   var s=akunNamaOnly(akunLawan);
   if(kind==='bahan') return s==='Biaya Bahan';
   if(kind==='upah') return s==='Biaya Upah'||s==='Biaya Upah2'||s==='Biaya Upah3';
+  if(kind==='akomodasi') return s==='Biaya Akomodasi';
   if(kind==='admFee') return s==='Biaya ADM Fee';
   return false;
 }
@@ -659,13 +663,14 @@ function matchesPlainCost(akunLawan, kind){
 function computeProjectProgressRows(from, to){
   return DB.projects.map(function(p, i){
     var ledger=p.ledgerName||p.nama;
-    var bahan=0, upah=0, admFee=0, costCenter=0;
+    var bahan=0, upah=0, akomodasi=0, admFee=0, costCenter=0;
     DB.txns.forEach(function(t){
       if(t.project!==ledger || !/keluar$/.test(t.jenis)) return;
       if(from && t.tgl<from) return;
       if(to && t.tgl>to) return;
       if(matchesPlainCost(t.akunLawan,'bahan')) bahan+=t.kredit;
       else if(matchesPlainCost(t.akunLawan,'upah')) upah+=t.kredit;
+      else if(matchesPlainCost(t.akunLawan,'akomodasi')) akomodasi+=t.kredit;
       else if(matchesPlainCost(t.akunLawan,'admFee')) admFee+=t.kredit;
       else costCenter+=t.kredit;
     });
@@ -675,9 +680,10 @@ function computeProjectProgressRows(from, to){
       if(to && j.tgl>to) return;
       if(matchesRapCost(j.akun,'bahan')) bahan+=j.debet;
       else if(matchesRapCost(j.akun,'upah')) upah+=j.debet;
+      else if(matchesRapCost(j.akun,'akomodasi')) akomodasi+=j.debet;
       else costCenter+=j.debet;
     });
-    var totalRap=bahan+upah;
+    var totalRap=bahan+upah+akomodasi;
     var sisaRap=(p.rap||0)-totalRap;
     var ratio=p.rap?totalRap/p.rap:null;
     var statusRap=ratio===null?'':(ratio>1?'MELEBIHI':(ratio>0.9?'HAMPIR':'AMAN'));
@@ -689,6 +695,7 @@ function computeProjectProgressRows(from, to){
       kontrak:p.kontrak||0, rap:p.rap||0,
       bahan:bahan, bahanPct:totalRap?bahan/totalRap:0,
       upah:upah, upahPct:totalRap?upah/totalRap:0,
+      akomodasi:akomodasi, akomodasiPct:totalRap?akomodasi/totalRap:0,
       totalRap:totalRap, totalRapPct:p.rap?totalRap/p.rap:0,
       sisaRap:sisaRap, sisaRapPct:p.rap?sisaRap/p.rap:0,
       statusRap:statusRap,
@@ -710,7 +717,7 @@ function computeCashPeriods(){
   function addDays(iso, n){
     var d=new Date(iso+'T00:00:00');
     d.setDate(d.getDate()+n);
-    return d.toISOString().slice(0,10);
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   }
   function fridayOf(iso){
     // Week runs Friday -> Thursday (per how this company counts a week).
@@ -793,7 +800,7 @@ function computeCashPeriods(){
     {
       id:'all', tag:'Keseluruhan', short:'Semua', from:allFrom, to:allTo,
       label:fmtDate(allFrom)+' s/d '+fmtDate(allTo),
-      saldo_awal:0, uang_masuk:allR.masuk, uang_keluar:allR.keluar, saldo_akhir:allR.masuk-allR.keluar,
+      saldo_awal:saldoAwal(allFrom), uang_masuk:allR.masuk, uang_keluar:allR.keluar, saldo_akhir:saldoAwal(allFrom)+allR.masuk-allR.keluar,
       komposisi_masuk:komposisi(allFrom,allTo),
       kumulatif:kumulatifUpTo(allTo),
       projects:projectBreakdown(allFrom,allTo),
@@ -808,8 +815,8 @@ function computeCashPeriods(){
 
 /* Underlying kas/bank + jurnal umum postings behind a project's cost
    figure — feeds the generic drill-down modal (klik angka untuk lihat
-   riwayat transaksi). kind is 'bahan' | 'upah' | 'costCenter' |
-   'admFee' | 'all'. Optional [from,to] matches whatever window the
+   riwayat transaksi). kind is 'bahan' | 'upah' | 'akomodasi' |
+   'costCenter' | 'admFee' | 'all'. Optional [from,to] matches whatever window the
    Rincian Progress table is currently filtered to. */
 function projectCostTxns(projectNama, kind, from, to){
   var list=[];
@@ -819,6 +826,7 @@ function projectCostTxns(projectNama, kind, from, to){
     if(to && t.tgl>to) return;
     var cat = matchesPlainCost(t.akunLawan,'bahan') ? 'bahan'
       : matchesPlainCost(t.akunLawan,'upah') ? 'upah'
+      : matchesPlainCost(t.akunLawan,'akomodasi') ? 'akomodasi'
       : matchesPlainCost(t.akunLawan,'admFee') ? 'admFee' : 'costCenter';
     if(kind!=='all' && cat!==kind) return;
     list.push({tgl:t.tgl, ref:t.ref, ket:t.ket+' — '+t.akunLawan, amount:t.kredit});
@@ -827,7 +835,8 @@ function projectCostTxns(projectNama, kind, from, to){
     if(j.project!==projectNama) return;
     if(from && j.tgl<from) return;
     if(to && j.tgl>to) return;
-    var cat = matchesRapCost(j.akun,'bahan') ? 'bahan' : matchesRapCost(j.akun,'upah') ? 'upah' : 'costCenter';
+    var cat = matchesRapCost(j.akun,'bahan') ? 'bahan' : matchesRapCost(j.akun,'upah') ? 'upah'
+      : matchesRapCost(j.akun,'akomodasi') ? 'akomodasi' : 'costCenter';
     if(kind!=='all' && cat!==kind) return;
     list.push({tgl:j.tgl, ref:j.ref, ket:j.ket+' — '+j.akun, amount:j.debet});
   });
@@ -2000,7 +2009,7 @@ function registerPages(){
       return '<button type="button" class="linklike" data-drill-ledger="'+esc(r.ledgerName)+'" '+
         'data-drill-label="'+esc(r.nama)+'" data-drill-kind="'+kind+'">'+num0(amount)+'</button>';
     }
-    var KIND_LABEL={bahan:'Biaya Bahan',upah:'Biaya Upah',costCenter:'Cost Center',admFee:'Adm Fee',all:'Total Pengeluaran RAP'};
+    var KIND_LABEL={bahan:'Biaya Bahan',upah:'Biaya Upah',akomodasi:'Biaya Akomodasi',costCenter:'Cost Center',admFee:'Adm Fee',all:'Total Pengeluaran RAP'};
 
     // Rincian Progress per Proyek is inherently cumulative (sejak awal
     // proyek sampai tanggal tertentu), so it uses a plain Dari/Sampai
@@ -2013,7 +2022,7 @@ function registerPages(){
       progTo = fv('fProgTo')||null;
       progRows = computeProjectProgressRows(progFrom, progTo);
       document.getElementById('progPeriodDesc').textContent = (progFrom||progTo)
-        ? 'Biaya Bahan/Upah/Cost Center/Adm Fee di bawah ini untuk periode '+
+        ? 'Biaya Bahan/Upah/Akomodasi/Cost Center/Adm Fee di bawah ini untuk periode '+
           (progFrom?fmtDate(progFrom):'awal')+' s/d '+(progTo?fmtDate(progTo):'sekarang')+
           '. Nilai Kontrak dan Nilai RAP selalu total sejak awal proyek.'
         : 'Menampilkan total biaya sejak awal setiap proyek sampai sekarang.';
@@ -2032,6 +2041,8 @@ function registerPages(){
         {key:'bahanPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.bahanPct):'–'; }},
         {key:'upah',label:'Biaya Upah',num:true,render:function(r){ return drillCell(r.upah,r,'upah'); }},
         {key:'upahPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.upahPct):'–'; }},
+        {key:'akomodasi',label:'Biaya Akomodasi',num:true,render:function(r){ return drillCell(r.akomodasi,r,'akomodasi'); }},
+        {key:'akomodasiPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.akomodasiPct):'–'; }},
         {key:'totalRap',label:'Total Pengeluaran RAP',num:true,render:function(r){ return drillCell(r.totalRap,r,'all'); }},
         {key:'totalRapPct',label:'%',num:true,render:function(r){ return r.rap?pct(r.totalRapPct):'–'; }},
         {key:'sisaRap',label:'Sisa RAP',num:true,render:function(r){ return num0(r.sisaRap); }},
@@ -2059,10 +2070,10 @@ function registerPages(){
         }});
       bindSearch('qProg', progTbl);
       bindExport('prog', 'Rincian_Progress_Proyek',
-        ['Nama Proyek','Pemberi Proyek','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Total Pengeluaran RAP',
+        ['Nama Proyek','Pemberi Proyek','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Biaya Akomodasi','Total Pengeluaran RAP',
          'Sisa RAP','Status RAP','Cost Center','Adm Fee','Total Pengeluaran','Hasil Usaha'],
         function(){ return progTbl.getFiltered().map(function(r){
-          return [r.nama,r.pemberiProyek,r.kontrak,r.rap,r.bahan,r.upah,r.totalRap,r.sisaRap,r.statusRap,
+          return [r.nama,r.pemberiProyek,r.kontrak,r.rap,r.bahan,r.upah,r.akomodasi,r.totalRap,r.sisaRap,r.statusRap,
             r.costCenter,r.admFee,r.totalPengeluaran,r.hasilUsaha];
         }); });
     }

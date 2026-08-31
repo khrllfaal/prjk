@@ -10,6 +10,17 @@ require_once __DIR__ . '/db.php';
 // endpoint's error handling in the frontend keeps working.
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
+
+// Belt-and-suspenders alongside .htaccess's mod_deflate: some shared
+// hosting plans restrict which Apache modules a .htaccess can enable,
+// so compress at the PHP layer too. ob_gzhandler is a no-op if the
+// client didn't send Accept-Encoding: gzip or zlib isn't available —
+// safe to call unconditionally. The full transactions list is the
+// biggest response here (over 1MB once a few months of real data is
+// loaded) and compresses to well under a tenth of that.
+if (extension_loaded('zlib') && !ini_get('zlib.output_compression')) {
+    ob_start('ob_gzhandler');
+}
 set_exception_handler(function (Throwable $e): void {
     error_log('[accv2] Unhandled ' . get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
     if (!headers_sent()) {
