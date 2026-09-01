@@ -634,9 +634,12 @@ function guessLedgerName(displayName, knownLedgerNames){
    (accrual postings there keep the "kode-nama" format, e.g.
    "5.1.1-Biaya Bahan") — the real kas/bank ledger below uses the exact
    account-name matching in matchesPlainCost() instead. */
-var RAP_COST_CODES={bahan:['5.1.1'], upah:['5.1.2','5.1.9'], akomodasi:['5.1.26','6.2.36']};
-function akunKodeOf(akunStr){ return (akunStr||'').split('-')[0]; }
-function matchesRapCost(akunStr, kind){ return RAP_COST_CODES[kind].indexOf(akunKodeOf(akunStr))>-1; }
+// Both the old and current COA numbering are listed per category — a
+// jurnal_umum entry keeps whatever code it was posted with, so matching
+// only today's COA codes would silently stop counting older rows.
+var RAP_COST_CODES={bahan:['5.1.1','5.1.01'], upah:['5.1.2','5.1.9','5.1.02','5.1.09','5.1.10'],
+  akomodasi:['5.1.26','6.2.36','5.1.11']};
+function matchesRapCost(akunStr, kind){ return RAP_COST_CODES[kind].indexOf(akunKode(akunStr))>-1; }
 
 /* Kas/bank keluar postings name the account either with a COA code
    prefix (manual entry via the app's own form always writes
@@ -726,13 +729,20 @@ function computeCashPeriods(){
     return addDays(iso,-dow);
   }
   function isMasuk(t){ return /masuk$/.test(t.jenis); }
+  function isBank(t){ return /^bank_/.test(t.jenis); }
   function sumRange(from,to){
-    var masuk=0, keluar=0;
+    var masuk=0, keluar=0, kasMasuk=0, bankMasuk=0, kasKeluar=0, bankKeluar=0;
     DB.txns.forEach(function(t){
       if(t.tgl<from||t.tgl>to) return;
-      if(isMasuk(t)) masuk+=t.debet; else keluar+=t.kredit;
+      if(isMasuk(t)){
+        masuk+=t.debet;
+        if(isBank(t)) bankMasuk+=t.debet; else kasMasuk+=t.debet;
+      } else {
+        keluar+=t.kredit;
+        if(isBank(t)) bankKeluar+=t.kredit; else kasKeluar+=t.kredit;
+      }
     });
-    return {masuk:masuk, keluar:keluar};
+    return {masuk:masuk, keluar:keluar, kasMasuk:kasMasuk, bankMasuk:bankMasuk, kasKeluar:kasKeluar, bankKeluar:bankKeluar};
   }
   function saldoAwal(before){
     var s=0;
@@ -776,6 +786,7 @@ function computeCashPeriods(){
       id:id, tag:tag, short:tag, from:weekStart, to:weekEnd,
       label:fmtDate(weekStart)+' s/d '+fmtDate(weekEnd),
       saldo_awal:awal, uang_masuk:r.masuk, uang_keluar:r.keluar, saldo_akhir:awal+r.masuk-r.keluar,
+      kasMasuk:r.kasMasuk, bankMasuk:r.bankMasuk, kasKeluar:r.kasKeluar, bankKeluar:r.bankKeluar,
       komposisi_masuk:komposisi(weekStart,weekEnd),
       kumulatif:kumulatifUpTo(weekEnd),
       projects:projectBreakdown(weekStart,weekEnd),
@@ -801,6 +812,7 @@ function computeCashPeriods(){
       id:'all', tag:'Keseluruhan', short:'Semua', from:allFrom, to:allTo,
       label:fmtDate(allFrom)+' s/d '+fmtDate(allTo),
       saldo_awal:saldoAwal(allFrom), uang_masuk:allR.masuk, uang_keluar:allR.keluar, saldo_akhir:saldoAwal(allFrom)+allR.masuk-allR.keluar,
+      kasMasuk:allR.kasMasuk, bankMasuk:allR.bankMasuk, kasKeluar:allR.kasKeluar, bankKeluar:allR.bankKeluar,
       komposisi_masuk:komposisi(allFrom,allTo),
       kumulatif:kumulatifUpTo(allTo),
       projects:projectBreakdown(allFrom,allTo),
@@ -857,7 +869,7 @@ var HUTANG_DAGANG_CODE='2.1.1';
    a specific case.  */
 function computeHutangDagangRows(){
   var notas=DB.jurnal.filter(function(j){
-    return akunKodeOf(j.akun)===HUTANG_DAGANG_CODE && j.kredit>0;
+    return akunKode(j.akun)===HUTANG_DAGANG_CODE && j.kredit>0;
   }).map(function(j){
     return {id:j.id, tgl:j.tgl, ref:j.ref, vendor:j.relasi||'(Tanpa Vendor)', project:j.project||'',
       ket:j.ket, amount:j.kredit, paid:0};
@@ -865,7 +877,7 @@ function computeHutangDagangRows(){
 
   var paymentsByVendor={};
   DB.txns.forEach(function(t){
-    if(!/keluar$/.test(t.jenis) || akunKodeOf(t.akunLawan)!==HUTANG_DAGANG_CODE) return;
+    if(!/keluar$/.test(t.jenis) || akunKode(t.akunLawan)!==HUTANG_DAGANG_CODE) return;
     var v=t.relasi||'(Tanpa Vendor)';
     paymentsByVendor[v]=(paymentsByVendor[v]||0)+t.kredit;
   });
@@ -1347,18 +1359,40 @@ function inRange(tgl, from, to){
   if(to && tgl>to) return false;
   return true;
 }
+/* Coded jurnal entries ("6.2.99-Biaya lain-lain", from manual entry via
+   the app's own form) carry their kode as a literal prefix — extract it
+   directly. Bulk report imports post plain names with no prefix at all
+   ("Biaya lain-lain"), so for those, resolve the kode by looking the
+   name up in the COA master list instead — otherwise every head/group
+   classification (Laba Rugi, Neraca, Laporan Hutang, …) would silently
+   see zero matches for the bulk of the real ledger. */
+var _coaKodeByNameCache=null;
+function invalidateCoaCache(){ _coaKodeByNameCache=null; }
+function coaKodeByName(namaLower){
+  if(!_coaKodeByNameCache){
+    _coaKodeByNameCache={};
+    (DB&&DB.coa?DB.coa:[]).forEach(function(c){
+      _coaKodeByNameCache[String(c.nama||'').trim().toLowerCase()]=c.kode;
+    });
+  }
+  return _coaKodeByNameCache[namaLower]||'';
+}
 function akunKode(namaAkun){
-  // "6.2.99-Biaya lain-lain" -> "6.2.99"
-  var m=String(namaAkun||'').match(/^([\d.]+)\s*-/);
-  return m?m[1]:'';
+  var s=String(namaAkun||'');
+  var m=s.match(/^([\d.]+)\s*-/);
+  if(m) return m[1];
+  return coaKodeByName(akunNamaOnly(s).toLowerCase());
 }
 function akunHead(namaAkun){
   var k=akunKode(namaAkun);
   return k?k.split('.')[0]:'';
 }
-function akunLabel(namaAkun){
-  return String(namaAkun||'').trim()||'(Tanpa Akun)';
-}
+// akunLabel === akunNamaOnly: an account can appear coded ("5.1.1-Biaya
+// Bahan", manual jurnal entry) or plain ("Biaya Bahan", bulk report
+// import) depending on where it was posted — grouping by the raw string
+// would show the same GL account twice in a statement, so every report
+// groups by the stripped name instead.
+function akunLabel(namaAkun){ return akunNamaOnly(namaAkun); }
 function akunNamaOnly(s){ return String(s||'').replace(/^[\d.]+-/,'').trim()||'(Tanpa Akun)'; }
 
 /* ============================================================
@@ -1901,20 +1935,45 @@ function registerPages(){
       return (diff>0?'▲ Naik ':'▼ Turun ')+rp(Math.abs(diff))+' dari minggu lalu';
     }
 
+    // Uang Masuk/Uang Keluar are each a Kas + Bank total — click the
+    // figure to see the split, same idea as the drill-down buttons
+    // elsewhere in the app.
+    function kpiCardDrill(label,value,sub,variant,drillKind){
+      var html=kpiCard(label,value,sub,variant);
+      return html.replace('<div class="kpi-card',
+        '<div data-kas-split="'+drillKind+'" style="cursor:pointer;" class="kpi-card');
+    }
+    function showKasBankSplit(p, kind){
+      var isMasuk=kind==='masuk';
+      var kas=isMasuk?p.kasMasuk:p.kasKeluar, bank=isMasuk?p.bankMasuk:p.bankKeluar;
+      var total=kas+bank;
+      var title=(isMasuk?'Uang Masuk':'Uang Keluar')+' — '+p.label;
+      var body='<div class="table-scroll"><table class="dtab"><thead><tr>'+
+        '<th>Sumber</th><th style="text-align:right;">Jumlah</th></tr></thead><tbody>'+
+        '<tr><td>Kas</td><td style="text-align:right;">'+num0(kas)+'</td></tr>'+
+        '<tr><td>Bank</td><td style="text-align:right;">'+num0(bank)+'</td></tr>'+
+        '</tbody><tfoot><tr><td><b>Total</b></td><td style="text-align:right;"><b>'+num0(total)+'</b></td></tr></tfoot>'+
+        '</table></div>';
+      openModal(title, body, {saveLabel:null});
+    }
+
     var kasTbl=null;
     function drawKas(){
       var p=period();
       document.getElementById('periodNote').textContent='Menampilkan data '+p.label;
       var cards=[];
       if(p.saldo_awal) cards.push(kpiCard('Saldo Awal / Dana Tersedia', rp(p.saldo_awal),'Posisi kas di awal periode','accent'));
-      cards.push(kpiCard('Uang Masuk', rp(p.uang_masuk),
-        p.banding?bandingText(p.uang_masuk,p.banding.masukLalu):p.label,'accent'));
-      cards.push(kpiCard('Uang Keluar', rp(p.uang_keluar),
-        p.banding?bandingText(p.uang_keluar,p.banding.keluarLalu):p.label,'accent'));
+      cards.push(kpiCardDrill('Uang Masuk', rp(p.uang_masuk),
+        (p.banding?bandingText(p.uang_masuk,p.banding.masukLalu):p.label)+' · klik untuk rincian Kas/Bank','accent','masuk'));
+      cards.push(kpiCardDrill('Uang Keluar', rp(p.uang_keluar),
+        (p.banding?bandingText(p.uang_keluar,p.banding.keluarLalu):p.label)+' · klik untuk rincian Kas/Bank','accent','keluar'));
       cards.push(kpiCard('Saldo Akhir', rp(p.saldo_akhir),
         p.saldo_akhir<0?'Defisit — uang keluar melebihi masuk':'Surplus periode ini',
         p.saldo_akhir<0?'danger':'safe'));
       document.getElementById('kpiKas').innerHTML=cards.join('');
+      document.querySelectorAll('#kpiKas [data-kas-split]').forEach(function(el){
+        el.onclick=function(){ showKasBankSplit(p, el.getAttribute('data-kas-split')); };
+      });
 
       var kEl=document.getElementById('kompKas'), kD=document.getElementById('kompDesc');
       if(p.komposisi_masuk && p.komposisi_masuk.length){
@@ -2204,6 +2263,7 @@ function registerPages(){
           var savedObj;
           if(rec){ rec.kode=kode; rec.nama=nama; rec.level=kode.split('.').length; rec.tipe=coaTipe(kode); savedObj=rec; }
           else { savedObj={id:uid('a'),kode:kode,nama:nama,level:kode.split('.').length,tipe:coaTipe(kode)}; DB.coa.push(savedObj); }
+          invalidateCoaCache();
           saveDB(); syncUpsert('coa', savedObj); closeModal(); draw(); toast('Akun tersimpan.','success');
         }});
     }
@@ -2214,6 +2274,7 @@ function registerPages(){
         (kids.length?' Akun ini punya <b>'+kids.length+' sub-akun</b> yang ikut terhapus.':''),function(){
         var removedIds=[id].concat(kids.map(function(x){ return x.id; }));
         DB.coa=DB.coa.filter(function(x){ return x.id!==id && x.kode.indexOf(rec.kode+'.')!==0; });
+        invalidateCoaCache();
         saveDB(); removedIds.forEach(function(rid){ syncDelete('coa', rid); }); draw(); toast('Akun dihapus.','success');
       });
     }
@@ -2508,7 +2569,7 @@ function registerPages(){
             b.onclick=function(){
               var vendor=b.getAttribute('data-drill-vendor');
               var list=DB.txns.filter(function(t){
-                return /keluar$/.test(t.jenis) && akunKodeOf(t.akunLawan)===HUTANG_DAGANG_CODE && (t.relasi||'(Tanpa Vendor)')===vendor;
+                return /keluar$/.test(t.jenis) && akunKode(t.akunLawan)===HUTANG_DAGANG_CODE && (t.relasi||'(Tanpa Vendor)')===vendor;
               }).map(function(t){ return {tgl:t.tgl, ref:t.ref, ket:t.ket+(t.project?' — '+t.project:''), amount:t.kredit}; })
                 .sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
               showTxnDrilldown('Pembayaran Hutang — '+vendor, 'Seluruh pembayaran kas/bank ke vendor ini untuk Hutang Dagang', list);
