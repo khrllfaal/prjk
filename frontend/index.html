@@ -782,10 +782,13 @@ function computeCashPeriods(){
     var weekEnd=addDays(weekStart,6);
     var r=sumRange(weekStart,weekEnd);
     var awal=saldoAwal(weekStart);
+    // Uang Masuk/Uang Keluar shown on the cards are Kas only, per owner's
+    // request — Bank Masuk/Keluar only ever feed into Saldo Akhir
+    // (awal + kas+bank masuk - kas+bank keluar), not the two KPI figures.
     return {
       id:id, tag:tag, short:tag, from:weekStart, to:weekEnd,
       label:fmtDate(weekStart)+' s/d '+fmtDate(weekEnd),
-      saldo_awal:awal, uang_masuk:r.masuk, uang_keluar:r.keluar, saldo_akhir:awal+r.masuk-r.keluar,
+      saldo_awal:awal, uang_masuk:r.kasMasuk, uang_keluar:r.kasKeluar, saldo_akhir:awal+r.masuk-r.keluar,
       kasMasuk:r.kasMasuk, bankMasuk:r.bankMasuk, kasKeluar:r.kasKeluar, bankKeluar:r.bankKeluar,
       komposisi_masuk:komposisi(weekStart,weekEnd),
       kumulatif:kumulatifUpTo(weekEnd),
@@ -806,12 +809,12 @@ function computeCashPeriods(){
   var periods=[
     weekPeriod('w1', lastFriday, '1 Minggu Lalu'),
     weekPeriod('w0', thisFriday, 'Minggu Ini', {
-      masukLalu:lastWeekR.masuk, keluarLalu:lastWeekR.keluar,
+      masukLalu:lastWeekR.kasMasuk, keluarLalu:lastWeekR.kasKeluar,
     }),
     {
       id:'all', tag:'Keseluruhan', short:'Semua', from:allFrom, to:allTo,
       label:fmtDate(allFrom)+' s/d '+fmtDate(allTo),
-      saldo_awal:saldoAwal(allFrom), uang_masuk:allR.masuk, uang_keluar:allR.keluar, saldo_akhir:saldoAwal(allFrom)+allR.masuk-allR.keluar,
+      saldo_awal:saldoAwal(allFrom), uang_masuk:allR.kasMasuk, uang_keluar:allR.kasKeluar, saldo_akhir:saldoAwal(allFrom)+allR.masuk-allR.keluar,
       kasMasuk:allR.kasMasuk, bankMasuk:allR.bankMasuk, kasKeluar:allR.kasKeluar, bankKeluar:allR.bankKeluar,
       komposisi_masuk:komposisi(allFrom,allTo),
       kumulatif:kumulatifUpTo(allTo),
@@ -1935,24 +1938,24 @@ function registerPages(){
       return (diff>0?'▲ Naik ':'▼ Turun ')+rp(Math.abs(diff))+' dari minggu lalu';
     }
 
-    // Uang Masuk/Uang Keluar are each a Kas + Bank total — click the
-    // figure to see the split, same idea as the drill-down buttons
-    // elsewhere in the app.
+    // Uang Masuk/Uang Keluar shown on the cards are Kas only. Bank
+    // Masuk/Keluar only ever shows up folded into Saldo Akhir — click
+    // that figure to see exactly how Kas and Bank each contributed.
     function kpiCardDrill(label,value,sub,variant,drillKind){
       var html=kpiCard(label,value,sub,variant);
       return html.replace('<div class="kpi-card',
-        '<div data-kas-split="'+drillKind+'" style="cursor:pointer;" class="kpi-card');
+        '<div data-saldo-drill="'+drillKind+'" style="cursor:pointer;" class="kpi-card');
     }
-    function showKasBankSplit(p, kind){
-      var isMasuk=kind==='masuk';
-      var kas=isMasuk?p.kasMasuk:p.kasKeluar, bank=isMasuk?p.bankMasuk:p.bankKeluar;
-      var total=kas+bank;
-      var title=(isMasuk?'Uang Masuk':'Uang Keluar')+' — '+p.label;
+    function showSaldoAkhirBreakdown(p){
+      var title='Rincian Saldo Akhir — '+p.label;
       var body='<div class="table-scroll"><table class="dtab"><thead><tr>'+
-        '<th>Sumber</th><th style="text-align:right;">Jumlah</th></tr></thead><tbody>'+
-        '<tr><td>Kas</td><td style="text-align:right;">'+num0(kas)+'</td></tr>'+
-        '<tr><td>Bank</td><td style="text-align:right;">'+num0(bank)+'</td></tr>'+
-        '</tbody><tfoot><tr><td><b>Total</b></td><td style="text-align:right;"><b>'+num0(total)+'</b></td></tr></tfoot>'+
+        '<th>Komponen</th><th style="text-align:right;">Jumlah</th></tr></thead><tbody>'+
+        '<tr><td>Saldo Awal (Kas + Bank)</td><td style="text-align:right;">'+num0(p.saldo_awal)+'</td></tr>'+
+        '<tr><td>Kas Masuk</td><td style="text-align:right;">'+num0(p.kasMasuk)+'</td></tr>'+
+        '<tr><td>Bank Masuk</td><td style="text-align:right;">'+num0(p.bankMasuk)+'</td></tr>'+
+        '<tr><td>Kas Keluar</td><td style="text-align:right;">-'+num0(p.kasKeluar)+'</td></tr>'+
+        '<tr><td>Bank Keluar</td><td style="text-align:right;">-'+num0(p.bankKeluar)+'</td></tr>'+
+        '</tbody><tfoot><tr><td><b>Saldo Akhir</b></td><td style="text-align:right;"><b>'+num0(p.saldo_akhir)+'</b></td></tr></tfoot>'+
         '</table></div>';
       openModal(title, body, {saveLabel:null});
     }
@@ -1963,16 +1966,16 @@ function registerPages(){
       document.getElementById('periodNote').textContent='Menampilkan data '+p.label;
       var cards=[];
       if(p.saldo_awal) cards.push(kpiCard('Saldo Awal / Dana Tersedia', rp(p.saldo_awal),'Posisi kas di awal periode','accent'));
-      cards.push(kpiCardDrill('Uang Masuk', rp(p.uang_masuk),
-        (p.banding?bandingText(p.uang_masuk,p.banding.masukLalu):p.label)+' · klik untuk rincian Kas/Bank','accent','masuk'));
-      cards.push(kpiCardDrill('Uang Keluar', rp(p.uang_keluar),
-        (p.banding?bandingText(p.uang_keluar,p.banding.keluarLalu):p.label)+' · klik untuk rincian Kas/Bank','accent','keluar'));
-      cards.push(kpiCard('Saldo Akhir', rp(p.saldo_akhir),
-        p.saldo_akhir<0?'Defisit — uang keluar melebihi masuk':'Surplus periode ini',
-        p.saldo_akhir<0?'danger':'safe'));
+      cards.push(kpiCard('Uang Masuk', rp(p.uang_masuk),
+        (p.banding?bandingText(p.uang_masuk,p.banding.masukLalu):p.label)+' · Kas','accent'));
+      cards.push(kpiCard('Uang Keluar', rp(p.uang_keluar),
+        (p.banding?bandingText(p.uang_keluar,p.banding.keluarLalu):p.label)+' · Kas','accent'));
+      cards.push(kpiCardDrill('Saldo Akhir', rp(p.saldo_akhir),
+        (p.saldo_akhir<0?'Defisit — uang keluar melebihi masuk':'Surplus periode ini')+' · klik untuk rincian Kas/Bank',
+        p.saldo_akhir<0?'danger':'safe','saldo'));
       document.getElementById('kpiKas').innerHTML=cards.join('');
-      document.querySelectorAll('#kpiKas [data-kas-split]').forEach(function(el){
-        el.onclick=function(){ showKasBankSplit(p, el.getAttribute('data-kas-split')); };
+      document.querySelectorAll('#kpiKas [data-saldo-drill]').forEach(function(el){
+        el.onclick=function(){ showSaldoAkhirBreakdown(p); };
       });
 
       var kEl=document.getElementById('kompKas'), kD=document.getElementById('kompDesc');
@@ -2855,18 +2858,62 @@ function registerPages(){
   };
 
   /* ---------------- grouped statement helper ---------------- */
+  function compareKode(ka,kb){
+    if(!ka && !kb) return 0;
+    if(!ka) return 1;
+    if(!kb) return -1;
+    var pa=ka.split('.').map(Number), pb=kb.split('.').map(Number);
+    for(var i=0;i<Math.max(pa.length,pb.length);i++){
+      var x=pa[i]||0, y=pb[i]||0;
+      if(x!==y) return x-y;
+    }
+    return 0;
+  }
+  /* A proper statement (Neraca/Laba Rugi) lists every account in the
+     group, not just the ones with activity this period — a zero-balance
+     line is still meaningful (it says "nothing moved here"), and
+     matches the fixed layout of every standard accounting report.
+     Sums are keyed by account NAME (not kode) so a legacy jurnal_umum
+     entry posted under an old/superseded code still matches its
+     current COA leaf; any name with a real balance that doesn't match
+     a known COA leaf still gets its own row (marked unlisted) so a
+     stray/misspelled account name never silently drops money from the
+     total. */
   function groupByHead(from,to,heads){
-    var map={};
+    var sumsByName={};
     allEntries().forEach(function(e){
       if(!inRange(e.tgl,from,to)) return;
       var h=akunHead(e.akun);
       if(heads.indexOf(h)===-1) return;
-      var a=akunLabel(e.akun);
-      if(!map[a]) map[a]={akun:a,kode:akunKode(e.akun),head:h,debet:0,kredit:0};
-      map[a].debet+=e.debet; map[a].kredit+=e.kredit;
+      var key=akunNamaOnly(e.akun).toLowerCase();
+      if(!sumsByName[key]) sumsByName[key]={nama:akunNamaOnly(e.akun),debet:0,kredit:0};
+      sumsByName[key].debet+=e.debet; sumsByName[key].kredit+=e.kredit;
     });
-    return Object.keys(map).map(function(k){ return map[k]; })
-      .sort(function(a,b){ return (a.kode||'zz')>(b.kode||'zz')?1:-1; });
+    var matched={};
+    // Two different COA leaves can share the exact same name (e.g. both
+    // "2.1.3-Hutang Pihak Ke-3" and "2.2.1-Hutang Pihak Ke-3" exist —
+    // short-term vs long-term). A posted entry only ever names the
+    // account, never which of the two, so there is no way to split the
+    // amount between them — assign it to the first leaf by kode only,
+    // and leave any later duplicate at zero, so the balance is counted
+    // exactly once instead of once per duplicate.
+    var claimed={};
+    var rows=DB.coa.filter(function(c){
+      return c.level===3 && heads.indexOf(String(c.kode).split('.')[0])>-1;
+    }).sort(function(a,b){ return compareKode(a.kode,b.kode); }).map(function(c){
+      var key=String(c.nama||'').trim().toLowerCase();
+      matched[key]=true;
+      var s=(!claimed[key] && sumsByName[key])?sumsByName[key]:{debet:0,kredit:0};
+      claimed[key]=true;
+      return {akun:c.kode+'-'+c.nama, kode:c.kode, head:String(c.kode).split('.')[0], debet:s.debet, kredit:s.kredit};
+    });
+    Object.keys(sumsByName).forEach(function(key){
+      if(matched[key]) return;
+      var s=sumsByName[key];
+      if(!s.debet && !s.kredit) return;
+      rows.push({akun:s.nama, kode:'', head:'', debet:s.debet, kredit:s.kredit, unlisted:true});
+    });
+    return rows.sort(function(a,b){ return compareKode(a.kode,b.kode); });
   }
   function headName(h){
     var a=DB.coa.find(function(x){ return x.kode===h; });
@@ -2884,8 +2931,9 @@ function registerPages(){
         html+='<tr><td colspan="2" style="color:var(--text-faint);font-style:italic;">Tidak ada transaksi pada kelompok ini.</td></tr>';
       }
       g.rows.forEach(function(r){
+        var v=valueFn(r);
         html+='<tr><td style="padding-left:28px;" class="wrap">'+esc(r.akun)+'</td>'+
-          '<td class="num">'+numSigned(valueFn(r))+'</td></tr>';
+          '<td class="num">'+(Math.abs(v)<0.5?'<span class="faint-italic">–</span>':numSigned(v))+'</td></tr>';
       });
       grand+=g.total;
     });
@@ -2905,7 +2953,7 @@ function registerPages(){
       var mk=function(heads){
         var rows=groupByHead(from,to,heads).map(function(r){
           return {akun:r.akun, val:r.kredit-r.debet};
-        }).filter(function(r){ return Math.abs(r.val)>0.5; });
+        });
         return {rows:rows, total:rows.reduce(function(a,b){ return a+b.val; },0)};
       };
       var pend=mk(['4']), hpp=mk(['5']), biaya=mk(['6']), lain=mk(['7']), pajak=mk(['8']);
@@ -2956,7 +3004,7 @@ function registerPages(){
       var mk=function(heads,sign){
         var rows=groupByHead(from,to,heads).map(function(r){
           return {akun:r.akun, val:sign*(r.debet-r.kredit)};
-        }).filter(function(r){ return Math.abs(r.val)>0.5; });
+        });
         return {rows:rows, total:rows.reduce(function(a,b){ return a+b.val; },0)};
       };
       var aktiva=mk(['1'],1), kewajiban=mk(['2'],-1), ekuitas=mk(['3'],-1);
