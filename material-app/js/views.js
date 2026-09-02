@@ -391,16 +391,20 @@ Views.tabRab = function (body, project) {
         ${!canEdit ? `<div style="padding:14px 18px 0"><div class="note-callout">${ic('info')} Hanya Admin Pusat/Owner yang bisa mengubah data RAB. Hubungi owner bila kebutuhan RAB perlu diperbarui.</div></div>` : ''}
         <div class="table-wrap">
           <table class="data-table">
-            <thead><tr><th>Bahan</th><th>Kategori</th><th>Satuan</th><th>RAB Kebutuhan</th>${canEdit ? '<th></th>' : ''}</tr></thead>
+            <thead><tr><th>Bahan</th><th>Kategori</th><th>Satuan</th><th>RAB Kebutuhan</th><th>Kelompok Bahan (Katalog)</th>${canEdit ? '<th></th>' : ''}</tr></thead>
             <tbody>
-              ${materials.length ? materials.map(m => `
+              ${materials.length ? materials.map(m => {
+                const cat = m.catalogId ? Store.catalogItem(m.catalogId) : null;
+                return `
                 <tr>
                   <td><strong>${esc(m.nama)}</strong></td>
                   <td>${esc(m.kategori || '-')}</td>
                   <td>${esc(m.satuan)}</td>
                   <td class="num">${m.rabKebutuhan == null ? `<span class="badge belum-ada-rab">Belum ada RAB</span>` : fmtNum(m.rabKebutuhan)}</td>
+                  <td>${cat ? `<span style="font-size:12px;color:var(--gray-500)">${ic('copy')} ${esc(cat.nama)}</span>` : `<span style="font-size:11.5px;color:var(--gray-300)">belum dihubungkan</span>`}</td>
                   ${canEdit ? `<td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-edit="${m.id}">${ic('edit')}</button><button class="btn btn-ghost btn-sm" data-del="${m.id}">${ic('trash')}</button></td>` : ''}
-                </tr>`).join('') : `<tr><td colspan="5"><div class="empty-state">${ic('layers')}<h4>Belum ada bahan</h4></div></td></tr>`}
+                </tr>`;
+              }).join('') : `<tr><td colspan="6"><div class="empty-state">${ic('layers')}<h4>Belum ada bahan</h4></div></td></tr>`}
             </tbody>
           </table>
         </div>
@@ -616,6 +620,12 @@ Views.openMaterialModal = function (projectId, material) {
         <input id="fRab" type="number" step="any" value="${material?.rabKebutuhan ?? ''}" placeholder="Kosongkan jika belum tersedia" />
         <div class="hint">Boleh dikosongkan. Sistem tetap menghitung stok masuk/keluar walau RAB belum ada.</div>
       </div>
+      <div class="field full">
+        <label>Kelompok Bahan / Katalog (opsional) <span class="help-tip" title="Kalau bahan yang sama namanya beda-beda di tiap proyek (misal 'Semen PC' vs 'Semen Portland 50kg'), ketik/pilih nama kelompok yang sama di sini supaya bisa direkap total lintas proyek di halaman Katalog Bahan. Nama bahan di atas TIDAK ikut berubah.">${ic('info')}</span></label>
+        <input id="fCatalog" list="catalogDatalist" value="${esc(material?.catalogId ? (Store.catalogItem(material.catalogId)?.nama || '') : '')}" placeholder="Ketik atau pilih dari daftar, kosongkan bila tidak perlu" />
+        <datalist id="catalogDatalist">${Store.catalog().map(c => `<option value="${esc(c.nama)}">`).join('')}</datalist>
+        <div class="hint">Kalau nama belum ada di daftar, entri katalog baru dibuat otomatis saat disimpan.</div>
+      </div>
     </div>
   `, `<button class="btn btn-ghost" id="mCancel">Batal</button><button class="btn btn-primary" id="mSave">${isEdit ? 'Simpan' : 'Tambah'}</button>`);
 
@@ -625,7 +635,13 @@ Views.openMaterialModal = function (projectId, material) {
     const satuan = document.getElementById('fSatuan').value.trim();
     if (!nama || !satuan) { Toast.show('Nama dan satuan wajib diisi', 'error'); return; }
     const rabVal = document.getElementById('fRab').value;
-    const payload = { nama, satuan, kategori: document.getElementById('fKategori').value.trim(), rabKebutuhan: rabVal === '' ? null : Number(rabVal) };
+    const catalogName = document.getElementById('fCatalog').value.trim();
+    let catalogId = null;
+    if (catalogName) {
+      const existingCat = Store.catalog().find(c => c.nama.trim().toLowerCase() === catalogName.toLowerCase());
+      catalogId = existingCat ? existingCat.id : Store.addCatalog({ nama: catalogName, satuan, kategori: document.getElementById('fKategori').value.trim() }).id;
+    }
+    const payload = { nama, satuan, kategori: document.getElementById('fKategori').value.trim(), rabKebutuhan: rabVal === '' ? null : Number(rabVal), catalogId };
     if (isEdit) Store.updateMaterial(material.id, payload);
     else Store.addMaterial(Object.assign({ projectId }, payload));
     Toast.show(isEdit ? 'Bahan diperbarui' : 'Bahan ditambahkan', 'success');
@@ -662,6 +678,87 @@ Views.tabMingguan = function (body, project) {
 };
 
 function addDays(iso, n) { const d = new Date(iso); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+
+/* ================= KATALOG BAHAN (rekap lintas proyek) ================= */
+Views.catalog = function (root) {
+  App.setTopbar('Katalog Bahan', 'Satu barang, boleh beda nama di tiap RAB proyek');
+  const rows = Calc.catalogSummary();
+  const unlinked = Calc.unlinkedMaterialCount();
+
+  root.innerHTML = `
+    <div class="view">
+      <div class="page-head">
+        <div>
+          <h2>Katalog Bahan</h2>
+          <p>Hubungkan bahan yang penulisannya beda-beda di tiap RAB proyek ke satu entri di sini, supaya bisa direkap totalnya lintas proyek &mdash; tanpa mengubah nama asli di RAB masing-masing proyek.</p>
+        </div>
+        <div class="actions"><button class="btn btn-primary" id="newCatBtn">${ic('plus')} Entri Katalog Baru</button></div>
+      </div>
+
+      ${unlinked ? `<div class="note-callout warn" style="margin-bottom:16px">${ic('alert')} ${unlinked} bahan di berbagai proyek belum dihubungkan ke katalog, jadi belum ikut ke rekap lintas proyek di bawah. Hubungkan lewat tab "RAB &amp; Bahan" tiap proyek (kolom "Kelompok Bahan").</div>` : ''}
+
+      <div class="card">
+        <div class="card-head"><div><h3>Rekap Lintas Proyek</h3><div class="sub">${rows.length} entri katalog</div></div></div>
+        <div class="card-body pad-0">
+          <div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Katalog Bahan</th><th>Satuan Baku</th><th>Proyek</th><th>Nama di Tiap RAB Proyek</th><th>Total Masuk</th><th>Total Keluar</th><th>Total RAB</th><th></th></tr></thead>
+            <tbody id="catRows"></tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>`;
+
+  const tbody = document.getElementById('catRows');
+  tbody.innerHTML = rows.length ? rows.map(r => `
+    <tr>
+      <td><strong>${esc(r.catalog.nama)}</strong>${r.catalog.kategori ? `<div style="font-size:11px;color:var(--gray-500)">${esc(r.catalog.kategori)}</div>` : ''}</td>
+      <td>${esc(r.catalog.satuan)}</td>
+      <td class="num">${r.projectsInvolved.length}</td>
+      <td>${r.linked.length ? r.linked.map(m => {
+          const proj = Store.project(m.projectId);
+          const mismatch = m.satuan.trim().toLowerCase() !== r.catalog.satuan.trim().toLowerCase();
+          return `<div style="font-size:12px;margin-bottom:3px">${esc(m.nama)} <span style="color:var(--gray-500)">&middot; ${esc(proj ? proj.nama : '-')}</span>${mismatch ? ` <span class="badge habis" title="Satuan bahan ini (${esc(m.satuan)}) beda dari satuan baku katalog (${esc(r.catalog.satuan)}), jadi tidak ikut dijumlahkan otomatis">satuan beda</span>` : ''}</div>`;
+        }).join('') : `<span style="font-size:12px;color:var(--gray-500)">Belum ada bahan proyek yang dihubungkan ke sini</span>`}</td>
+      <td class="num">${fmtNum(r.totalMasuk)}</td>
+      <td class="num">${fmtNum(r.totalKeluar)}</td>
+      <td class="num">${r.totalRab == null ? '<span style="color:var(--gray-500)">-</span>' : fmtNum(r.totalRab)}</td>
+      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-edit="${r.catalog.id}">${ic('edit')}</button><button class="btn btn-ghost btn-sm" data-del="${r.catalog.id}">${ic('trash')}</button></td>
+    </tr>`).join('') : `<tr><td colspan="8"><div class="empty-state">${ic('layers')}<h4>Belum ada entri katalog</h4><p>Buat entri katalog untuk mulai menggabungkan bahan-bahan sejenis dari berbagai proyek.</p></div></td></tr>`;
+
+  document.getElementById('newCatBtn').onclick = () => Views.openCatalogModal();
+  tbody.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => Views.openCatalogModal(Store.catalogItem(b.dataset.edit)));
+  tbody.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+    if (confirm('Hapus entri katalog ini? Bahan di tiap proyek tidak akan ikut terhapus, hanya tautannya yang lepas.')) {
+      Store.deleteCatalog(b.dataset.del);
+      Toast.show('Entri katalog dihapus', 'success');
+      App.renderView();
+    }
+  });
+};
+
+Views.openCatalogModal = function (cat) {
+  const isEdit = !!cat;
+  Modal.open(isEdit ? 'Edit Katalog Bahan' : 'Entri Katalog Baru', `
+    <div class="note-callout">${ic('info')} Ini nama "kelompok"/baku, dipakai untuk menggabungkan bahan yang penulisannya beda-beda di tiap RAB proyek (misal "Semen PC" vs "Semen Portland 50kg") agar bisa direkap total pemakaiannya lintas proyek.</div>
+    <div class="form-grid" style="margin-top:14px">
+      <div class="field full"><label>Nama Katalog</label><input id="fCatNama" value="${esc(cat?.nama || '')}" placeholder="Contoh: Semen PC 50kg" /></div>
+      <div class="field"><label>Satuan Baku</label><input id="fCatSatuan" value="${esc(cat?.satuan || '')}" placeholder="zak / m3 / rit" /></div>
+      <div class="field"><label>Kategori</label><input id="fCatKategori" value="${esc(cat?.kategori || '')}" placeholder="Beton / Perkerasan / dst" /></div>
+    </div>
+  `, `<button class="btn btn-ghost" id="mCancel">Batal</button><button class="btn btn-primary" id="mSave">${isEdit ? 'Simpan' : 'Buat'}</button>`);
+
+  document.getElementById('mCancel').onclick = Modal.close;
+  document.getElementById('mSave').onclick = () => {
+    const nama = document.getElementById('fCatNama').value.trim();
+    const satuan = document.getElementById('fCatSatuan').value.trim();
+    if (!nama || !satuan) { Toast.show('Nama dan satuan wajib diisi', 'error'); return; }
+    const payload = { nama, satuan, kategori: document.getElementById('fCatKategori').value.trim() };
+    if (isEdit) Store.updateCatalog(cat.id, payload); else Store.addCatalog(payload);
+    Toast.show(isEdit ? 'Katalog diperbarui' : 'Katalog dibuat', 'success');
+    Modal.close();
+    App.renderView();
+  };
+};
 
 /* ================= QUICK INPUT (mode lapangan) ================= */
 Views.quickInput = function (root) {

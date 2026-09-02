@@ -104,6 +104,7 @@ const App = {
     if (parts[0] === 'proyek' && parts[1]) return { name: 'project-detail', params: { id: parts[1], tab: parts[2] || 'ringkasan' } };
     if (parts[0] === 'proyek') return { name: 'projects', params: {} };
     if (parts[0] === 'input') return { name: 'quick-input', params: {} };
+    if (parts[0] === 'katalog') return { name: 'catalog', params: {} };
     return { name: 'dashboard', params: {} };
   },
 
@@ -191,6 +192,9 @@ const App = {
       { key: 'projects', label: 'Daftar Proyek', icon: 'folder', hash: '#/proyek' },
       { key: 'quick-input', label: 'Input Transaksi', icon: 'plus', hash: '#/input' },
     ];
+    if (this.session && this.session.role === 'owner') {
+      items.push({ key: 'catalog', label: 'Katalog Bahan', icon: 'copy', hash: '#/katalog' });
+    }
     return items;
   },
 
@@ -285,6 +289,7 @@ const App = {
       case 'projects': return Views.projects(root);
       case 'project-detail': return Views.projectDetail(root, this.route.params.id, this.route.params.tab);
       case 'quick-input': return Views.quickInput(root);
+      case 'catalog': return Views.catalog(root);
       default: return Views.dashboard(root);
     }
   },

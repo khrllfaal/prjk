@@ -68,6 +68,32 @@ const Calc = {
     return Store.projects().map(p => ({ project: p, health: this.projectHealth(p.id) }));
   },
 
+  // Rekap 1 entri Katalog Bahan lintas SEMUA proyek yang bahannya
+  // dihubungkan ke entri itu. Hanya bahan dengan satuan SAMA PERSIS dengan
+  // satuan baku katalog yang dijumlahkan (m3 tidak boleh ketimpa rit) --
+  // yang satuannya beda ditandai terpisah supaya tidak salah hitung diam-diam.
+  catalogSummary() {
+    const allTx = Store.transactions();
+    return Store.catalog().map(cat => {
+      const linked = Store.materials().filter(m => m.catalogId === cat.id);
+      const sameUnit = linked.filter(m => m.satuan.trim().toLowerCase() === cat.satuan.trim().toLowerCase());
+      const mismatched = linked.filter(m => m.satuan.trim().toLowerCase() !== cat.satuan.trim().toLowerCase());
+      let totalMasuk = 0, totalKeluar = 0, totalRab = 0, hasRab = false;
+      sameUnit.forEach(m => {
+        const tx = allTx.filter(t => t.materialId === m.id);
+        totalMasuk += tx.filter(t => t.tipe === 'masuk').reduce((s, t) => s + Number(t.volume || 0), 0);
+        totalKeluar += tx.filter(t => t.tipe === 'keluar').reduce((s, t) => s + Number(t.volume || 0), 0);
+        if (m.rabKebutuhan != null) { totalRab += Number(m.rabKebutuhan); hasRab = true; }
+      });
+      const projectsInvolved = [...new Set(linked.map(m => m.projectId))].map(pid => Store.project(pid)).filter(Boolean);
+      return { catalog: cat, linked, sameUnit, mismatched, totalMasuk, totalKeluar, totalRab: hasRab ? totalRab : null, projectsInvolved };
+    });
+  },
+
+  unlinkedMaterialCount() {
+    return Store.materials().filter(m => !m.catalogId).length;
+  },
+
   // Rekap mingguan (ISO week) untuk 1 proyek
   weeklyRecap(projectId, weekStartDate) {
     const materials = Store.materials(projectId);

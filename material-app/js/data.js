@@ -26,6 +26,21 @@ function seedData() {
   const projA = 'proj_demo_cibalong';
   const projB = 'proj_demo_baru';
 
+  // Katalog Bahan (global, lintas proyek). Nama bahan di tiap RAB proyek
+  // sering beda-beda penulisannya walau barangnya sama -> dihubungkan ke
+  // sini lewat catalogId supaya bisa direkap total lintas proyek, TANPA
+  // memaksa nama di RAB masing-masing proyek diseragamkan (nama di RAB
+  // harus tetap sesuai dokumen kontrak aslinya).
+  const catalog = [
+    { id: 'cat_semen', nama: 'Semen PC 50kg', satuan: 'zak (50kg)', kategori: 'Beton' },
+    { id: 'cat_pasir_beton', nama: 'Pasir Beton', satuan: 'm3', kategori: 'Beton' },
+    { id: 'cat_split', nama: 'Split / Kerikil', satuan: 'm3', kategori: 'Beton' },
+    { id: 'cat_agregat_a', nama: 'Agregat Kelas A', satuan: 'm3', kategori: 'Perkerasan' },
+    { id: 'cat_agregat_s', nama: 'Agregat Kelas S', satuan: 'm3', kategori: 'Perkerasan' },
+    { id: 'cat_sirtu', nama: 'Sirtu', satuan: 'rit', kategori: 'Timbunan' },
+    { id: 'cat_pasir_pasang', nama: 'Pasir Pasang', satuan: 'm3', kategori: 'Pasangan' },
+  ];
+
   const projects = [
     {
       id: projA,
@@ -51,14 +66,17 @@ function seedData() {
   // bahan belum tersedia -> UI harus tetap jalan & jujur menampilkan
   // "Belum ada RAB", bukan error / NaN.
   const materials = [
-    { id: 'mat_a1', projectId: projA, nama: 'Semen PC', satuan: 'zak (50kg)', kategori: 'Beton', rabKebutuhan: 18301.98 },
-    { id: 'mat_a2', projectId: projA, nama: 'Pasir Beton (Cor)', satuan: 'm3', kategori: 'Beton', rabKebutuhan: 1600.43 },
-    { id: 'mat_a3', projectId: projA, nama: 'Split / Kerikil', satuan: 'm3', kategori: 'Beton', rabKebutuhan: 2462.09 },
-    { id: 'mat_a4', projectId: projA, nama: 'Agregat Kelas A', satuan: 'm3', kategori: 'Perkerasan', rabKebutuhan: 2314.84 },
-    { id: 'mat_a5', projectId: projA, nama: 'Agregat Kelas S', satuan: 'm3', kategori: 'Perkerasan', rabKebutuhan: 615 },
-    { id: 'mat_a6', projectId: projA, nama: 'Sirtu', satuan: 'rit', kategori: 'Timbunan', rabKebutuhan: null },
-    { id: 'mat_b1', projectId: projB, nama: 'Semen PC', satuan: 'zak (50kg)', kategori: 'Beton', rabKebutuhan: null },
-    { id: 'mat_b2', projectId: projB, nama: 'Pasir Pasang', satuan: 'm3', kategori: 'Pasangan', rabKebutuhan: null },
+    { id: 'mat_a1', projectId: projA, nama: 'Semen PC', satuan: 'zak (50kg)', kategori: 'Beton', rabKebutuhan: 18301.98, catalogId: 'cat_semen' },
+    { id: 'mat_a2', projectId: projA, nama: 'Pasir Beton (Cor)', satuan: 'm3', kategori: 'Beton', rabKebutuhan: 1600.43, catalogId: 'cat_pasir_beton' },
+    { id: 'mat_a3', projectId: projA, nama: 'Split / Kerikil', satuan: 'm3', kategori: 'Beton', rabKebutuhan: 2462.09, catalogId: 'cat_split' },
+    { id: 'mat_a4', projectId: projA, nama: 'Agregat Kelas A', satuan: 'm3', kategori: 'Perkerasan', rabKebutuhan: 2314.84, catalogId: 'cat_agregat_a' },
+    { id: 'mat_a5', projectId: projA, nama: 'Agregat Kelas S', satuan: 'm3', kategori: 'Perkerasan', rabKebutuhan: 615, catalogId: 'cat_agregat_s' },
+    { id: 'mat_a6', projectId: projA, nama: 'Sirtu', satuan: 'rit', kategori: 'Timbunan', rabKebutuhan: null, catalogId: 'cat_sirtu' },
+    // Sengaja beda nama & satuan dari mat_a1 (RAB proyek B menulisnya beda),
+    // tapi barangnya sama -> dihubungkan ke catalogId yang sama supaya tetap
+    // bisa direkap total lintas proyek lewat halaman Katalog Bahan.
+    { id: 'mat_b1', projectId: projB, nama: 'Semen Portland (Padang) 50kg', satuan: 'zak', kategori: 'Beton', rabKebutuhan: null, catalogId: 'cat_semen' },
+    { id: 'mat_b2', projectId: projB, nama: 'Pasir Pasang', satuan: 'm3', kategori: 'Pasangan', rabKebutuhan: null, catalogId: 'cat_pasir_pasang' },
   ];
 
   const tx = [];
@@ -103,7 +121,7 @@ function seedData() {
   // Project B - belum ada barang masuk sama sekali utk salah satu bahan
   [[3, 480, 'SJ-B01']].forEach(([o, v, sj]) => pushTx('mat_b1', 'masuk', d(o), v, { noSuratJalan: sj }));
 
-  return { projects, materials, transactions: tx };
+  return { projects, materials, transactions: tx, catalog };
 }
 
 const Store = {
@@ -115,6 +133,7 @@ const Store = {
       const raw = localStorage.getItem(DB_KEY);
       if (raw) {
         this._cache = JSON.parse(raw);
+        if (!this._cache.catalog) this._cache.catalog = []; // data lama sebelum fitur katalog ada
       } else {
         this._cache = seedData();
         this.save();
@@ -171,6 +190,27 @@ const Store = {
     const db = this.load();
     db.materials = db.materials.filter(m => m.id !== id);
     db.transactions = db.transactions.filter(t => t.materialId !== id);
+    this.save();
+  },
+
+  // ---- Katalog Bahan (global, penghubung nama-bahan-berbeda antar proyek) ----
+  catalog() { return this.load().catalog; },
+  catalogItem(id) { return this.load().catalog.find(c => c.id === id); },
+  addCatalog(c) {
+    const rec = Object.assign({ id: uid('cat') }, c);
+    this.load().catalog.push(rec);
+    this.save();
+    return rec;
+  },
+  updateCatalog(id, patch) {
+    const c = this.catalogItem(id);
+    if (c) { Object.assign(c, patch); this.save(); }
+    return c;
+  },
+  deleteCatalog(id) {
+    const db = this.load();
+    db.catalog = db.catalog.filter(c => c.id !== id);
+    db.materials.forEach(m => { if (m.catalogId === id) m.catalogId = null; });
     this.save();
   },
 
