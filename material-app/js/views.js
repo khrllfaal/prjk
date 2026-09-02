@@ -189,8 +189,13 @@ Views.openProjectModal = function (project) {
       <div class="field"><label>Nilai Kontrak (Rp)</label><input id="fNilai" type="number" value="${project?.nilaiKontrak ?? ''}" placeholder="0" /></div>
       <div class="field"><label>Tanggal Mulai</label><input id="fTgl" type="date" value="${project?.tanggalMulai || todayISO()}" /></div>
       <div class="field"><label>PIC Lapangan</label><input id="fPic" value="${esc(project?.pic || '')}" placeholder="Nama admin lapangan" /></div>
+      ${!isEdit && Store.projects().length ? `<div class="field full">
+        <label>Salin daftar bahan RAB dari proyek lain (opsional)</label>
+        <select id="fTemplate"><option value="">Tidak, mulai kosong</option>${Store.projects().map(p => `<option value="${p.id}">${esc(p.nama)}</option>`).join('')}</select>
+        <div class="hint">Bahan &amp; satuan langsung tersalin, tinggal cek ulang angka RAB-nya (bisa dikoreksi lewat tab RAB &amp; Bahan).</div>
+      </div>` : ''}
     </div>
-    <div class="note-callout">${ic('info')} Belum punya data RAB volume bahan? Tidak masalah &mdash; proyek tetap bisa dibuat dan bahan bisa ditambahkan tanpa RAB, lalu dilengkapi belakangan.</div>
+    <div class="note-callout">${ic('info')} Belum punya data RAB volume bahan? Tidak masalah &mdash; proyek tetap bisa dibuat dan bahan bisa ditambahkan tanpa RAB, lalu dilengkapi belakangan. Untuk input banyak bahan sekaligus, gunakan "Import Massal" di tab RAB &amp; Bahan setelah proyek dibuat.</div>
   `, `<button class="btn btn-ghost" id="mCancel">Batal</button><button class="btn btn-primary" id="mSave">${isEdit ? 'Simpan' : 'Buat Proyek'}</button>`);
 
   document.getElementById('mCancel').onclick = Modal.close;
@@ -205,7 +210,17 @@ Views.openProjectModal = function (project) {
       pic: document.getElementById('fPic').value.trim(),
     };
     if (isEdit) { Store.updateProject(project.id, payload); Toast.show('Proyek diperbarui', 'success'); }
-    else { const rec = Store.addProject(payload); Toast.show('Proyek dibuat', 'success'); App.navigate('#/proyek/' + rec.id + '/ringkasan'); }
+    else {
+      const rec = Store.addProject(payload);
+      const templateId = document.getElementById('fTemplate')?.value;
+      if (templateId) {
+        Store.materials(templateId).forEach(m => Store.addMaterial({ projectId: rec.id, nama: m.nama, kategori: m.kategori, satuan: m.satuan, rabKebutuhan: m.rabKebutuhan }));
+        Toast.show('Proyek dibuat, bahan RAB disalin', 'success');
+      } else {
+        Toast.show('Proyek dibuat', 'success');
+      }
+      App.navigate('#/proyek/' + rec.id + '/ringkasan');
+    }
     Modal.close();
     App.renderView();
   };
@@ -366,7 +381,11 @@ Views.tabRab = function (body, project) {
     <div class="card">
       <div class="card-head">
         <div><h3>RAB &amp; Master Bahan</h3><div class="sub">Kebutuhan bahan acuan RAB per proyek ini</div></div>
-        ${canEdit ? `<button class="btn btn-primary btn-sm" id="addMatBtn">${ic('plus')} Tambah Bahan</button>` : ''}
+        ${canEdit ? `<div class="actions">
+          <button class="btn btn-outline btn-sm" id="dupRabBtn">${ic('copy')} Salin dari Proyek Lain</button>
+          <button class="btn btn-outline btn-sm" id="importRabBtn">${ic('upload')} Import Massal</button>
+          <button class="btn btn-primary btn-sm" id="addMatBtn">${ic('plus')} Tambah Bahan</button>
+        </div>` : ''}
       </div>
       <div class="card-body pad-0">
         ${!canEdit ? `<div style="padding:14px 18px 0"><div class="note-callout">${ic('info')} Hanya Admin Pusat/Owner yang bisa mengubah data RAB. Hubungi owner bila kebutuhan RAB perlu diperbarui.</div></div>` : ''}
@@ -390,6 +409,8 @@ Views.tabRab = function (body, project) {
 
   if (canEdit) {
     document.getElementById('addMatBtn').onclick = () => Views.openMaterialModal(project.id);
+    document.getElementById('importRabBtn').onclick = () => Views.openImportRabModal(project.id);
+    document.getElementById('dupRabBtn').onclick = () => Views.openDuplicateRabModal(project.id);
     body.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => Views.openMaterialModal(project.id, Store.material(b.dataset.edit)));
     body.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
       if (confirm('Hapus bahan ini beserta seluruh riwayat transaksinya?')) {
@@ -399,6 +420,188 @@ Views.tabRab = function (body, project) {
       }
     });
   }
+};
+
+/* ---- Import RAB massal (paste dari Excel / upload CSV) ---- */
+function parseBulkMaterialText(text) {
+  return text.split(/\r?\n/)
+    .filter(l => l.trim() !== '')
+    .map(line => {
+      const delim = line.includes('\t') ? '\t' : (line.includes(';') ? ';' : ',');
+      const parts = line.split(delim).map(p => p.trim().replace(/^"|"$/g, ''));
+      return { nama: parts[0] || '', kategori: parts[1] || '', satuan: parts[2] || '', rabRaw: parts[3] !== undefined ? parts[3] : '' };
+    });
+}
+
+const smallInputStyle = 'width:100%;border:1px solid var(--gray-200);border-radius:6px;padding:5px 7px;font-size:12.5px';
+
+Views.openImportRabModal = function (projectId) {
+  let rows = [];
+  Modal.open('Import RAB Massal', `
+    <div class="note-callout">${ic('info')} Salin beberapa baris langsung dari Excel (kolom: Nama Bahan, Kategori, Satuan, RAB Kebutuhan) lalu tempel di bawah. RAB Kebutuhan boleh dikosongkan bila belum tersedia. Bisa juga unggah file .csv.</div>
+    <div class="field full" style="margin-top:14px">
+      <label>Tempel data di sini (dipisah Tab/koma, satu baris per bahan)</label>
+      <textarea id="bulkText" rows="6" placeholder="Semen PC&#9;Beton&#9;zak (50kg)&#9;18301.98
+Pasir Beton&#9;Beton&#9;m3&#9;1600.43"></textarea>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:6px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--gray-700)"><input type="checkbox" id="bulkHeader" checked /> Baris pertama header</label>
+      <select id="bulkMode" style="padding:7px 9px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:12.5px">
+        <option value="gabung">Update bila nama sama, tambah bila baru</option>
+        <option value="tambah">Selalu tambah sebagai bahan baru</option>
+      </select>
+      <input type="file" id="bulkFile" accept=".csv,.txt" class="hidden" />
+      <button type="button" class="btn btn-ghost btn-sm" id="bulkFileBtn">${ic('folder')} Unggah CSV</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="bulkTemplateBtn">${ic('download')} Contoh Format</button>
+      <button type="button" class="btn btn-outline btn-sm" id="bulkParseBtn">Pratinjau</button>
+    </div>
+    <div id="bulkPreviewWrap"></div>
+  `, `<button class="btn btn-ghost" id="mCancel">Batal</button><button class="btn btn-primary" id="mImport" disabled>Import 0 Bahan</button>`);
+
+  document.getElementById('mCancel').onclick = Modal.close;
+  document.getElementById('bulkFileBtn').onclick = () => document.getElementById('bulkFile').click();
+  document.getElementById('bulkFile').addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => { document.getElementById('bulkText').value = String(reader.result || ''); };
+    reader.readAsText(f);
+  });
+  document.getElementById('bulkTemplateBtn').onclick = () => {
+    const sample = 'Nama Bahan,Kategori,Satuan,RAB Kebutuhan\nSemen PC,Beton,zak (50kg),18301.98\nPasir Beton,Beton,m3,1600.43\nSplit/Kerikil,Beton,m3,\n';
+    const blob = new Blob([sample], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'template_rab_bahan.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const updateImportBtn = () => {
+    const validCount = rows.filter(r => r.nama.trim() && r.satuan.trim()).length;
+    const btn = document.getElementById('mImport');
+    btn.disabled = validCount === 0;
+    btn.textContent = `Import ${validCount} Bahan`;
+  };
+
+  const renderPreview = () => {
+    const wrap = document.getElementById('bulkPreviewWrap');
+    if (!rows.length) { wrap.innerHTML = ''; updateImportBtn(); return; }
+    const existingNames = new Set(Store.materials(projectId).map(m => m.nama.trim().toLowerCase()));
+    wrap.innerHTML = `<div class="table-wrap" style="max-height:280px;overflow-y:auto;border:1px solid var(--gray-100);border-radius:10px">
+      <table class="data-table">
+        <thead><tr><th>Nama Bahan</th><th>Kategori</th><th>Satuan</th><th>RAB Kebutuhan</th><th>Ket.</th><th></th></tr></thead>
+        <tbody>${rows.map((r, i) => {
+          const valid = r.nama.trim() && r.satuan.trim();
+          const isUpdate = existingNames.has(r.nama.trim().toLowerCase());
+          return `<tr>
+            <td><input data-i="${i}" data-f="nama" value="${esc(r.nama)}" style="${smallInputStyle}" /></td>
+            <td><input data-i="${i}" data-f="kategori" value="${esc(r.kategori)}" style="${smallInputStyle}" /></td>
+            <td><input data-i="${i}" data-f="satuan" value="${esc(r.satuan)}" style="${smallInputStyle};width:90px" /></td>
+            <td><input data-i="${i}" data-f="rabRaw" value="${esc(r.rabRaw)}" style="${smallInputStyle};width:100px" /></td>
+            <td>${!valid ? '<span class="badge habis">Belum lengkap</span>' : isUpdate ? '<span class="badge perlu-order">Update</span>' : '<span class="badge aman">Baru</span>'}</td>
+            <td><button type="button" class="btn btn-ghost btn-sm" data-del="${i}">${ic('x')}</button></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+      <div class="hint" style="margin-top:8px">${rows.filter(r => r.nama.trim() && r.satuan.trim()).length} dari ${rows.length} baris siap diimport.</div>`;
+
+    wrap.querySelectorAll('input[data-i]').forEach(inp => inp.addEventListener('input', () => {
+      rows[Number(inp.dataset.i)][inp.dataset.f] = inp.value;
+      updateImportBtn();
+      wrap.querySelectorAll(`[data-del="${inp.dataset.i}"]`);
+    }));
+    wrap.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => { rows.splice(Number(b.dataset.del), 1); renderPreview(); }));
+    updateImportBtn();
+  };
+
+  document.getElementById('bulkParseBtn').onclick = () => {
+    const text = document.getElementById('bulkText').value;
+    let parsed = parseBulkMaterialText(text);
+    if (document.getElementById('bulkHeader').checked && parsed.length) parsed = parsed.slice(1);
+    if (!parsed.length) { Toast.show('Tidak ada baris yang bisa dibaca', 'error'); return; }
+    rows = parsed;
+    renderPreview();
+  };
+
+  document.getElementById('mImport').onclick = () => {
+    const mode = document.getElementById('bulkMode').value;
+    const existing = Store.materials(projectId);
+    let added = 0, updated = 0, skipped = 0;
+    rows.forEach(r => {
+      const nama = r.nama.trim(), satuan = r.satuan.trim();
+      if (!nama || !satuan) { skipped++; return; }
+      const rab = parseFlexNumber(r.rabRaw);
+      const match = mode === 'gabung' ? existing.find(m => m.nama.trim().toLowerCase() === nama.toLowerCase()) : null;
+      if (match) { Store.updateMaterial(match.id, { kategori: r.kategori.trim(), satuan, rabKebutuhan: rab }); updated++; }
+      else { const rec = Store.addMaterial({ projectId, nama, kategori: r.kategori.trim(), satuan, rabKebutuhan: rab }); existing.push(rec); added++; }
+    });
+    Toast.show(`Import selesai: ${added} bahan baru, ${updated} diperbarui${skipped ? `, ${skipped} baris dilewati` : ''}`, 'success');
+    Modal.close();
+    App.renderView();
+  };
+};
+
+/* ---- Salin bahan RAB dari proyek lain (template antar-proyek) ---- */
+Views.openDuplicateRabModal = function (projectId) {
+  const others = Store.projects().filter(p => p.id !== projectId);
+  if (!others.length) { Toast.show('Belum ada proyek lain untuk disalin', 'error'); return; }
+
+  const renderList = (sourceId) => {
+    const mats = Store.materials(sourceId);
+    const wrap = document.getElementById('dupListWrap');
+    wrap.innerHTML = mats.length ? `
+      <div class="table-wrap" style="max-height:260px;overflow-y:auto;border:1px solid var(--gray-100);border-radius:10px">
+        <table class="data-table"><thead><tr><th style="width:34px"><input type="checkbox" id="dupAll" checked /></th><th>Nama Bahan</th><th>Satuan</th><th>RAB Kebutuhan</th></tr></thead>
+        <tbody>${mats.map(m => `<tr>
+          <td><input type="checkbox" class="dupItem" value="${m.id}" checked /></td>
+          <td>${esc(m.nama)}</td><td>${esc(m.satuan)}</td>
+          <td class="num">${m.rabKebutuhan == null ? '<span style="color:var(--gray-500)">-</span>' : fmtNum(m.rabKebutuhan)}</td>
+        </tr>`).join('')}</tbody></table>
+      </div>` : `<div class="empty-state">${ic('layers')}<h4>Proyek ini belum punya bahan</h4></div>`;
+
+    const allBox = document.getElementById('dupAll');
+    if (allBox) allBox.addEventListener('change', () => wrap.querySelectorAll('.dupItem').forEach(cb => cb.checked = allBox.checked));
+  };
+
+  Modal.open('Salin Bahan RAB dari Proyek Lain', `
+    <div class="form-grid">
+      <div class="field full">
+        <label>Salin dari proyek</label>
+        <select id="dupSource">${others.map(p => `<option value="${p.id}">${esc(p.nama)}</option>`).join('')}</select>
+      </div>
+      <div class="field full">
+        <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="dupIncludeRab" checked style="width:auto" /> Sertakan angka RAB Kebutuhan</label>
+        <div class="hint">Nonaktifkan bila volume RAB proyek ini pasti berbeda &mdash; nama &amp; satuan tetap disalin, RAB dikosongkan untuk diisi manual.</div>
+      </div>
+    </div>
+    <div id="dupListWrap"></div>
+  `, `<button class="btn btn-ghost" id="mCancel">Batal</button><button class="btn btn-primary" id="mDup">Salin Bahan Terpilih</button>`);
+
+  document.getElementById('mCancel').onclick = Modal.close;
+  const srcSel = document.getElementById('dupSource');
+  renderList(srcSel.value);
+  srcSel.addEventListener('change', () => renderList(srcSel.value));
+
+  document.getElementById('mDup').onclick = () => {
+    const includeRab = document.getElementById('dupIncludeRab').checked;
+    const sourceId = srcSel.value;
+    const chosenIds = Array.from(document.querySelectorAll('.dupItem:checked')).map(cb => cb.value);
+    if (!chosenIds.length) { Toast.show('Pilih minimal satu bahan', 'error'); return; }
+    const existingNames = new Set(Store.materials(projectId).map(m => m.nama.trim().toLowerCase()));
+    let added = 0, skipped = 0;
+    chosenIds.forEach(id => {
+      const m = Store.material(id);
+      if (!m) return;
+      if (existingNames.has(m.nama.trim().toLowerCase())) { skipped++; return; }
+      Store.addMaterial({ projectId, nama: m.nama, kategori: m.kategori, satuan: m.satuan, rabKebutuhan: includeRab ? m.rabKebutuhan : null });
+      existingNames.add(m.nama.trim().toLowerCase());
+      added++;
+    });
+    Toast.show(`${added} bahan disalin${skipped ? `, ${skipped} dilewati (nama sudah ada)` : ''}`, 'success');
+    Modal.close();
+    App.renderView();
+  };
 };
 
 Views.openMaterialModal = function (projectId, material) {

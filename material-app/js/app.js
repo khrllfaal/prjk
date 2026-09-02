@@ -16,6 +16,22 @@ const fmtDate = (iso) => {
   if (isNaN(d)) return iso;
   return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
 };
+// Terima angka dari copy-paste Excel dalam format apa pun: "1.234,56" (id-ID),
+// "1234.56", "1,234.56", atau kosong. Dipakai oleh fitur import massal RAB.
+const parseFlexNumber = (raw) => {
+  if (raw === undefined || raw === null) return null;
+  let s = String(raw).trim().replace(/[^0-9.,-]/g, '');
+  if (s === '' || s === '-') return null;
+  const hasComma = s.includes(','), hasDot = s.includes('.');
+  if (hasComma && hasDot) {
+    s = s.lastIndexOf(',') > s.lastIndexOf('.') ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  } else if (hasComma && !hasDot) {
+    s = s.replace(',', '.');
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+};
+
 const esc = (s) => String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
