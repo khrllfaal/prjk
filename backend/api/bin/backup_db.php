@@ -9,6 +9,7 @@ declare(strict_types=1);
  * Usage (CLI only — refuses to run over HTTP):
  *   php backup_db.php
  *   php backup_db.php --exclude=users
+ *   php backup_db.php --exclude=users --data-only
  *
  * On Hostinger, schedule this from hPanel -> Advanced -> Cron Job as a
  * daily command, e.g.:
@@ -16,14 +17,23 @@ declare(strict_types=1);
  * See docs/DEPLOY_HOSTINGER.md for the full walkthrough, including why
  * `backup_dir` in config.php must point outside public_html.
  *
- * --exclude=table1,table2 skips those tables entirely (no DROP/CREATE/
+ * --exclude=table1,table2 skips those tables entirely (no DELETE/
  * INSERT for them) — use this for a dump that's meant to hand off a
  * data update (e.g. a corrected report import) without also
  * overwriting the target database's real `users` table and its
- * accounts/passwords. Excluding `users` is safe even though
- * hutang_overrides has a foreign key to it: that FK is only checked
- * against whatever `users` table already exists on the restore
- * target, which this flag deliberately leaves untouched.
+ * accounts/passwords.
+ *
+ * --data-only skips DROP TABLE/CREATE TABLE for every dumped table and
+ * only emits DELETE FROM + INSERT INTO. Use this for a data-refresh
+ * dump aimed at a database whose schema is already set up (the normal
+ * case when handing someone an updated export) — recreating a table
+ * risks errno 150 if that table's own foreign keys point at a table
+ * this dump excludes (e.g. transactions.created_by -> users, which
+ * --exclude=users deliberately leaves untouched: CREATE TABLE would
+ * try to re-establish that FK against whatever's already there, which
+ * fails if it doesn't match exactly). Without this flag the dump is a
+ * full schema+data backup, suitable for restoring into an empty
+ * database from scratch.
  */
 if (PHP_SAPI !== 'cli') {
     http_response_code(403);
@@ -48,12 +58,16 @@ function sql_literal($v): string {
     return "'" . str_replace(["\\", "'"], ["\\\\", "\\'"], (string)$v) . "'";
 }
 
-function dump_table(PDO $pdo, $out, string $table): int {
+function dump_table(PDO $pdo, $out, string $table, bool $dataOnly): int {
     $q = quote_ident($table);
     fwrite($out, "\n-- ---- $table ----\n");
-    fwrite($out, "DROP TABLE IF EXISTS $q;\n");
-    $createRow = $pdo->query("SHOW CREATE TABLE $q")->fetch(PDO::FETCH_NUM);
-    fwrite($out, $createRow[1] . ";\n");
+    if ($dataOnly) {
+        fwrite($out, "DELETE FROM $q;\n");
+    } else {
+        fwrite($out, "DROP TABLE IF EXISTS $q;\n");
+        $createRow = $pdo->query("SHOW CREATE TABLE $q")->fetch(PDO::FETCH_NUM);
+        fwrite($out, $createRow[1] . ";\n");
+    }
 
     $rowCount = 0;
     $stmt = $pdo->query("SELECT * FROM $q");
@@ -103,6 +117,7 @@ $tables = array_values(array_intersect($knownOrder, $existing));
 $tables = array_merge($tables, array_diff($existing, $tables));
 
 $exclude = [];
+$dataOnly = in_array('--data-only', $argv, true);
 foreach ($argv as $arg) {
     if (preg_match('/^--exclude=(.+)$/', $arg, $m)) {
         $exclude = array_map('trim', explode(',', $m[1]));
@@ -133,7 +148,7 @@ gzwrite($gz, "SET NAMES utf8mb4;\nSET SESSION sql_mode='';\nSET FOREIGN_KEY_CHEC
 
 $totalRows = 0;
 foreach ($tables as $table) {
-    $totalRows += dump_table($pdo, $gz, $table);
+    $totalRows += dump_table($pdo, $gz, $table, $dataOnly);
 }
 gzwrite($gz, "\nSET FOREIGN_KEY_CHECKS=1;\n");
 gzclose($gz);
