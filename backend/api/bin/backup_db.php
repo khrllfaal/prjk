@@ -61,7 +61,37 @@ function sql_literal($v): string {
     return "'" . str_replace(["\\", "'"], ["\\\\", "\\'"], (string)$v) . "'";
 }
 
-function dump_table(PDO $pdo, $out, string $table, bool $dataOnly): int {
+/** Drop any "CONSTRAINT ... FOREIGN KEY (...) REFERENCES `x` (...)" line
+ *  targeting one of $excluded tables, fixing up the trailing comma on
+ *  whatever line ends up last before the closing ")" of the CREATE
+ *  TABLE. An excluded table (--exclude=users) is never touched by this
+ *  dump, so its real structure on the target server is unknown — a
+ *  mismatched column type/collation there (common across MySQL/MariaDB
+ *  versions and manual edits) makes CREATE TABLE ... FOREIGN KEY
+ *  REFERENCES that table fail with errno 150 even though the table
+ *  exists. The constraint is only ever an audit-trail nicety here, not
+ *  something the app depends on the database to enforce. */
+function strip_fk_to_excluded(string $ddl, array $excluded): string {
+    if (!$excluded) return $ddl;
+    $pattern = '/^\s*CONSTRAINT\s+`[^`]+`\s+FOREIGN KEY\s+\([^)]*\)\s+REFERENCES\s+`('
+        . implode('|', array_map(fn($t) => preg_quote($t, '/'), $excluded))
+        . ')`.*$/im';
+    $lines = explode("\n", $ddl);
+    $lines = array_values(array_filter($lines, fn($line) => !preg_match($pattern, $line)));
+    // If a removed line was the last one before the closing ")" of the
+    // column/key list, the new last line there must not keep a trailing
+    // comma — find that closing line (e.g. ") ENGINE=InnoDB ...") and
+    // strip a trailing comma off whatever now immediately precedes it.
+    foreach ($lines as $i => $line) {
+        if (preg_match('/^\s*\)/', $line) && $i > 0) {
+            $lines[$i - 1] = preg_replace('/,\s*$/', '', $lines[$i - 1]);
+            break;
+        }
+    }
+    return implode("\n", $lines);
+}
+
+function dump_table(PDO $pdo, $out, string $table, bool $dataOnly, array $excluded = []): int {
     $q = quote_ident($table);
     fwrite($out, "\n-- ---- $table ----\n");
     if (!$dataOnly) {
@@ -75,6 +105,7 @@ function dump_table(PDO $pdo, $out, string $table, bool $dataOnly): int {
         // this dump doesn't happen to include.
         $createRow = $pdo->query("SHOW CREATE TABLE $q")->fetch(PDO::FETCH_NUM);
         $createSql = preg_replace('/^CREATE TABLE/', 'CREATE TABLE IF NOT EXISTS', $createRow[1], 1);
+        $createSql = strip_fk_to_excluded($createSql, $excluded);
         fwrite($out, $createSql . ";\n");
     }
     // Always clear existing rows before inserting fresh ones — this is
@@ -161,7 +192,7 @@ gzwrite($gz, "SET NAMES utf8mb4;\nSET SESSION sql_mode='';\nSET FOREIGN_KEY_CHEC
 
 $totalRows = 0;
 foreach ($tables as $table) {
-    $totalRows += dump_table($pdo, $gz, $table, $dataOnly);
+    $totalRows += dump_table($pdo, $gz, $table, $dataOnly, $exclude);
 }
 gzwrite($gz, "\nSET FOREIGN_KEY_CHECKS=1;\n");
 gzclose($gz);
