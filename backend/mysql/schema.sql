@@ -61,11 +61,12 @@ CREATE TABLE IF NOT EXISTS projects (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS coa (
-  id      VARCHAR(40) PRIMARY KEY,
-  kode    VARCHAR(40) NOT NULL UNIQUE,
-  nama    VARCHAR(255) NOT NULL,
-  level   TINYINT NOT NULL,
-  tipe    VARCHAR(20) NOT NULL
+  id          VARCHAR(40) PRIMARY KEY,
+  kode        VARCHAR(40) NOT NULL UNIQUE,
+  nama        VARCHAR(255) NOT NULL,
+  level       TINYINT NOT NULL,
+  tipe        VARCHAR(20) NOT NULL,
+  saldo_awal  DECIMAL(18,2) NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------

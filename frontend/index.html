@@ -571,7 +571,7 @@ function seedDB(){
   knownLedgerNames.forEach(function(nm){ pushProject(nm, 0, 0, null); });
 
   var coa=SEED.coa.map(function(c,i){
-    return {id:'a'+(i+1), kode:c.kode, nama:c.nama, level:c.level, tipe:coaTipe(c.kode)};
+    return {id:'a'+(i+1), kode:c.kode, nama:c.nama, level:c.level, tipe:coaTipe(c.kode), saldoAwal:c.saldoAwal||0};
   });
 
   // transactions: give each an id + ref no
@@ -728,34 +728,35 @@ function computeCashPeriods(){
     var dow=(d.getDay()+2)%7; // 0=Fri..6=Thu
     return addDays(iso,-dow);
   }
-  function isMasuk(t){ return /masuk$/.test(t.jenis); }
-  function isBank(t){ return /^bank_/.test(t.jenis); }
+  // Bank Masuk/Keluar are deliberately out of this whole widget — owner's
+  // call: Posisi Kas tracks the Kas Besar/Kas Kecil ledger only. What
+  // used to sit in the tracked bank accounts before this ledger started
+  // is folded in separately as a fixed opening balance (see coaAwal
+  // below), not as ongoing bank transactions.
+  function isKasMasuk(t){ return t.jenis==='kas_masuk'; }
+  function isKasKeluar(t){ return t.jenis==='kas_keluar'; }
   function sumRange(from,to){
-    var masuk=0, keluar=0, kasMasuk=0, bankMasuk=0, kasKeluar=0, bankKeluar=0;
+    var masuk=0, keluar=0;
     DB.txns.forEach(function(t){
       if(t.tgl<from||t.tgl>to) return;
-      if(isMasuk(t)){
-        masuk+=t.debet;
-        if(isBank(t)) bankMasuk+=t.debet; else kasMasuk+=t.debet;
-      } else {
-        keluar+=t.kredit;
-        if(isBank(t)) bankKeluar+=t.kredit; else kasKeluar+=t.kredit;
-      }
+      if(isKasMasuk(t)) masuk+=t.debet;
+      else if(isKasKeluar(t)) keluar+=t.kredit;
     });
-    return {masuk:masuk, keluar:keluar, kasMasuk:kasMasuk, bankMasuk:bankMasuk, kasKeluar:kasKeluar, bankKeluar:bankKeluar};
+    return {masuk:masuk, keluar:keluar};
   }
   function saldoAwal(before){
     var s=0;
     DB.txns.forEach(function(t){
       if(t.tgl>=before) return;
-      s += isMasuk(t)?t.debet:-t.kredit;
+      if(isKasMasuk(t)) s+=t.debet;
+      else if(isKasKeluar(t)) s-=t.kredit;
     });
     return s;
   }
   function komposisi(from,to){
     var map={}, order=[];
     DB.txns.forEach(function(t){
-      if(t.tgl<from||t.tgl>to||!isMasuk(t)) return;
+      if(t.tgl<from||t.tgl>to||!isKasMasuk(t)) return;
       var label=akunNamaOnly(t.akunLawan);
       if(!map[label]){ map[label]={sumber:label, jumlah:0}; order.push(label); }
       map[label].jumlah+=t.debet;
@@ -765,10 +766,10 @@ function computeCashPeriods(){
   function projectBreakdown(from,to){
     var map={}, order=[];
     DB.txns.forEach(function(t){
-      if(t.tgl<from||t.tgl>to) return;
+      if(t.tgl<from||t.tgl>to||(!isKasMasuk(t)&&!isKasKeluar(t))) return;
       var key=t.project||'(Tanpa Project)';
       if(!map[key]){ map[key]={nama:key, masuk:0, keluar:0}; order.push(key); }
-      if(isMasuk(t)) map[key].masuk+=t.debet; else map[key].keluar+=t.kredit;
+      if(isKasMasuk(t)) map[key].masuk+=t.debet; else map[key].keluar+=t.kredit;
     });
     return order.map(function(k){ return map[k]; });
   }
@@ -782,14 +783,10 @@ function computeCashPeriods(){
     var weekEnd=addDays(weekStart,6);
     var r=sumRange(weekStart,weekEnd);
     var awal=saldoAwal(weekStart);
-    // Uang Masuk/Uang Keluar shown on the cards are Kas only, per owner's
-    // request — Bank Masuk/Keluar only ever feed into Saldo Akhir
-    // (awal + kas+bank masuk - kas+bank keluar), not the two KPI figures.
     return {
       id:id, tag:tag, short:tag, from:weekStart, to:weekEnd,
       label:fmtDate(weekStart)+' s/d '+fmtDate(weekEnd),
-      saldo_awal:awal, uang_masuk:r.kasMasuk, uang_keluar:r.kasKeluar, saldo_akhir:awal+r.masuk-r.keluar,
-      kasMasuk:r.kasMasuk, bankMasuk:r.bankMasuk, kasKeluar:r.kasKeluar, bankKeluar:r.bankKeluar,
+      saldo_awal:awal, uang_masuk:r.masuk, uang_keluar:r.keluar, saldo_akhir:awal+r.masuk-r.keluar,
       komposisi_masuk:komposisi(weekStart,weekEnd),
       kumulatif:kumulatifUpTo(weekEnd),
       projects:projectBreakdown(weekStart,weekEnd),
@@ -805,17 +802,22 @@ function computeCashPeriods(){
   var allFrom=allDates.length?allDates[0]:today;
   var allTo=allDates.length?allDates[allDates.length-1]:today;
   var allR=sumRange(allFrom,allTo);
+  // Fixed opening balance carried in Master COA's Saldo Awal — the
+  // owner's chosen starting figure for "Semua" (what was already in
+  // hand before this ledger's tracked kas transactions began), added
+  // once here rather than computed from any transaction history.
+  var coaAwal=(DB.coa||[]).reduce(function(a,c){ return a+(c.saldoAwal||0); },0);
+  var allSaldoAwal=coaAwal+saldoAwal(allFrom);
 
   var periods=[
     weekPeriod('w1', lastFriday, '1 Minggu Lalu'),
     weekPeriod('w0', thisFriday, 'Minggu Ini', {
-      masukLalu:lastWeekR.kasMasuk, keluarLalu:lastWeekR.kasKeluar,
+      masukLalu:lastWeekR.masuk, keluarLalu:lastWeekR.keluar,
     }),
     {
       id:'all', tag:'Keseluruhan', short:'Semua', from:allFrom, to:allTo,
       label:fmtDate(allFrom)+' s/d '+fmtDate(allTo),
-      saldo_awal:saldoAwal(allFrom), uang_masuk:allR.kasMasuk, uang_keluar:allR.kasKeluar, saldo_akhir:saldoAwal(allFrom)+allR.masuk-allR.keluar,
-      kasMasuk:allR.kasMasuk, bankMasuk:allR.bankMasuk, kasKeluar:allR.kasKeluar, bankKeluar:allR.bankKeluar,
+      saldo_awal:allSaldoAwal, uang_masuk:allR.masuk, uang_keluar:allR.keluar, saldo_akhir:allSaldoAwal+allR.masuk-allR.keluar,
       komposisi_masuk:komposisi(allFrom,allTo),
       kumulatif:kumulatifUpTo(allTo),
       projects:projectBreakdown(allFrom,allTo),
@@ -1938,28 +1940,6 @@ function registerPages(){
       return (diff>0?'▲ Naik ':'▼ Turun ')+rp(Math.abs(diff))+' dari minggu lalu';
     }
 
-    // Uang Masuk/Uang Keluar shown on the cards are Kas only. Bank
-    // Masuk/Keluar only ever shows up folded into Saldo Akhir — click
-    // that figure to see exactly how Kas and Bank each contributed.
-    function kpiCardDrill(label,value,sub,variant,drillKind){
-      var html=kpiCard(label,value,sub,variant);
-      return html.replace('<div class="kpi-card',
-        '<div data-saldo-drill="'+drillKind+'" style="cursor:pointer;" class="kpi-card');
-    }
-    function showSaldoAkhirBreakdown(p){
-      var title='Rincian Saldo Akhir — '+p.label;
-      var body='<div class="table-scroll"><table class="dtab"><thead><tr>'+
-        '<th>Komponen</th><th style="text-align:right;">Jumlah</th></tr></thead><tbody>'+
-        '<tr><td>Saldo Awal (Kas + Bank)</td><td style="text-align:right;">'+num0(p.saldo_awal)+'</td></tr>'+
-        '<tr><td>Kas Masuk</td><td style="text-align:right;">'+num0(p.kasMasuk)+'</td></tr>'+
-        '<tr><td>Bank Masuk</td><td style="text-align:right;">'+num0(p.bankMasuk)+'</td></tr>'+
-        '<tr><td>Kas Keluar</td><td style="text-align:right;">-'+num0(p.kasKeluar)+'</td></tr>'+
-        '<tr><td>Bank Keluar</td><td style="text-align:right;">-'+num0(p.bankKeluar)+'</td></tr>'+
-        '</tbody><tfoot><tr><td><b>Saldo Akhir</b></td><td style="text-align:right;"><b>'+num0(p.saldo_akhir)+'</b></td></tr></tfoot>'+
-        '</table></div>';
-      openModal(title, body, {saveLabel:null});
-    }
-
     var kasTbl=null;
     function drawKas(){
       var p=period();
@@ -1967,16 +1947,13 @@ function registerPages(){
       var cards=[];
       if(p.saldo_awal) cards.push(kpiCard('Saldo Awal / Dana Tersedia', rp(p.saldo_awal),'Posisi kas di awal periode','accent'));
       cards.push(kpiCard('Uang Masuk', rp(p.uang_masuk),
-        (p.banding?bandingText(p.uang_masuk,p.banding.masukLalu):p.label)+' · Kas','accent'));
+        p.banding?bandingText(p.uang_masuk,p.banding.masukLalu):p.label,'accent'));
       cards.push(kpiCard('Uang Keluar', rp(p.uang_keluar),
-        (p.banding?bandingText(p.uang_keluar,p.banding.keluarLalu):p.label)+' · Kas','accent'));
-      cards.push(kpiCardDrill('Saldo Akhir', rp(p.saldo_akhir),
-        (p.saldo_akhir<0?'Defisit — uang keluar melebihi masuk':'Surplus periode ini')+' · klik untuk rincian Kas/Bank',
-        p.saldo_akhir<0?'danger':'safe','saldo'));
+        p.banding?bandingText(p.uang_keluar,p.banding.keluarLalu):p.label,'accent'));
+      cards.push(kpiCard('Saldo Akhir', rp(p.saldo_akhir),
+        p.saldo_akhir<0?'Defisit — uang keluar melebihi masuk':'Surplus periode ini',
+        p.saldo_akhir<0?'danger':'safe'));
       document.getElementById('kpiKas').innerHTML=cards.join('');
-      document.querySelectorAll('#kpiKas [data-saldo-drill]').forEach(function(el){
-        el.onclick=function(){ showSaldoAkhirBreakdown(p); };
-      });
 
       var kEl=document.getElementById('kompKas'), kD=document.getElementById('kompDesc');
       if(p.komposisi_masuk && p.komposisi_masuk.length){
@@ -2233,6 +2210,7 @@ function registerPages(){
           '<span class="toggle" data-tg="'+esc(a.kode)+'">'+(hasChild?(collapsed[a.kode]?'▸':'▾'):'')+'</span>'+
           '<span class="kode">'+esc(a.kode)+'</span>'+
           '<span class="nm">'+esc(a.nama)+' <span class="tipe">('+esc(a.tipe)+')</span></span>'+
+          (a.saldoAwal?'<span class="mono" style="font-size:12px;margin-right:10px;">'+num0(a.saldoAwal)+'</span>':'')+
           '<span class="acts"><button class="btn btn-warn btn-sm" data-edit="'+a.id+'">Edit</button>'+
           '<button class="btn btn-danger btn-sm" data-del="'+a.id+'">Hapus</button></span></div>';
       }).join('');
@@ -2257,18 +2235,20 @@ function registerPages(){
         '<div class="form-grid">'+
         '<div class="field"><label>Kode Akun *</label><input id="f_kode" value="'+esc(rec?rec.kode:'')+'" placeholder="mis. 6.2.40"></div>'+
         '<div class="field"><label>Nama Akun *</label><input id="f_nama" value="'+esc(rec?rec.nama:'')+'"></div>'+
+        '<div class="field full"><label>Saldo Awal (Rp)</label><input type="text" inputmode="numeric" id="f_saldoAwal" value="'+esc(rec&&rec.saldoAwal?rec.saldoAwal:'')+'" placeholder="0"></div>'+
         '</div>',{onSave:function(){
-          var kode=fv('f_kode'), nama=fv('f_nama');
+          var kode=fv('f_kode'), nama=fv('f_nama'), saldoAwal=fnumC('f_saldoAwal');
           if(!kode||!nama){ toast('Kode dan nama akun wajib diisi.','danger'); return; }
           if(!/^\d+(\.\d+)*$/.test(kode)){ toast('Format kode akun tidak valid (contoh: 6.2.40).','danger'); return; }
           var dup=DB.coa.find(function(x){ return x.kode===kode && (!rec||x.id!==rec.id); });
           if(dup){ toast('Kode akun '+kode+' sudah dipakai.','danger'); return; }
           var savedObj;
-          if(rec){ rec.kode=kode; rec.nama=nama; rec.level=kode.split('.').length; rec.tipe=coaTipe(kode); savedObj=rec; }
-          else { savedObj={id:uid('a'),kode:kode,nama:nama,level:kode.split('.').length,tipe:coaTipe(kode)}; DB.coa.push(savedObj); }
+          if(rec){ rec.kode=kode; rec.nama=nama; rec.level=kode.split('.').length; rec.tipe=coaTipe(kode); rec.saldoAwal=saldoAwal; savedObj=rec; }
+          else { savedObj={id:uid('a'),kode:kode,nama:nama,level:kode.split('.').length,tipe:coaTipe(kode),saldoAwal:saldoAwal}; DB.coa.push(savedObj); }
           invalidateCoaCache();
           saveDB(); syncUpsert('coa', savedObj); closeModal(); draw(); toast('Akun tersimpan.','success');
         }});
+      bindCurrencyInput('f_saldoAwal');
     }
     function del(id){
       var rec=DB.coa.find(function(x){ return x.id===id; });
@@ -2288,8 +2268,8 @@ function registerPages(){
     document.getElementById('btnCollapse').onclick=function(){
       DB.coa.forEach(function(a){ if(a.level<=2) collapsed[a.kode]=true; }); draw();
     };
-    bindExport('exp','Chart_of_Account',['Kode','Nama Akun','Tipe'],function(){
-      return DB.coa.map(function(a){ return [a.kode,a.nama,a.tipe]; });
+    bindExport('exp','Chart_of_Account',['Kode','Nama Akun','Tipe','Saldo Awal'],function(){
+      return DB.coa.map(function(a){ return [a.kode,a.nama,a.tipe,a.saldoAwal||0]; });
     });
   };
 

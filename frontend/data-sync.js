@@ -40,8 +40,8 @@ function txnToDb(obj){
     vendor_id: !isIn ? (obj.vendorId||null) : null,
     ket:obj.ket||'', debet:obj.debet||0, kredit:obj.kredit||0};
 }
-function coaFromDb(r){ return {id:r.id, kode:r.kode, nama:r.nama, level:r.level, tipe:r.tipe}; }
-function coaToDb(obj){ return {id:obj.id, kode:obj.kode, nama:obj.nama, level:obj.level, tipe:obj.tipe}; }
+function coaFromDb(r){ return {id:r.id, kode:r.kode, nama:r.nama, level:r.level, tipe:r.tipe, saldoAwal:Number(r.saldo_awal)||0}; }
+function coaToDb(obj){ return {id:obj.id, kode:obj.kode, nama:obj.nama, level:obj.level, tipe:obj.tipe, saldo_awal:obj.saldoAwal||0}; }
 
 function relasiFromDb(r){ return {id:r.id, kode:r.kode, nama:r.nama, alamat:r.alamat||'', telp:r.telp||'', email:r.email||''}; }
 function relasiToDb(obj){ return {id:obj.id, kode:obj.kode, nama:obj.nama, alamat:obj.alamat||'', telp:obj.telp||'', email:obj.email||''}; }
