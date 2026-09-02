@@ -1,0 +1,590 @@
+/* ===========================================================
+   views.js — kumpulan tampilan halaman
+   =========================================================== */
+
+const Perm = {
+  isOwner: () => App.session && App.session.role === 'owner',
+  canManageProjects: () => Perm.isOwner(),
+  canManageRab: () => Perm.isOwner(),
+  canDelete: () => Perm.isOwner(),
+};
+
+const Views = {};
+
+/* ================= DASHBOARD ================= */
+Views.dashboard = function (root) {
+  App.setTopbar('Dashboard', App.session.role === 'owner' ? 'Ringkasan seluruh proyek' : 'Ringkasan proyek Anda');
+  const all = Calc.allProjectsHealth();
+  const totalProyek = all.length;
+  const proyekAlert = all.filter(x => x.health.totalAlert > 0).length;
+  const withAvg = all.filter(x => x.health.avgPct !== null);
+  const avgAll = withAvg.length ? withAvg.reduce((s, x) => s + x.health.avgPct, 0) / withAvg.length : null;
+  const belumAdaRabTotal = all.reduce((s, x) => s + x.health.belumAdaRab, 0);
+
+  const alertRows = [];
+  all.forEach(({ project, health }) => {
+    health.alerts.forEach(r => alertRows.push({ project, r }));
+  });
+  alertRows.sort((a, b) => {
+    const rank = { habis: 0, over: 0, 'perlu-order': 1, 'perlu-perhatian': 1 };
+    return (rank[a.r.statusStok] ?? rank[a.r.statusRab] ?? 2) - (rank[b.r.statusStok] ?? rank[b.r.statusRab] ?? 2);
+  });
+
+  root.innerHTML = `
+    <div class="view">
+      <div class="page-head">
+        <div>
+          <h2>Halo, ${esc(App.session.name.split(' ')[0])} &#128075;</h2>
+          <p>Berikut kondisi bahan proyek per ${fmtDate(todayISO())}.</p>
+        </div>
+        <div class="actions">
+          <button class="btn btn-outline" id="gotoProjects">${ic('folder')} Lihat Proyek</button>
+          <button class="btn btn-primary" id="gotoInput">${ic('plus')} Input Transaksi</button>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="icon">${ic('folder')}</div>
+          <div class="val">${totalProyek}</div>
+          <div class="lbl">Proyek Aktif</div>
+        </div>
+        <div class="kpi-card ${proyekAlert ? 'red' : 'green'}">
+          <div class="icon">${ic('alert')}</div>
+          <div class="val">${proyekAlert}</div>
+          <div class="lbl">Proyek Perlu Perhatian</div>
+        </div>
+        <div class="kpi-card amber">
+          <div class="icon">${ic('trending')}</div>
+          <div class="val">${avgAll === null ? '-' : (avgAll * 100).toFixed(0) + '%'}</div>
+          <div class="lbl">Rata-rata Pemakaian vs RAB</div>
+        </div>
+        <div class="kpi-card">
+          <div class="icon">${ic('info')}</div>
+          <div class="val">${belumAdaRabTotal}</div>
+          <div class="lbl">Bahan Tanpa Data RAB</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head">
+            <div><h3>Ringkasan per Proyek</h3><div class="sub">Klik baris untuk lihat detail</div></div>
+          </div>
+          <div class="card-body pad-0">
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Proyek</th><th>Bahan</th><th>Pemakaian vs RAB</th><th>Status</th></tr></thead>
+                <tbody id="dashProjRows"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div><h3>Perlu Perhatian</h3><div class="sub">${alertRows.length} bahan butuh tindak lanjut</div></div>
+          </div>
+          <div class="card-body pad-0">
+            ${alertRows.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Bahan</th><th>Proyek</th><th>Status</th></tr></thead><tbody>
+              ${alertRows.slice(0, 8).map(({ project, r }) => `
+                <tr class="clickable-row" data-hash="#/proyek/${project.id}/ringkasan">
+                  <td>${esc(r.material.nama)}</td>
+                  <td>${esc(project.nama)}</td>
+                  <td>${statusBadge(r.statusStok === 'aman' ? r.statusRab : r.statusStok)}</td>
+                </tr>`).join('')}
+            </tbody></table></div>` : `
+              <div class="empty-state">${ic('check')}<h4>Semua aman</h4><p>Tidak ada bahan yang perlu perhatian khusus saat ini.</p></div>`}
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  const tbody = document.getElementById('dashProjRows');
+  tbody.innerHTML = all.map(({ project, health }) => {
+    const overall = overallStatus(health);
+    return `
+    <tr class="clickable-row" data-hash="#/proyek/${project.id}/ringkasan">
+      <td><strong>${esc(project.nama)}</strong><div style="font-size:11.5px;color:var(--gray-500)">${esc(project.lokasi)}</div></td>
+      <td class="num">${health.totalBahan}</td>
+      <td style="min-width:140px">${health.avgPct === null ? '<span style="color:var(--gray-500);font-size:12px">Belum ada RAB</span>' : progressBar(health.avgPct, progressClassFor(null, health.avgPct > 1 ? 'over' : health.avgPct > 0.9 ? 'perlu-perhatian' : 'aman')) + `<div style="font-size:11px;color:var(--gray-500);margin-top:4px">${(health.avgPct * 100).toFixed(0)}%</div>`}</td>
+      <td>${statusBadge(overall)}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="4"><div class="empty-state">${ic('folder')}<h4>Belum ada proyek</h4></div></td></tr>`;
+
+  bindRowNav(root);
+  document.getElementById('gotoProjects').onclick = () => App.navigate('#/proyek');
+  document.getElementById('gotoInput').onclick = () => App.navigate('#/input');
+};
+
+function overallStatus(health) {
+  if (health.avgPct === null && health.totalAlert === 0) return 'belum-ada-rab';
+  const has = (s) => health.alerts.some(r => r.statusStok === s || r.statusRab === s);
+  if (has('habis')) return 'habis';
+  if (has('over')) return 'over';
+  if (has('perlu-order')) return 'perlu-order';
+  if (has('perlu-perhatian')) return 'perlu-perhatian';
+  return 'aman';
+}
+
+function bindRowNav(root) {
+  root.querySelectorAll('[data-hash]').forEach(el => {
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', () => App.navigate(el.dataset.hash));
+  });
+}
+
+/* ================= PROJECTS LIST ================= */
+Views.projects = function (root) {
+  App.setTopbar('Daftar Proyek', `${Store.projects().length} proyek`);
+  const projects = Store.projects();
+
+  root.innerHTML = `
+    <div class="view">
+      <div class="page-head">
+        <div><h2>Daftar Proyek</h2><p>Kelola proyek dan pantau status bahan tiap proyek.</p></div>
+        <div class="actions">
+          ${Perm.canManageProjects() ? `<button class="btn btn-primary" id="newProjBtn">${ic('plus')} Proyek Baru</button>` : ''}
+        </div>
+      </div>
+      <div class="proj-grid" id="projGrid"></div>
+    </div>`;
+
+  const grid = document.getElementById('projGrid');
+  if (!projects.length) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">${ic('folder')}<h4>Belum ada proyek</h4><p>Buat proyek pertama untuk mulai mencatat bahan.</p></div>`;
+  } else {
+    grid.innerHTML = projects.map(p => {
+      const health = Calc.projectHealth(p.id);
+      const overall = overallStatus(health);
+      return `
+      <div class="proj-card" data-hash="#/proyek/${p.id}/ringkasan">
+        <div class="top-row">
+          <div><h4>${esc(p.nama)}</h4><div class="loc">${ic('mapPin')} ${esc(p.lokasi)}</div></div>
+          <span class="badge ${p.status === 'active' ? 'active' : 'selesai'}">${p.status === 'active' ? 'Aktif' : 'Selesai'}</span>
+        </div>
+        <div class="stat-row"><span>Nilai Kontrak</span><strong style="color:var(--navy-900)">${fmtCurrency(p.nilaiKontrak)}</strong></div>
+        <div class="stat-row"><span>Jumlah Bahan</span><span>${health.totalBahan}</span></div>
+        ${health.avgPct !== null ? progressBar(health.avgPct, progressClassFor(null, health.avgPct > 1 ? 'over' : 'aman')) : ''}
+        <div class="top-row" style="align-items:center">
+          ${statusBadge(overall)}
+          ${health.totalAlert ? `<span class="alert-chip">${ic('alert')} ${health.totalAlert} perlu perhatian</span>` : `<span style="font-size:11px;color:var(--gray-500)">${ic('calendar')} Mulai ${fmtDate(p.tanggalMulai)}</span>`}
+        </div>
+      </div>`;
+    }).join('');
+  }
+  bindRowNav(grid);
+
+  if (Perm.canManageProjects()) {
+    document.getElementById('newProjBtn').onclick = () => Views.openProjectModal();
+  }
+};
+
+Views.openProjectModal = function (project) {
+  const isEdit = !!project;
+  Modal.open(isEdit ? 'Edit Proyek' : 'Proyek Baru', `
+    <div class="form-grid">
+      <div class="field full"><label>Nama Proyek</label><input id="fNama" value="${esc(project?.nama || '')}" placeholder="Contoh: Peningkatan Jalan Cibalong" /></div>
+      <div class="field"><label>Lokasi</label><input id="fLokasi" value="${esc(project?.lokasi || '')}" placeholder="Kecamatan, Kabupaten" /></div>
+      <div class="field"><label>Nilai Kontrak (Rp)</label><input id="fNilai" type="number" value="${project?.nilaiKontrak ?? ''}" placeholder="0" /></div>
+      <div class="field"><label>Tanggal Mulai</label><input id="fTgl" type="date" value="${project?.tanggalMulai || todayISO()}" /></div>
+      <div class="field"><label>PIC Lapangan</label><input id="fPic" value="${esc(project?.pic || '')}" placeholder="Nama admin lapangan" /></div>
+    </div>
+    <div class="note-callout">${ic('info')} Belum punya data RAB volume bahan? Tidak masalah &mdash; proyek tetap bisa dibuat dan bahan bisa ditambahkan tanpa RAB, lalu dilengkapi belakangan.</div>
+  `, `<button class="btn btn-ghost" id="mCancel">Batal</button><button class="btn btn-primary" id="mSave">${isEdit ? 'Simpan' : 'Buat Proyek'}</button>`);
+
+  document.getElementById('mCancel').onclick = Modal.close;
+  document.getElementById('mSave').onclick = () => {
+    const nama = document.getElementById('fNama').value.trim();
+    if (!nama) { Toast.show('Nama proyek wajib diisi', 'error'); return; }
+    const payload = {
+      nama,
+      lokasi: document.getElementById('fLokasi').value.trim(),
+      nilaiKontrak: Number(document.getElementById('fNilai').value) || 0,
+      tanggalMulai: document.getElementById('fTgl').value || todayISO(),
+      pic: document.getElementById('fPic').value.trim(),
+    };
+    if (isEdit) { Store.updateProject(project.id, payload); Toast.show('Proyek diperbarui', 'success'); }
+    else { const rec = Store.addProject(payload); Toast.show('Proyek dibuat', 'success'); App.navigate('#/proyek/' + rec.id + '/ringkasan'); }
+    Modal.close();
+    App.renderView();
+  };
+};
+
+/* ================= PROJECT DETAIL ================= */
+Views.projectDetail = function (root, id, tab) {
+  const project = Store.project(id);
+  if (!project) { root.innerHTML = `<div class="view"><div class="empty-state">${ic('alert')}<h4>Proyek tidak ditemukan</h4></div></div>`; return; }
+  App.setTopbar(project.nama, project.lokasi);
+
+  const tabs = [
+    { key: 'ringkasan', label: 'Ringkasan' },
+    { key: 'transaksi', label: 'Transaksi' },
+    { key: 'rab', label: 'RAB & Bahan' },
+    { key: 'mingguan', label: 'Laporan Mingguan' },
+  ];
+  const health = Calc.projectHealth(id);
+
+  root.innerHTML = `
+    <div class="view">
+      <div class="page-head">
+        <div>
+          <h2>${esc(project.nama)}</h2>
+          <p>${ic('mapPin')} ${esc(project.lokasi)} &middot; Mulai ${fmtDate(project.tanggalMulai)} &middot; PIC: ${esc(project.pic || '-')}</p>
+        </div>
+        <div class="actions">
+          ${Perm.canManageProjects() ? `<button class="btn btn-outline" id="editProjBtn">${ic('edit')} Edit Proyek</button>` : ''}
+          <button class="btn btn-primary" id="inputHereBtn">${ic('plus')} Input Transaksi</button>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card"><div class="icon">${ic('layers')}</div><div class="val">${health.totalBahan}</div><div class="lbl">Jenis Bahan</div></div>
+        <div class="kpi-card ${health.totalAlert ? 'red' : 'green'}"><div class="icon">${ic('alert')}</div><div class="val">${health.totalAlert}</div><div class="lbl">Perlu Perhatian</div></div>
+        <div class="kpi-card amber"><div class="icon">${ic('trending')}</div><div class="val">${health.avgPct === null ? '-' : (health.avgPct * 100).toFixed(0) + '%'}</div><div class="lbl">Rata-rata Pemakaian vs RAB</div></div>
+        <div class="kpi-card"><div class="icon">${ic('package')}</div><div class="val">${fmtCurrency(project.nilaiKontrak)}</div><div class="lbl">Nilai Kontrak</div></div>
+      </div>
+
+      <div class="tabs" id="detailTabs">
+        ${tabs.map(t => `<button class="tab-btn ${t.key === tab ? 'active' : ''}" data-tab="${t.key}">${t.label}</button>`).join('')}
+      </div>
+      <div id="tabBody"></div>
+    </div>`;
+
+  document.getElementById('detailTabs').querySelectorAll('.tab-btn').forEach(b => {
+    b.addEventListener('click', () => App.navigate(`#/proyek/${id}/${b.dataset.tab}`));
+  });
+  document.getElementById('inputHereBtn').onclick = () => Views.openTransactionModal(id);
+  if (Perm.canManageProjects()) document.getElementById('editProjBtn').onclick = () => Views.openProjectModal(project);
+
+  const body = document.getElementById('tabBody');
+  if (tab === 'transaksi') Views.tabTransaksi(body, project);
+  else if (tab === 'rab') Views.tabRab(body, project);
+  else if (tab === 'mingguan') Views.tabMingguan(body, project);
+  else Views.tabRingkasan(body, project);
+};
+
+Views.tabRingkasan = function (body, project) {
+  const rows = Calc.projectSummaries(project.id);
+  body.innerHTML = `
+    <div class="card">
+      <div class="card-head"><div><h3>Rekap Stok Bahan</h3><div class="sub">Dihitung otomatis dari seluruh transaksi masuk/keluar</div></div></div>
+      <div class="card-body pad-0">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr>
+              <th>Bahan</th><th>Satuan</th><th>RAB Kebutuhan</th><th>Total Masuk</th><th>Total Keluar</th><th>Sisa Stok</th><th>% Pemakaian</th><th>Status Stok</th><th>Status RAB</th>
+            </tr></thead>
+            <tbody>
+              ${rows.length ? rows.map(r => `
+                <tr>
+                  <td><strong>${esc(r.material.nama)}</strong></td>
+                  <td>${esc(r.material.satuan)}</td>
+                  <td class="num">${r.material.rabKebutuhan == null ? '<span style="color:var(--gray-500)">-</span>' : fmtNum(r.material.rabKebutuhan)}</td>
+                  <td class="num">${fmtNum(r.totalMasuk)}</td>
+                  <td class="num">${fmtNum(r.totalKeluar)}</td>
+                  <td class="num"><strong>${fmtNum(r.sisaStok)}</strong></td>
+                  <td style="min-width:120px">${r.pctRab === null ? '<span style="font-size:11.5px;color:var(--gray-500)">Belum ada RAB</span>' : progressBar(r.pctRab, progressClassFor(r.statusStok, r.statusRab)) + `<div style="font-size:11px;color:var(--gray-500);margin-top:4px">${(r.pctRab * 100).toFixed(0)}%</div>`}</td>
+                  <td>${statusBadge(r.statusStok)}</td>
+                  <td>${statusBadge(r.statusRab)}</td>
+                </tr>`).join('') : `<tr><td colspan="9"><div class="empty-state">${ic('package')}<h4>Belum ada bahan</h4><p>Tambahkan bahan lewat tab RAB &amp; Bahan.</p></div></td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+};
+
+Views.tabTransaksi = function (body, project) {
+  const materials = Store.materials(project.id);
+  const allTx = Store.transactionsByProject(project.id).slice().sort((a, b) => b.tanggal.localeCompare(a.tanggal) || b.dibuatPada.localeCompare(a.dibuatPada));
+
+  body.innerHTML = `
+    <div class="card">
+      <div class="card-head">
+        <div><h3>Riwayat Transaksi</h3><div class="sub">${allTx.length} transaksi tercatat</div></div>
+      </div>
+      <div class="card-body pad-0">
+        <div class="filter-bar" style="padding:16px 18px 0">
+          <select id="fMat"><option value="">Semua Bahan</option>${materials.map(m => `<option value="${m.id}">${esc(m.nama)}</option>`).join('')}</select>
+          <select id="fTipe"><option value="">Semua Tipe</option><option value="masuk">Masuk</option><option value="keluar">Keluar</option></select>
+          <input class="fb-grow" id="fSearch" placeholder="Cari no. surat jalan / keterangan..." />
+        </div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table class="data-table">
+            <thead><tr><th>Tanggal</th><th>Bahan</th><th>Tipe</th><th>Volume</th><th>No. Surat/Ref</th><th>Keterangan</th><th>Diinput</th><th></th></tr></thead>
+            <tbody id="txRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+
+  const renderRows = () => {
+    const fm = document.getElementById('fMat').value;
+    const ft = document.getElementById('fTipe').value;
+    const fs = document.getElementById('fSearch').value.trim().toLowerCase();
+    const filtered = allTx.filter(t =>
+      (!fm || t.materialId === fm) &&
+      (!ft || t.tipe === ft) &&
+      (!fs || (t.noSuratJalan || '').toLowerCase().includes(fs) || (t.keterangan || '').toLowerCase().includes(fs))
+    );
+    const tbody = document.getElementById('txRows');
+    tbody.innerHTML = filtered.length ? filtered.map(t => {
+      const m = Store.material(t.materialId);
+      return `<tr>
+        <td>${fmtDate(t.tanggal)}</td>
+        <td>${esc(m ? m.nama : '-')}</td>
+        <td>${statusBadge(t.tipe)}</td>
+        <td class="num">${fmtNum(t.volume)} ${esc(m ? m.satuan : '')}</td>
+        <td>${esc(t.noSuratJalan || '-')}</td>
+        <td>${esc(t.keterangan || t.itemPekerjaan || '-')}</td>
+        <td style="font-size:11.5px;color:var(--gray-500)">${esc(t.diinputOleh || '-')}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" data-edit="${t.id}">${ic('edit')}</button>
+          ${Perm.canDelete() ? `<button class="btn btn-ghost btn-sm" data-del="${t.id}">${ic('trash')}</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="8"><div class="empty-state">${ic('search')}<h4>Tidak ada transaksi</h4><p>Coba ubah filter, atau tambah transaksi baru.</p></div></td></tr>`;
+
+    tbody.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => Views.openTransactionModal(project.id, allTx.find(t => t.id === b.dataset.edit)));
+    tbody.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+      if (confirm('Hapus transaksi ini? Tindakan tidak bisa dibatalkan.')) {
+        Store.deleteTransaction(b.dataset.del);
+        Toast.show('Transaksi dihapus', 'success');
+        App.renderView();
+      }
+    });
+  };
+  ['fMat', 'fTipe', 'fSearch'].forEach(id => document.getElementById(id).addEventListener('input', renderRows));
+  renderRows();
+};
+
+Views.tabRab = function (body, project) {
+  const materials = Store.materials(project.id);
+  const canEdit = Perm.canManageRab();
+  body.innerHTML = `
+    <div class="card">
+      <div class="card-head">
+        <div><h3>RAB &amp; Master Bahan</h3><div class="sub">Kebutuhan bahan acuan RAB per proyek ini</div></div>
+        ${canEdit ? `<button class="btn btn-primary btn-sm" id="addMatBtn">${ic('plus')} Tambah Bahan</button>` : ''}
+      </div>
+      <div class="card-body pad-0">
+        ${!canEdit ? `<div style="padding:14px 18px 0"><div class="note-callout">${ic('info')} Hanya Admin Pusat/Owner yang bisa mengubah data RAB. Hubungi owner bila kebutuhan RAB perlu diperbarui.</div></div>` : ''}
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Bahan</th><th>Kategori</th><th>Satuan</th><th>RAB Kebutuhan</th>${canEdit ? '<th></th>' : ''}</tr></thead>
+            <tbody>
+              ${materials.length ? materials.map(m => `
+                <tr>
+                  <td><strong>${esc(m.nama)}</strong></td>
+                  <td>${esc(m.kategori || '-')}</td>
+                  <td>${esc(m.satuan)}</td>
+                  <td class="num">${m.rabKebutuhan == null ? `<span class="badge belum-ada-rab">Belum ada RAB</span>` : fmtNum(m.rabKebutuhan)}</td>
+                  ${canEdit ? `<td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" data-edit="${m.id}">${ic('edit')}</button><button class="btn btn-ghost btn-sm" data-del="${m.id}">${ic('trash')}</button></td>` : ''}
+                </tr>`).join('') : `<tr><td colspan="5"><div class="empty-state">${ic('layers')}<h4>Belum ada bahan</h4></div></td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+
+  if (canEdit) {
+    document.getElementById('addMatBtn').onclick = () => Views.openMaterialModal(project.id);
+    body.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => Views.openMaterialModal(project.id, Store.material(b.dataset.edit)));
+    body.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+      if (confirm('Hapus bahan ini beserta seluruh riwayat transaksinya?')) {
+        Store.deleteMaterial(b.dataset.del);
+        Toast.show('Bahan dihapus', 'success');
+        App.renderView();
+      }
+    });
+  }
+};
+
+Views.openMaterialModal = function (projectId, material) {
+  const isEdit = !!material;
+  Modal.open(isEdit ? 'Edit Bahan' : 'Tambah Bahan', `
+    <div class="form-grid">
+      <div class="field full"><label>Nama Bahan</label><input id="fNama" value="${esc(material?.nama || '')}" placeholder="Contoh: Semen PC" /></div>
+      <div class="field"><label>Satuan</label><input id="fSatuan" value="${esc(material?.satuan || '')}" placeholder="zak / m3 / rit" /></div>
+      <div class="field"><label>Kategori</label><input id="fKategori" value="${esc(material?.kategori || '')}" placeholder="Beton / Perkerasan / dst" /></div>
+      <div class="field full">
+        <label>RAB Kebutuhan (opsional) <span class="help-tip" title="Kosongkan bila data volume RAB belum tersedia. Status akan ditandai 'Belum ada RAB' dan tidak mengganggu perhitungan stok masuk/keluar.">${ic('info')}</span></label>
+        <input id="fRab" type="number" step="any" value="${material?.rabKebutuhan ?? ''}" placeholder="Kosongkan jika belum tersedia" />
+        <div class="hint">Boleh dikosongkan. Sistem tetap menghitung stok masuk/keluar walau RAB belum ada.</div>
+      </div>
+    </div>
+  `, `<button class="btn btn-ghost" id="mCancel">Batal</button><button class="btn btn-primary" id="mSave">${isEdit ? 'Simpan' : 'Tambah'}</button>`);
+
+  document.getElementById('mCancel').onclick = Modal.close;
+  document.getElementById('mSave').onclick = () => {
+    const nama = document.getElementById('fNama').value.trim();
+    const satuan = document.getElementById('fSatuan').value.trim();
+    if (!nama || !satuan) { Toast.show('Nama dan satuan wajib diisi', 'error'); return; }
+    const rabVal = document.getElementById('fRab').value;
+    const payload = { nama, satuan, kategori: document.getElementById('fKategori').value.trim(), rabKebutuhan: rabVal === '' ? null : Number(rabVal) };
+    if (isEdit) Store.updateMaterial(material.id, payload);
+    else Store.addMaterial(Object.assign({ projectId }, payload));
+    Toast.show(isEdit ? 'Bahan diperbarui' : 'Bahan ditambahkan', 'success');
+    Modal.close();
+    App.renderView();
+  };
+};
+
+Views.tabMingguan = function (body, project) {
+  const weeks = Calc.weekOptions(project.id);
+  body.innerHTML = `
+    <div class="card">
+      <div class="card-head">
+        <div><h3>Laporan Mingguan</h3><div class="sub">Rekap masuk/keluar per minggu berjalan</div></div>
+        <select id="weekSel">${weeks.map((w, i) => `<option value="${w}">Minggu ${fmtDate(w)} &ndash; ${fmtDate(addDays(w, 6))}</option>`).join('')}</select>
+      </div>
+      <div class="card-body pad-0"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>No</th><th>Nama Bahan</th><th>Satuan</th><th>Masuk Minggu Ini</th><th>Keluar Minggu Ini</th><th>Sisa Stok s/d Minggu Ini</th></tr></thead>
+        <tbody id="weekRows"></tbody>
+      </table></div></div>
+    </div>`;
+
+  const render = () => {
+    const week = document.getElementById('weekSel').value;
+    const rows = Calc.weeklyRecap(project.id, week);
+    document.getElementById('weekRows').innerHTML = rows.length ? rows.map((r, i) => `
+      <tr>
+        <td>${i + 1}</td><td><strong>${esc(r.material.nama)}</strong></td><td>${esc(r.material.satuan)}</td>
+        <td class="num">${fmtNum(r.masukMinggu)}</td><td class="num">${fmtNum(r.keluarMinggu)}</td><td class="num">${fmtNum(r.sisaSdMinggu)}</td>
+      </tr>`).join('') : `<tr><td colspan="6"><div class="empty-state">${ic('calendar')}<h4>Belum ada bahan</h4></div></td></tr>`;
+  };
+  document.getElementById('weekSel').addEventListener('change', render);
+  render();
+};
+
+function addDays(iso, n) { const d = new Date(iso); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+
+/* ================= QUICK INPUT (mode lapangan) ================= */
+Views.quickInput = function (root) {
+  App.setTopbar('Input Transaksi', 'Catat bahan masuk atau keluar');
+  const projects = Store.projects();
+  const defaultProj = App.session.projectId && Store.project(App.session.projectId) ? App.session.projectId : (projects[0] ? projects[0].id : '');
+
+  root.innerHTML = `
+    <div class="view" style="max-width:760px">
+      <div class="page-head"><div><h2>Input Transaksi</h2><p>Pilih proyek dan bahan, lalu catat transaksi masuk atau keluar.</p></div></div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-body">
+          <div class="form-grid">
+            <div class="field full"><label>Proyek</label><select id="qProj">${projects.map(p => `<option value="${p.id}" ${p.id === defaultProj ? 'selected' : ''}>${esc(p.nama)}</option>`).join('')}</select></div>
+          </div>
+          <div class="quickpad">
+            <div class="qp-btn in active" data-tipe="masuk">${ic('in')}<strong>Bahan Masuk</strong><span>Barang diterima di lapangan</span></div>
+            <div class="qp-btn out" data-tipe="keluar">${ic('out')}<strong>Bahan Terpakai</strong><span>Bahan digunakan untuk pekerjaan</span></div>
+          </div>
+          <div class="form-grid">
+            <div class="field full"><label>Bahan</label><select id="qMat"></select></div>
+            <div class="field"><label>Volume</label><input id="qVol" type="number" step="any" min="0" placeholder="0" /></div>
+            <div class="field"><label>Tanggal</label><input id="qTgl" type="date" value="${todayISO()}" /></div>
+            <div class="field"><label id="qRefLabel">No. Surat Jalan</label><input id="qRef" placeholder="SJ-0001" /></div>
+            <div class="field"><label>Item Pekerjaan (opsional)</label><input id="qItem" placeholder="Contoh: 5.1.(1) Lapis Pondasi Agregat A" /></div>
+            <div class="field full"><label>Keterangan</label><textarea id="qKet" rows="2" placeholder="Catatan tambahan (opsional)"></textarea></div>
+          </div>
+          <button class="btn btn-primary btn-block" id="qSubmit">${ic('plus')} Simpan Transaksi</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Transaksi Hari Ini</h3></div>
+        <div class="card-body pad-0"><div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Waktu</th><th>Proyek</th><th>Bahan</th><th>Tipe</th><th>Volume</th></tr></thead>
+          <tbody id="qToday"></tbody>
+        </table></div></div>
+      </div>
+    </div>`;
+
+  let tipe = 'masuk';
+  const matSel = document.getElementById('qMat');
+  const fillMaterials = () => {
+    const pid = document.getElementById('qProj').value;
+    const mats = Store.materials(pid);
+    matSel.innerHTML = mats.length ? mats.map(m => `<option value="${m.id}">${esc(m.nama)} (${esc(m.satuan)})</option>`).join('') : `<option value="">Belum ada bahan di proyek ini</option>`;
+  };
+  fillMaterials();
+  document.getElementById('qProj').addEventListener('change', fillMaterials);
+
+  root.querySelectorAll('.qp-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      root.querySelectorAll('.qp-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      tipe = btn.dataset.tipe;
+      document.getElementById('qRefLabel').textContent = tipe === 'masuk' ? 'No. Surat Jalan' : 'Referensi (opsional)';
+    });
+  });
+
+  const renderToday = () => {
+    const all = Store.transactions().filter(t => t.tanggal === todayISO()).sort((a, b) => b.dibuatPada.localeCompare(a.dibuatPada));
+    document.getElementById('qToday').innerHTML = all.length ? all.map(t => {
+      const m = Store.material(t.materialId);
+      const proj = m ? Store.project(m.projectId) : null;
+      return `<tr><td>${new Date(t.dibuatPada).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</td><td>${esc(proj ? proj.nama : '-')}</td><td>${esc(m ? m.nama : '-')}</td><td>${statusBadge(t.tipe)}</td><td class="num">${fmtNum(t.volume)} ${esc(m ? m.satuan : '')}</td></tr>`;
+    }).join('') : `<tr><td colspan="5"><div class="empty-state">${ic('clipboard')}<h4>Belum ada input hari ini</h4></div></td></tr>`;
+  };
+  renderToday();
+
+  document.getElementById('qSubmit').addEventListener('click', () => {
+    const projectId = document.getElementById('qProj').value;
+    const materialId = matSel.value;
+    const volume = Number(document.getElementById('qVol').value);
+    const tanggal = document.getElementById('qTgl').value || todayISO();
+    if (!materialId) { Toast.show('Pilih bahan terlebih dahulu', 'error'); return; }
+    if (!volume || volume <= 0) { Toast.show('Volume harus lebih dari 0', 'error'); return; }
+    Store.addTransaction({
+      materialId, tipe, tanggal, volume,
+      noSuratJalan: document.getElementById('qRef').value.trim(),
+      itemPekerjaan: document.getElementById('qItem').value.trim(),
+      keterangan: document.getElementById('qKet').value.trim(),
+      diinputOleh: App.session.name,
+    });
+    Toast.show(`Bahan ${tipe === 'masuk' ? 'masuk' : 'keluar'} tercatat`, 'success');
+    document.getElementById('qVol').value = '';
+    document.getElementById('qRef').value = '';
+    document.getElementById('qItem').value = '';
+    document.getElementById('qKet').value = '';
+    renderToday();
+  });
+};
+
+Views.openTransactionModal = function (projectId, tx) {
+  const materials = Store.materials(projectId);
+  if (!materials.length) { Toast.show('Tambahkan bahan dulu lewat tab RAB & Bahan', 'error'); return; }
+  const isEdit = !!tx;
+  Modal.open(isEdit ? 'Edit Transaksi' : 'Input Transaksi', `
+    <div class="form-grid">
+      <div class="field full"><label>Bahan</label><select id="tMat">${materials.map(m => `<option value="${m.id}" ${tx?.materialId === m.id ? 'selected' : ''}>${esc(m.nama)} (${esc(m.satuan)})</option>`).join('')}</select></div>
+      <div class="field"><label>Tipe</label><select id="tTipe"><option value="masuk" ${tx?.tipe === 'masuk' ? 'selected' : ''}>Masuk</option><option value="keluar" ${tx?.tipe === 'keluar' ? 'selected' : ''}>Keluar</option></select></div>
+      <div class="field"><label>Volume</label><input id="tVol" type="number" step="any" value="${tx?.volume ?? ''}" /></div>
+      <div class="field"><label>Tanggal</label><input id="tTgl" type="date" value="${tx?.tanggal || todayISO()}" /></div>
+      <div class="field"><label>No. Surat/Ref</label><input id="tRef" value="${esc(tx?.noSuratJalan || '')}" /></div>
+      <div class="field full"><label>Item Pekerjaan (opsional)</label><input id="tItem" value="${esc(tx?.itemPekerjaan || '')}" /></div>
+      <div class="field full"><label>Keterangan</label><textarea id="tKet" rows="2">${esc(tx?.keterangan || '')}</textarea></div>
+    </div>
+  `, `<button class="btn btn-ghost" id="mCancel">Batal</button><button class="btn btn-primary" id="mSave">${isEdit ? 'Simpan' : 'Tambah'}</button>`);
+
+  document.getElementById('mCancel').onclick = Modal.close;
+  document.getElementById('mSave').onclick = () => {
+    const volume = Number(document.getElementById('tVol').value);
+    if (!volume || volume <= 0) { Toast.show('Volume harus lebih dari 0', 'error'); return; }
+    const payload = {
+      materialId: document.getElementById('tMat').value,
+      tipe: document.getElementById('tTipe').value,
+      volume,
+      tanggal: document.getElementById('tTgl').value || todayISO(),
+      noSuratJalan: document.getElementById('tRef').value.trim(),
+      itemPekerjaan: document.getElementById('tItem').value.trim(),
+      keterangan: document.getElementById('tKet').value.trim(),
+    };
+    if (isEdit) Store.updateTransaction(tx.id, payload);
+    else Store.addTransaction(Object.assign({ diinputOleh: App.session.name }, payload));
+    Toast.show(isEdit ? 'Transaksi diperbarui' : 'Transaksi ditambahkan', 'success');
+    Modal.close();
+    App.renderView();
+  };
+};
