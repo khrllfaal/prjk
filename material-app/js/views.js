@@ -86,12 +86,13 @@ Views.dashboard = function (root) {
             <div><h3>Perlu Perhatian</h3><div class="sub">${alertRows.length} bahan butuh tindak lanjut</div></div>
           </div>
           <div class="card-body pad-0">
-            ${alertRows.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Bahan</th><th>Proyek</th><th>Status</th></tr></thead><tbody>
+            ${alertRows.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Bahan</th><th>Proyek</th><th>Status</th><th>Tindak Lanjut</th></tr></thead><tbody>
               ${alertRows.slice(0, 8).map(({ project, r }) => `
-                <tr class="clickable-row" data-hash="#/proyek/${project.id}/ringkasan">
-                  <td>${esc(r.material.nama)}</td>
-                  <td>${esc(project.nama)}</td>
+                <tr>
+                  <td class="clickable-row" data-hash="#/proyek/${project.id}/ringkasan">${esc(r.material.nama)}</td>
+                  <td class="clickable-row" data-hash="#/proyek/${project.id}/ringkasan">${esc(project.nama)}</td>
                   <td>${statusBadge(r.statusStok === 'aman' ? r.statusRab : r.statusStok)}</td>
+                  <td style="min-width:150px">${followUpCell(r.material, r.statusStok)}</td>
                 </tr>`).join('')}
             </tbody></table></div>` : `
               <div class="empty-state">${ic('check')}<h4>Semua aman</h4><p>Tidak ada bahan yang perlu perhatian khusus saat ini.</p></div>`}
@@ -113,6 +114,7 @@ Views.dashboard = function (root) {
   }).join('') || `<tr><td colspan="4"><div class="empty-state">${ic('folder')}<h4>Belum ada proyek</h4></div></td></tr>`;
 
   bindRowNav(root);
+  bindFollowUpActions(root);
   document.getElementById('gotoProjects').onclick = () => App.navigate('#/proyek');
   document.getElementById('gotoInput').onclick = () => App.navigate('#/input');
 };
@@ -279,6 +281,37 @@ Views.projectDetail = function (root, id, tab) {
   else Views.tabRingkasan(body, project);
 };
 
+// Sel "Tindak Lanjut": penanda ringan (bukan form pengajuan) untuk bahan
+// yang berstatus Perlu Order/Habis, supaya Admin Pusat/Owner tahu mana yang
+// sudah ditindaklanjuti tanpa harus tanya-tanya ulang. Hanya owner yang bisa
+// menandai; admin lapangan cukup melihat.
+function followUpCell(material, statusStok) {
+  const needsFollowUp = statusStok === 'habis' || statusStok === 'perlu-order';
+  if (!needsFollowUp) return '<span style="color:var(--gray-300);font-size:12px">-</span>';
+  if (material.dipesanPada) {
+    return `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <span class="badge aman">${ic('check')} Sudah dipesan &middot; ${fmtDate(material.dipesanPada)}</span>
+      ${Perm.isOwner() ? `<button class="btn btn-ghost btn-sm" data-unmark="${material.id}" title="Batalkan tanda">${ic('x')}</button>` : ''}
+    </div>`;
+  }
+  return Perm.isOwner()
+    ? `<button class="btn btn-outline btn-sm" data-mark="${material.id}">${ic('check')} Tandai Sudah Dipesan</button>`
+    : `<span class="badge habis" style="font-weight:600">${ic('alert')} Belum ditindaklanjuti</span>`;
+}
+
+function bindFollowUpActions(root) {
+  root.querySelectorAll('[data-mark]').forEach(b => b.addEventListener('click', () => {
+    Store.markOrdered(b.dataset.mark, App.session.name);
+    Toast.show('Ditandai sudah dipesan', 'success');
+    App.renderView();
+  }));
+  root.querySelectorAll('[data-unmark]').forEach(b => b.addEventListener('click', () => {
+    Store.unmarkOrdered(b.dataset.unmark);
+    Toast.show('Tanda dibatalkan', 'success');
+    App.renderView();
+  }));
+}
+
 Views.tabRingkasan = function (body, project) {
   const rows = Calc.projectSummaries(project.id);
   body.innerHTML = `
@@ -288,7 +321,7 @@ Views.tabRingkasan = function (body, project) {
         <div class="table-wrap">
           <table class="data-table">
             <thead><tr>
-              <th>Bahan</th><th>Satuan</th><th>RAB Kebutuhan</th><th>Total Masuk</th><th>Total Keluar</th><th>Sisa Stok</th><th>% Pemakaian</th><th>Status Stok</th><th>Status RAB</th>
+              <th>Bahan</th><th>Satuan</th><th>RAB Kebutuhan</th><th>Total Masuk</th><th>Total Keluar</th><th>Sisa Stok</th><th>% Pemakaian</th><th>Status Stok</th><th>Status RAB</th><th>Tindak Lanjut</th>
             </tr></thead>
             <tbody>
               ${rows.length ? rows.map(r => `
@@ -302,12 +335,14 @@ Views.tabRingkasan = function (body, project) {
                   <td style="min-width:120px">${r.pctRab === null ? '<span style="font-size:11.5px;color:var(--gray-500)">Belum ada RAB</span>' : progressBar(r.pctRab, progressClassFor(r.statusStok, r.statusRab)) + `<div style="font-size:11px;color:var(--gray-500);margin-top:4px">${(r.pctRab * 100).toFixed(0)}%</div>`}</td>
                   <td>${statusBadge(r.statusStok)}</td>
                   <td>${statusBadge(r.statusRab)}</td>
-                </tr>`).join('') : `<tr><td colspan="9"><div class="empty-state">${ic('package')}<h4>Belum ada bahan</h4><p>Tambahkan bahan lewat tab RAB &amp; Bahan.</p></div></td></tr>`}
+                  <td style="min-width:150px">${followUpCell(r.material, r.statusStok)}</td>
+                </tr>`).join('') : `<tr><td colspan="10"><div class="empty-state">${ic('package')}<h4>Belum ada bahan</h4><p>Tambahkan bahan lewat tab RAB &amp; Bahan.</p></div></td></tr>`}
             </tbody>
           </table>
         </div>
       </div>
     </div>`;
+  bindFollowUpActions(body);
 };
 
 Views.tabTransaksi = function (body, project) {

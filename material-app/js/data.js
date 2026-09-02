@@ -14,6 +14,7 @@
 const DB_KEY = 'mattrack_v1';
 
 const uid = (p) => p + '_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
+const todayISODate = () => new Date().toISOString().slice(0, 10);
 
 function seedData() {
   const now = new Date();
@@ -193,6 +194,16 @@ const Store = {
     this.save();
   },
 
+  // Tindak lanjut ringan untuk status "Perlu Order"/"Habis": bukan form
+  // pengajuan formal, cuma penanda "sudah diproses" biar Admin Pusat/Owner
+  // tidak bolak-balik menindaklanjuti bahan yang sama.
+  markOrdered(materialId, oleh) {
+    return this.updateMaterial(materialId, { dipesanPada: todayISODate(), dipesanOleh: oleh || '' });
+  },
+  unmarkOrdered(materialId) {
+    return this.updateMaterial(materialId, { dipesanPada: null, dipesanOleh: '' });
+  },
+
   // ---- Katalog Bahan (global, penghubung nama-bahan-berbeda antar proyek) ----
   catalog() { return this.load().catalog; },
   catalogItem(id) { return this.load().catalog.find(c => c.id === id); },
@@ -226,6 +237,12 @@ const Store = {
   addTransaction(t) {
     const rec = Object.assign({ id: uid('tx'), dibuatPada: new Date().toISOString() }, t);
     this.load().transactions.push(rec);
+    // Barang benar-benar masuk -> penanda "sudah dipesan" otomatis lepas,
+    // tidak perlu dibatalkan manual.
+    if (rec.tipe === 'masuk') {
+      const m = this.material(rec.materialId);
+      if (m && m.dipesanPada) { m.dipesanPada = null; m.dipesanOleh = ''; }
+    }
     this.save();
     return rec;
   },
