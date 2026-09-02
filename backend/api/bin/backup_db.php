@@ -23,17 +23,20 @@ declare(strict_types=1);
  * overwriting the target database's real `users` table and its
  * accounts/passwords.
  *
- * --data-only skips DROP TABLE/CREATE TABLE for every dumped table and
- * only emits DELETE FROM + INSERT INTO. Use this for a data-refresh
- * dump aimed at a database whose schema is already set up (the normal
- * case when handing someone an updated export) — recreating a table
- * risks errno 150 if that table's own foreign keys point at a table
- * this dump excludes (e.g. transactions.created_by -> users, which
- * --exclude=users deliberately leaves untouched: CREATE TABLE would
- * try to re-establish that FK against whatever's already there, which
- * fails if it doesn't match exactly). Without this flag the dump is a
- * full schema+data backup, suitable for restoring into an empty
- * database from scratch.
+ * Every dumped table is always replaced data-wise (DELETE FROM then
+ * INSERT), never appended to. By default each table is also preceded
+ * by CREATE TABLE IF NOT EXISTS (never DROP) so the same dump works
+ * whether the target is a genuinely empty database (fresh restore) or
+ * one that's just missing this particular table (e.g. a table that
+ * failed to get created in an earlier partial import) — it can't
+ * destroy a table that's already there, and can't fail re-establishing
+ * a foreign key against a table this dump doesn't happen to include
+ * (e.g. transactions.created_by -> users, left alone by
+ * --exclude=users).
+ *
+ * --data-only additionally skips the CREATE TABLE IF NOT EXISTS lines
+ * entirely, for a smaller file when you already know every table
+ * exists with the right structure.
  */
 if (PHP_SAPI !== 'cli') {
     http_response_code(403);
@@ -61,13 +64,23 @@ function sql_literal($v): string {
 function dump_table(PDO $pdo, $out, string $table, bool $dataOnly): int {
     $q = quote_ident($table);
     fwrite($out, "\n-- ---- $table ----\n");
-    if ($dataOnly) {
-        fwrite($out, "DELETE FROM $q;\n");
-    } else {
-        fwrite($out, "DROP TABLE IF EXISTS $q;\n");
+    if (!$dataOnly) {
+        // CREATE TABLE IF NOT EXISTS, never DROP: a target database can
+        // be a genuinely empty one (fresh restore) or one that's merely
+        // missing this particular table (e.g. it failed to get created
+        // in an earlier partial import) — either way this creates it
+        // without touching a table that's already there, so a restore
+        // can't destroy structure/other data by replacing it wholesale,
+        // and can't fail re-establishing a foreign key against a table
+        // this dump doesn't happen to include.
         $createRow = $pdo->query("SHOW CREATE TABLE $q")->fetch(PDO::FETCH_NUM);
-        fwrite($out, $createRow[1] . ";\n");
+        $createSql = preg_replace('/^CREATE TABLE/', 'CREATE TABLE IF NOT EXISTS', $createRow[1], 1);
+        fwrite($out, $createSql . ";\n");
     }
+    // Always clear existing rows before inserting fresh ones — this is
+    // a data *replace*, not an append, regardless of whether the CREATE
+    // TABLE above just ran or the table already existed with old data.
+    fwrite($out, "DELETE FROM $q;\n");
 
     $rowCount = 0;
     $stmt = $pdo->query("SELECT * FROM $q");
