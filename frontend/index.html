@@ -687,20 +687,25 @@ function computeProjectProgressRows(from, to){
       else costCenter+=j.debet;
     });
     var totalRap=bahan+upah+akomodasi;
-    var sisaRap=(p.rap||0)-totalRap;
-    var ratio=p.rap?totalRap/p.rap:null;
+    // Nilai RAP is always 60% of Nilai Kontrak — computed directly here
+    // rather than read from a separately-maintained project.rap field,
+    // which was left at 0 for almost every project and made Status RAP
+    // come out blank ("Data Tidak Lengkap") for the whole table.
+    var rapValue=(p.kontrak||0)*0.6;
+    var sisaRap=rapValue-totalRap;
+    var ratio=rapValue?totalRap/rapValue:null;
     var statusRap=ratio===null?'':(ratio>1?'MELEBIHI':(ratio>0.9?'HAMPIR':'AMAN'));
     var totalPengeluaran=totalRap+costCenter+admFee;
     var hasilUsaha=(p.kontrak||0)-totalPengeluaran;
     return {
       no:i+1, id:p.id, nama:p.nama, ledgerName:ledger, linked:!!ledger,
       pemberiProyek:p.pemberiProyek||'Lainnya',
-      kontrak:p.kontrak||0, rap:p.rap||0,
+      kontrak:p.kontrak||0, rap:rapValue,
       bahan:bahan, bahanPct:totalRap?bahan/totalRap:0,
       upah:upah, upahPct:totalRap?upah/totalRap:0,
       akomodasi:akomodasi, akomodasiPct:totalRap?akomodasi/totalRap:0,
-      totalRap:totalRap, totalRapPct:p.rap?totalRap/p.rap:0,
-      sisaRap:sisaRap, sisaRapPct:p.rap?sisaRap/p.rap:0,
+      totalRap:totalRap, totalRapPct:rapValue?totalRap/rapValue:0,
+      sisaRap:sisaRap, sisaRapPct:rapValue?sisaRap/rapValue:0,
       statusRap:statusRap,
       costCenter:costCenter, admFee:admFee,
       totalPengeluaran:totalPengeluaran, totalPengeluaranPct:p.kontrak?totalPengeluaran/p.kontrak:0,
@@ -744,8 +749,14 @@ function computeCashPeriods(){
     });
     return {masuk:masuk, keluar:keluar};
   }
+  // Fixed opening balance carried in Master COA's Saldo Awal — what was
+  // already in hand before this ledger's tracked kas transactions began.
+  // Baked into every period's running balance (not just "Semua") so
+  // "Minggu Ini"/"1 Minggu Lalu" reconcile exactly with "Semua" once
+  // their date range covers the same underlying transaction history.
+  var coaAwal=(DB.coa||[]).reduce(function(a,c){ return a+(c.saldoAwal||0); },0);
   function saldoAwal(before){
-    var s=0;
+    var s=coaAwal;
     DB.txns.forEach(function(t){
       if(t.tgl>=before) return;
       if(isKasMasuk(t)) s+=t.debet;
@@ -802,12 +813,7 @@ function computeCashPeriods(){
   var allFrom=allDates.length?allDates[0]:today;
   var allTo=allDates.length?allDates[allDates.length-1]:today;
   var allR=sumRange(allFrom,allTo);
-  // Fixed opening balance carried in Master COA's Saldo Awal — the
-  // owner's chosen starting figure for "Semua" (what was already in
-  // hand before this ledger's tracked kas transactions began), added
-  // once here rather than computed from any transaction history.
-  var coaAwal=(DB.coa||[]).reduce(function(a,c){ return a+(c.saldoAwal||0); },0);
-  var allSaldoAwal=coaAwal+saldoAwal(allFrom);
+  var allSaldoAwal=saldoAwal(allFrom);
 
   var periods=[
     weekPeriod('w1', lastFriday, '1 Minggu Lalu'),
@@ -931,6 +937,46 @@ function showTxnDrilldown(title, subtitle, list){
     '</tbody><tfoot><tr><td colspan="3"><b>Total</b></td><td style="text-align:right;"><b>'+num0(total)+'</b></td></tr></tfoot>'+
     '</table></div>';
   openModal(title, body, {wide:true, saveLabel:null});
+}
+
+/* All individual Kas Masuk/Kas Keluar postings inside [from,to], signed
+   (masuk positive, keluar negative) — feeds the Saldo Akhir drill-down
+   below. Newest first. */
+function saldoAkhirTxns(from, to){
+  var list=[];
+  DB.txns.forEach(function(t){
+    if(t.tgl<from||t.tgl>to) return;
+    if(t.jenis==='kas_masuk'){
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Masuk', amount:t.debet});
+    } else if(t.jenis==='kas_keluar'){
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Keluar', amount:-t.kredit});
+    }
+  });
+  return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+}
+/* Klik Saldo Akhir pada widget "Posisi Kas — Per Periode" -> rincian
+   perhitungan (Saldo Awal + Uang Masuk − Uang Keluar) plus daftar tiap
+   transaksi Kas Masuk/Keluar yang membentuknya. */
+function showSaldoAkhirDrilldown(p){
+  var list=saldoAkhirTxns(p.from,p.to);
+  var body='<div class="kpi-grid" style="margin-bottom:14px;">'+
+    kpiCard('Saldo Awal', rp(p.saldo_awal), 'Posisi awal periode','accent')+
+    kpiCard('Uang Masuk', '+ '+rp(p.uang_masuk), '', 'accent')+
+    kpiCard('Uang Keluar', '− '+rp(p.uang_keluar), '', 'accent')+
+    kpiCard('Saldo Akhir', rp(p.saldo_akhir), 'Saldo Awal + Masuk − Keluar', p.saldo_akhir<0?'danger':'safe')+
+    '</div>'+
+    '<div class="panel-desc" style="margin-bottom:8px;">Seluruh transaksi Kas Masuk &amp; Kas Keluar pada '+esc(p.label)+
+    ', diurutkan dari yang terbaru.</div>'+
+    '<div class="table-scroll" style="max-height:420px;overflow-y:auto;"><table class="dtab"><thead><tr>'+
+    '<th>Tanggal</th><th>Ref No</th><th>Description</th><th style="text-align:right;">Jumlah</th>'+
+    '</tr></thead><tbody>'+
+    (list.length?list.map(function(r){
+      return '<tr><td>'+fmtDate(r.tgl)+'</td><td class="mono" style="font-size:11.5px;">'+esc(r.ref||'–')+'</td>'+
+        '<td class="wrap">'+esc(r.ket||'–')+'</td><td style="text-align:right;" class="'+(r.amount<0?'neg':'pos')+'">'+
+        (r.amount<0?'('+num0(Math.abs(r.amount))+')':num0(r.amount))+'</td></tr>';
+    }).join(''):'<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:18px;">Tidak ada transaksi.</td></tr>')+
+    '</tbody></table></div>';
+  openModal('Rincian Saldo Akhir — '+p.label, body, {wide:true, saveLabel:null});
 }
 
 /* Ref No scheme shared by manual entry, the Excel importer, and the
@@ -1951,9 +1997,14 @@ function registerPages(){
       cards.push(kpiCard('Uang Keluar', rp(p.uang_keluar),
         p.banding?bandingText(p.uang_keluar,p.banding.keluarLalu):p.label,'accent'));
       cards.push(kpiCard('Saldo Akhir', rp(p.saldo_akhir),
-        p.saldo_akhir<0?'Defisit — uang keluar melebihi masuk':'Surplus periode ini',
+        (p.saldo_akhir<0?'Defisit — uang keluar melebihi masuk':'Surplus periode ini')+' · klik untuk rincian',
         p.saldo_akhir<0?'danger':'safe'));
       document.getElementById('kpiKas').innerHTML=cards.join('');
+      var kpiKids=document.getElementById('kpiKas').children;
+      var saldoAkhirCard=kpiKids[kpiKids.length-1];
+      saldoAkhirCard.style.cursor='pointer';
+      saldoAkhirCard.title='Klik untuk lihat rincian Saldo Akhir';
+      saldoAkhirCard.onclick=function(){ showSaldoAkhirDrilldown(p); };
 
       var kEl=document.getElementById('kompKas'), kD=document.getElementById('kompDesc');
       if(p.komposisi_masuk && p.komposisi_masuk.length){
