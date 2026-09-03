@@ -675,7 +675,12 @@ function computeProjectProgressRows(from, to){
       else if(matchesPlainCost(t.akunLawan,'upah')) upah+=t.kredit;
       else if(matchesPlainCost(t.akunLawan,'akomodasi')) akomodasi+=t.kredit;
       else if(matchesPlainCost(t.akunLawan,'admFee')) admFee+=t.kredit;
-      else costCenter+=t.kredit;
+      // Cost Center is a residual "other project cost" bucket — Bank
+      // Keluar postings linked to a project are almost always internal
+      // Kas<->Bank transfers ("Ayat Silang...") or loan
+      // repayments/drawdowns, not a real project expense, so only Kas
+      // Keluar falls into it here.
+      else if(t.jenis==='kas_keluar') costCenter+=t.kredit;
     });
     DB.jurnal.forEach(function(j){
       if(j.project!==ledger) return;
@@ -851,10 +856,14 @@ function projectCostTxns(projectNama, kind, from, to){
     if(t.project!==projectNama || !/keluar$/.test(t.jenis)) return;
     if(from && t.tgl<from) return;
     if(to && t.tgl>to) return;
+    // Bank Keluar residual postings (mostly internal Kas<->Bank transfers
+    // and loan repayments) never count as Cost Center — see
+    // computeProjectProgressRows() for the matching rule this mirrors.
     var cat = matchesPlainCost(t.akunLawan,'bahan') ? 'bahan'
       : matchesPlainCost(t.akunLawan,'upah') ? 'upah'
       : matchesPlainCost(t.akunLawan,'akomodasi') ? 'akomodasi'
-      : matchesPlainCost(t.akunLawan,'admFee') ? 'admFee' : 'costCenter';
+      : matchesPlainCost(t.akunLawan,'admFee') ? 'admFee'
+      : (t.jenis==='kas_keluar' ? 'costCenter' : 'bankLain');
     if(kind!=='all' && cat!==kind) return;
     list.push({tgl:t.tgl, ref:t.ref, ket:t.ket+' — '+t.akunLawan, amount:t.kredit});
   });
