@@ -811,7 +811,11 @@ function computeCashPeriods(){
   var lastWeekR=sumRange(lastFriday, addDays(lastFriday,6));
   var allDates=DB.txns.map(function(t){ return t.tgl; }).filter(Boolean).sort();
   var allFrom=allDates.length?allDates[0]:today;
-  var allTo=allDates.length?allDates[allDates.length-1]:today;
+  // "Semua" always runs through today's real date (not just the latest
+  // transaction on file) so its label/date range auto-advances every
+  // day even with no new data — same auto-update behavior as "Minggu
+  // Ini"/"1 Minggu Lalu", which are both anchored off todayISO() above.
+  var allTo=today;
   var allR=sumRange(allFrom,allTo);
   var allSaldoAwal=saldoAwal(allFrom);
 
