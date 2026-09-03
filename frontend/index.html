@@ -2859,10 +2859,11 @@ function registerPages(){
      a known COA leaf still gets its own row (marked unlisted) so a
      stray/misspelled account name never silently drops money from the
      total. */
-  function groupByHead(from,to,heads){
+  function groupByHead(from,to,heads,project){
     var sumsByName={};
     allEntries().forEach(function(e){
       if(!inRange(e.tgl,from,to)) return;
+      if(project && e.project!==project) return;
       var h=akunHead(e.akun);
       if(heads.indexOf(h)===-1) return;
       var key=akunNamaOnly(e.akun).toLowerCase();
@@ -2895,126 +2896,146 @@ function registerPages(){
     });
     return rows.sort(function(a,b){ return compareKode(a.kode,b.kode); });
   }
-  function headName(h){
-    var a=DB.coa.find(function(x){ return x.kode===h; });
-    return a?a.nama:('Kelompok '+h);
-  }
-  function statementTable(mountId, groups, valueFn){
-    /* groups: [{head, label, sign}] */
-    var html='<div class="table-scroll"><table class="dtab"><thead><tr>'+
-      '<th class="nosort">Akun</th><th class="nosort num">Jumlah</th></tr></thead><tbody>';
-    var grand=0;
-    groups.forEach(function(g){
-      html+='<tr class="row-group"><td>'+esc(g.label)+'</td><td class="num">'+
-        (g.rows.length?num0(g.total):'–')+'</td></tr>';
-      if(!g.rows.length){
-        html+='<tr><td colspan="2" style="color:var(--text-faint);font-style:italic;">Tidak ada transaksi pada kelompok ini.</td></tr>';
-      }
-      g.rows.forEach(function(r){
-        var v=valueFn(r);
-        html+='<tr><td style="padding-left:28px;" class="wrap">'+esc(r.akun)+'</td>'+
-          '<td class="num">'+(Math.abs(v)<0.5?'<span class="faint-italic">–</span>':numSigned(v))+'</td></tr>';
-      });
-      grand+=g.total;
-    });
-    html+='</tbody></table></div>';
-    document.getElementById(mountId).innerHTML=html;
-    return grand;
-  }
 
   /* ---------------- LABA RUGI ---------------- */
   PAGES.laba_rugi=function(c){
-    reportShell(c,'Laba Rugi','Pendapatan dikurangi harga pokok, biaya usaha, dan biaya lain-lain');
+    var years=Array.from(new Set(DB.txns.map(function(t){ return t.tgl.slice(0,4); })
+      .concat(DB.jurnal.map(function(j){ return j.tgl.slice(0,4); })))).filter(Boolean).sort();
+    var thisYear=todayISO().slice(0,4);
+    if(years.indexOf(thisYear)===-1) years.push(thisYear);
+    var monthNames=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+
+    c.innerHTML = pageHead('Laporan Laba Rugi','', '')+
+      '<div class="filterbar">'+
+        '<div class="field"><label>Bulan</label><select id="fBulan"><option value="">Semua Bulan</option>'+
+          monthNames.map(function(m,i){ return '<option value="'+(i+1)+'">'+m+'</option>'; }).join('')+'</select></div>'+
+        '<div class="field"><label>Tahun</label><select id="fTahun">'+
+          years.map(function(y){ return '<option'+(y===thisYear?' selected':'')+'>'+y+'</option>'; }).join('')+'</select></div>'+
+        '<div class="field grow"><label>Project</label><select id="fProject"><option value="">ALL PROJECT</option>'+
+          DB.projects.map(function(p){ return '<option value="'+esc(p.ledgerName||p.nama)+'">'+esc(p.nama)+'</option>'; }).join('')+'</select></div>'+
+        '<button class="btn btn-steel" id="btnFilter">Filter</button>'+
+        exportBtns('exp')+
+      '</div>'+
+      '<div id="reportBody"></div>';
+
     function refresh(){
-      var from=fv('fFrom'), to=fv('fTo');
-      /* One convention for every group: val = kredit − debet.
-         Revenue accounts carry a credit balance so they come out positive; cost accounts carry a
-         debit balance so they come out negative and therefore subtract when the subtotals are added. */
+      var bulan=fv('fBulan'), tahun=fv('fTahun'), project=fv('fProject');
+      var from=null, to=null;
+      if(tahun){
+        if(bulan){
+          var mm=String(bulan).padStart(2,'0');
+          var lastDay=new Date(Number(tahun), Number(bulan), 0).getDate();
+          from=tahun+'-'+mm+'-01'; to=tahun+'-'+mm+'-'+String(lastDay).padStart(2,'0');
+        } else {
+          from=tahun+'-01-01'; to=tahun+'-12-31';
+        }
+      }
+      /* val = kredit − debet: revenue accounts carry a credit balance so
+         they come out positive; cost accounts carry a debit balance so
+         they come out negative. Beban is heads 5-8 combined into one
+         flat list — matches the owner's reference report, which doesn't
+         split HPP/Biaya Usaha/Lain-lain/Pajak into separate sections. */
       var mk=function(heads){
-        var rows=groupByHead(from,to,heads).map(function(r){
+        var rows=groupByHead(from,to,heads,project||null).map(function(r){
           return {akun:r.akun, val:r.kredit-r.debet};
         });
         return {rows:rows, total:rows.reduce(function(a,b){ return a+b.val; },0)};
       };
-      var pend=mk(['4']), hpp=mk(['5']), biaya=mk(['6']), lain=mk(['7']), pajak=mk(['8']);
-      var labaKotor=pend.total+hpp.total;
-      var labaUsaha=labaKotor+biaya.total;
-      var labaBersih=labaUsaha+lain.total+pajak.total;
+      var pend=mk(['4']), beban=mk(['5','6','7','8']);
+      var labaBersih=pend.total+beban.total;
 
-      document.getElementById('reportBody').innerHTML=
-        '<div class="kpi-grid" style="margin-bottom:14px;">'+
-          kpiCard('Pendapatan',rp(pend.total),'Akun 4.x','accent')+
-          kpiCard('Laba Kotor',rp(labaKotor),'Pendapatan − HPP','accent')+
-          kpiCard('Laba Usaha',rp(labaUsaha),'Setelah biaya usaha','accent')+
-          kpiCard('Laba Bersih',rp(labaBersih),labaBersih<0?'Rugi berjalan':'Laba berjalan',labaBersih<0?'danger':'safe')+
-        '</div><div class="panel"><h3>Rincian Laba Rugi</h3>'+
-        '<div class="panel-desc">Nilai negatif berarti mengurangi laba</div><div id="lrTable"></div></div>';
-
-      statementTable('lrTable',[
-        {label:'PENDAPATAN', rows:pend.rows, total:pend.total},
-        {label:'HARGA POKOK PENJUALAN', rows:hpp.rows, total:hpp.total},
-        {label:'BIAYA USAHA', rows:biaya.rows, total:biaya.total},
-        {label:'PENDAPATAN & BIAYA LAIN-LAIN', rows:lain.rows, total:lain.total},
-        {label:'PAJAK PENGHASILAN', rows:pajak.rows, total:pajak.total}
-      ], function(r){ return r.val; });
-
-      var t=document.querySelector('#lrTable table');
-      if(t){
-        var tf=document.createElement('tfoot');
-        tf.innerHTML='<tr><td>LABA / RUGI BERSIH</td><td class="num" style="color:'+
-          (labaBersih<0?'var(--danger)':'var(--safe)')+'">'+numSigned(labaBersih)+'</td></tr>';
-        t.appendChild(tf);
-      }
-    }
-    refresh(); bindReportFilter(refresh);
-    bindExport('exp','Laba_Rugi',['Keterangan','Jumlah'],function(){
-      var out=[]; document.querySelectorAll('#lrTable tr').forEach(function(tr){
-        var td=tr.querySelectorAll('td');
-        if(td.length===2) out.push([td[0].textContent.trim(), td[1].textContent.trim()]);
+      var html='<div class="panel"><div class="table-scroll"><table class="dtab"><thead><tr>'+
+        '<th class="nosort">Keterangan</th><th class="nosort num">Jumlah</th></tr></thead><tbody>'+
+        '<tr><td colspan="2" style="background:var(--safe-bg);font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:11.5px;">PENDAPATAN</td></tr>';
+      pend.rows.forEach(function(r){
+        html+='<tr><td class="wrap">'+esc(r.akun)+'</td><td class="num">'+
+          (Math.abs(r.val)<0.5?'<span class="faint-italic">–</span>':num0(r.val))+'</td></tr>';
       });
+      html+='<tr><td><b>Total Pendapatan</b></td><td class="num"><b>'+num0(pend.total)+'</b></td></tr>'+
+        '<tr><td colspan="2" style="background:var(--warn-bg);font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:11.5px;">BEBAN</td></tr>';
+      beban.rows.forEach(function(r){
+        html+='<tr><td class="wrap">'+esc(r.akun)+'</td><td class="num">'+
+          (Math.abs(r.val)<0.5?'<span class="faint-italic">–</span>':num0(Math.abs(r.val)))+'</td></tr>';
+      });
+      html+='<tr><td><b>Total Beban</b></td><td class="num"><b>'+num0(Math.abs(beban.total))+'</b></td></tr>'+
+        '<tr style="background:var(--'+(labaBersih<0?'danger':'safe')+'-bg);"><td><b>LABA BERSIH</b></td>'+
+        '<td class="num"><b>'+numSigned(labaBersih)+'</b></td></tr>'+
+        '</tbody></table></div></div>';
+      document.getElementById('reportBody').innerHTML=html;
+      window._lrLastRows={pend:pend, beban:beban, labaBersih:labaBersih};
+    }
+    refresh();
+    document.getElementById('btnFilter').onclick=refresh;
+    document.getElementById('fProject').addEventListener('change',refresh);
+    bindExport('exp','Laba_Rugi',['Keterangan','Jumlah'],function(){
+      var d=window._lrLastRows;
+      var out=[['PENDAPATAN','']];
+      d.pend.rows.forEach(function(r){ out.push([r.akun,r.val]); });
+      out.push(['Total Pendapatan',d.pend.total]);
+      out.push(['BEBAN','']);
+      d.beban.rows.forEach(function(r){ out.push([r.akun,Math.abs(r.val)]); });
+      out.push(['Total Beban',Math.abs(d.beban.total)]);
+      out.push(['LABA BERSIH',d.labaBersih]);
       return out;
     });
   };
 
   /* ---------------- NERACA ---------------- */
   PAGES.neraca=function(c){
-    reportShell(c,'Neraca','Posisi aktiva, kewajiban, dan ekuitas');
-    function refresh(){
-      var from=fv('fFrom'), to=fv('fTo');
-      var mk=function(heads,sign){
-        var rows=groupByHead(from,to,heads).map(function(r){
-          return {akun:r.akun, val:sign*(r.debet-r.kredit)};
-        });
-        return {rows:rows, total:rows.reduce(function(a,b){ return a+b.val; },0)};
-      };
-      var aktiva=mk(['1'],1), kewajiban=mk(['2'],-1), ekuitas=mk(['3'],-1);
-      var labaRows=groupByHead(from,to,['4','5','6','7','8']);
-      var labaBerjalan=labaRows.reduce(function(a,b){ return a+(b.kredit-b.debet); },0);
-      var totalPasiva=kewajiban.total+ekuitas.total+labaBerjalan;
-      var selisih=aktiva.total-totalPasiva;
+    // A Balance Sheet is a snapshot as of one date, not a from/to range —
+    // every account's cumulative balance from the beginning up to that
+    // date (from=null in groupByHead means "no lower bound").
+    c.innerHTML = pageHead('Laporan Neraca','','')+
+      '<div class="filterbar">'+
+        '<div class="field"><label>Per Tanggal</label><input type="date" id="fPer" value="'+esc(todayISO())+'"></div>'+
+        '<button class="btn btn-steel" id="btnFilter">Tampilkan</button>'+
+        exportBtns('exp')+
+      '</div>'+
+      '<div id="reportBody"></div>';
 
-      document.getElementById('reportBody').innerHTML=
-        (Math.abs(selisih)<1?'':alertHTML('warn','⚠','Neraca belum seimbang',
-          'Selisih aktiva dan pasiva sebesar <b>'+rp(Math.abs(selisih))+'</b>. Umumnya karena saldo awal neraca belum diinput di data sumber — sheet transaksi hanya memuat mutasi Januari–April 2026.'))+
-        '<div class="kpi-grid" style="margin-bottom:14px;">'+
-          kpiCard('Total Aktiva',rp(aktiva.total),'Akun 1.x','accent')+
-          kpiCard('Total Kewajiban',rp(kewajiban.total),'Akun 2.x','accent')+
-          kpiCard('Ekuitas + Laba Berjalan',rp(ekuitas.total+labaBerjalan),'Akun 3.x + hasil usaha','accent')+
-        '</div><div class="grid-2">'+
-          '<div class="panel"><h3>AKTIVA</h3><div class="panel-desc">Harta perusahaan</div><div id="nAktiva"></div></div>'+
-          '<div class="panel"><h3>PASIVA</h3><div class="panel-desc">Kewajiban &amp; ekuitas</div><div id="nPasiva"></div></div>'+
-        '</div>';
-
-      statementTable('nAktiva',[{label:'AKTIVA',rows:aktiva.rows,total:aktiva.total}],function(r){ return r.val; });
-      statementTable('nPasiva',[
-        {label:'KEWAJIBAN',rows:kewajiban.rows,total:kewajiban.total},
-        {label:'EKUITAS',rows:ekuitas.rows.concat([{akun:'Laba / Rugi Berjalan',val:labaBerjalan}]),
-         total:ekuitas.total+labaBerjalan}
-      ],function(r){ return r.val; });
+    function acctRow(r,sign){
+      var v=sign*(r.debet-r.kredit);
+      return '<tr><td class="wrap" style="padding-left:20px;">'+esc(r.akun)+'</td><td class="num">'+
+        (Math.abs(v)<0.5?'<span class="faint-italic">–</span>':numSigned(v))+'</td></tr>';
     }
-    refresh(); bindReportFilter(refresh);
+    function refresh(){
+      var to=fv('fPer')||todayISO();
+      var aktiva=groupByHead(null,to,['1']);
+      var kewajiban=groupByHead(null,to,['2']);
+      var ekuitas=groupByHead(null,to,['3']);
+      var labaRows=groupByHead(null,to,['4','5','6','7','8']);
+
+      var totalAktiva=aktiva.reduce(function(a,r){ return a+(r.debet-r.kredit); },0);
+      var totalHutang=kewajiban.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
+      var totalEkuitasAkun=ekuitas.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
+      var labaBerjalan=labaRows.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
+      var totalEkuitas=totalEkuitasAkun+labaBerjalan;
+      var totalPasiva=totalHutang+totalEkuitas;
+      var selisih=totalAktiva-totalPasiva;
+
+      var html='<div class="panel"><div class="table-scroll"><table class="dtab" id="tblNeraca"><thead>'+
+        '<tr><th colspan="2" style="text-align:center;font-size:15px;">LAPORAN NERACA<br>'+
+        '<span style="font-weight:400;font-size:12px;color:var(--text-faint);">Per '+esc(fmtDate(to))+'</span></th></tr>'+
+        '</thead><tbody>'+
+        '<tr class="row-group"><td colspan="2">1-AKTIVA</td></tr>';
+      aktiva.forEach(function(r){ html+=acctRow(r,1); });
+      html+='<tr><td><b>TOTAL AKTIVA</b></td><td class="num"><b>'+num0(totalAktiva)+'</b></td></tr>'+
+        '<tr class="row-group"><td colspan="2">2-PASIVA</td></tr>';
+      kewajiban.forEach(function(r){ html+=acctRow(r,-1); });
+      html+='<tr><td><b>TOTAL HUTANG</b></td><td class="num"><b>'+num0(totalHutang)+'</b></td></tr>';
+      ekuitas.forEach(function(r){ html+=acctRow(r,-1); });
+      html+='<tr><td class="wrap" style="padding-left:20px;">Laba/Rugi Berjalan</td><td class="num">'+numSigned(labaBerjalan)+'</td></tr>'+
+        '<tr><td><b>TOTAL EKUITAS</b></td><td class="num"><b>'+num0(totalEkuitas)+'</b></td></tr>'+
+        '<tr><td><b>TOTAL PASIVA</b></td><td class="num"><b>'+num0(totalPasiva)+'</b></td></tr>'+
+        '<tr style="background:var(--'+(Math.abs(selisih)<1?'safe':'danger')+'-bg);"><td><b>NERACA BALANCE</b></td>'+
+        '<td class="num"><b>'+num0(selisih)+'</b></td></tr>'+
+        '</tbody></table></div></div>';
+      document.getElementById('reportBody').innerHTML=html;
+    }
+    refresh();
+    document.getElementById('btnFilter').onclick=refresh;
     bindExport('exp','Neraca',['Keterangan','Jumlah'],function(){
-      var out=[]; document.querySelectorAll('#nAktiva tr, #nPasiva tr').forEach(function(tr){
+      var out=[]; document.querySelectorAll('#tblNeraca tr').forEach(function(tr){
         var td=tr.querySelectorAll('td');
         if(td.length===2) out.push([td[0].textContent.trim(), td[1].textContent.trim()]);
       });
