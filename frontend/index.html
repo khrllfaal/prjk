@@ -663,6 +663,14 @@ function matchesPlainCost(akunLawan, kind){
    scopes every figure to that window (used by the "Minggu Ini" filter);
    omit both for all-time totals ("Semua"). Kontrak/RAP stay the
    project's fixed budget figures regardless of window. */
+/* A cash payment that settles a debt (Hutang) or funds a receivable
+   (Piutang) is a balance-sheet event, not a project expense — excluded
+   from the Cost Center bucket below the same way Bank Keluar transfers
+   are, so debt/receivable movements never inflate Cost Center. */
+function isHutangPiutangName(akunLawan){
+  var n=akunNamaOnly(akunLawan).toLowerCase();
+  return n.indexOf('hutang')===0 || n.indexOf('piutang')===0;
+}
 function computeProjectProgressRows(from, to){
   return DB.projects.map(function(p, i){
     var ledger=p.ledgerName||p.nama;
@@ -678,9 +686,9 @@ function computeProjectProgressRows(from, to){
       // Cost Center is a residual "other project cost" bucket — Bank
       // Keluar postings linked to a project are almost always internal
       // Kas<->Bank transfers ("Ayat Silang...") or loan
-      // repayments/drawdowns, not a real project expense, so only Kas
-      // Keluar falls into it here.
-      else if(t.jenis==='kas_keluar') costCenter+=t.kredit;
+      // repayments/drawdowns, and a Hutang/Piutang settlement is a
+      // balance-sheet movement either way, so neither counts as cost.
+      else if(t.jenis==='kas_keluar' && !isHutangPiutangName(t.akunLawan)) costCenter+=t.kredit;
     });
     DB.jurnal.forEach(function(j){
       if(j.project!==ledger) return;
@@ -689,7 +697,7 @@ function computeProjectProgressRows(from, to){
       if(matchesRapCost(j.akun,'bahan')) bahan+=j.debet;
       else if(matchesRapCost(j.akun,'upah')) upah+=j.debet;
       else if(matchesRapCost(j.akun,'akomodasi')) akomodasi+=j.debet;
-      else costCenter+=j.debet;
+      else if(!isHutangPiutangName(j.akun)) costCenter+=j.debet;
     });
     var totalRap=bahan+upah+akomodasi;
     // Nilai RAP is always 60% of Nilai Kontrak — computed directly here
@@ -857,13 +865,14 @@ function projectCostTxns(projectNama, kind, from, to){
     if(from && t.tgl<from) return;
     if(to && t.tgl>to) return;
     // Bank Keluar residual postings (mostly internal Kas<->Bank transfers
-    // and loan repayments) never count as Cost Center — see
-    // computeProjectProgressRows() for the matching rule this mirrors.
+    // and loan repayments) and any Hutang/Piutang settlement never count
+    // as Cost Center — see computeProjectProgressRows() for the matching
+    // rule this mirrors.
     var cat = matchesPlainCost(t.akunLawan,'bahan') ? 'bahan'
       : matchesPlainCost(t.akunLawan,'upah') ? 'upah'
       : matchesPlainCost(t.akunLawan,'akomodasi') ? 'akomodasi'
       : matchesPlainCost(t.akunLawan,'admFee') ? 'admFee'
-      : (t.jenis==='kas_keluar' ? 'costCenter' : 'bankLain');
+      : (t.jenis==='kas_keluar' && !isHutangPiutangName(t.akunLawan) ? 'costCenter' : 'excluded');
     if(kind!=='all' && cat!==kind) return;
     list.push({tgl:t.tgl, ref:t.ref, ket:t.ket+' — '+t.akunLawan, amount:t.kredit});
   });
@@ -872,7 +881,8 @@ function projectCostTxns(projectNama, kind, from, to){
     if(from && j.tgl<from) return;
     if(to && j.tgl>to) return;
     var cat = matchesRapCost(j.akun,'bahan') ? 'bahan' : matchesRapCost(j.akun,'upah') ? 'upah'
-      : matchesRapCost(j.akun,'akomodasi') ? 'akomodasi' : 'costCenter';
+      : matchesRapCost(j.akun,'akomodasi') ? 'akomodasi'
+      : (isHutangPiutangName(j.akun) ? 'excluded' : 'costCenter');
     if(kind!=='all' && cat!==kind) return;
     list.push({tgl:j.tgl, ref:j.ref, ket:j.ket+' — '+j.akun, amount:j.debet});
   });
@@ -940,16 +950,40 @@ function hutangStatusInfo(status){
 function showTxnDrilldown(title, subtitle, list){
   var total=list.reduce(function(a,b){ return a+(b.amount||0); },0);
   var body=(subtitle?'<div class="panel-desc" style="margin-bottom:10px;">'+esc(subtitle)+'</div>':'')+
-    '<div class="table-scroll"><table class="dtab"><thead><tr>'+
+    (list.length?'<input type="text" id="drillSearch" placeholder="Cari tanggal, ref, atau keterangan..." '+
+      'style="width:100%;box-sizing:border-box;padding:8px 10px;margin-bottom:10px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;">':'')+
+    '<div class="table-scroll"><table class="dtab" id="drillTable"><thead><tr>'+
     '<th>Tanggal</th><th>Ref No</th><th>Description</th><th style="text-align:right;">Amount</th>'+
     '</tr></thead><tbody>'+
     (list.length?list.map(function(r){
-      return '<tr><td>'+fmtDate(r.tgl)+'</td><td class="mono" style="font-size:11.5px;">'+esc(r.ref||'–')+'</td>'+
+      var key=esc((fmtDate(r.tgl)+' '+(r.ref||'')+' '+(r.ket||'')).toLowerCase());
+      return '<tr data-drill-row data-drill-key="'+key+'" data-drill-amt="'+(r.amount||0)+'">'+
+        '<td>'+fmtDate(r.tgl)+'</td><td class="mono" style="font-size:11.5px;">'+esc(r.ref||'–')+'</td>'+
         '<td class="wrap">'+esc(r.ket||'–')+'</td><td style="text-align:right;">'+num0(r.amount)+'</td></tr>';
     }).join(''):'<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:18px;">Tidak ada transaksi.</td></tr>')+
-    '</tbody><tfoot><tr><td colspan="3"><b>Total</b></td><td style="text-align:right;"><b>'+num0(total)+'</b></td></tr></tfoot>'+
+    '</tbody><tfoot><tr><td colspan="3"><b>Total</b></td><td style="text-align:right;" id="drillTotal"><b>'+num0(total)+'</b></td></tr></tfoot>'+
     '</table></div>';
   openModal(title, body, {wide:true, saveLabel:null});
+  if(list.length) wireDrilldownSearch('drillSearch','drillTable','drillTotal');
+}
+
+/* Shared simple search box for every read-only drill-down modal (Cash
+   Flow, Laba Rugi, Dashboard progress, Trial Hutang, Saldo Akhir, ...):
+   filters rows by plain substring match and re-sums the visible total. */
+function wireDrilldownSearch(searchId, tableId, totalId){
+  var searchEl=document.getElementById(searchId);
+  if(!searchEl) return;
+  searchEl.oninput=function(){
+    var q=searchEl.value.trim().toLowerCase();
+    var sum=0;
+    document.querySelectorAll('#'+tableId+' tbody tr[data-drill-row]').forEach(function(tr){
+      var match=!q || tr.getAttribute('data-drill-key').indexOf(q)>-1;
+      tr.style.display=match?'':'none';
+      if(match) sum+=Number(tr.getAttribute('data-drill-amt'))||0;
+    });
+    var totalEl=document.getElementById(totalId);
+    if(totalEl) totalEl.innerHTML='<b>'+num0(sum)+'</b>';
+  };
 }
 
 /* All individual Kas Masuk/Kas Keluar postings inside [from,to], signed
@@ -980,16 +1014,20 @@ function showSaldoAkhirDrilldown(p){
     '</div>'+
     '<div class="panel-desc" style="margin-bottom:8px;">Seluruh transaksi Kas Masuk &amp; Kas Keluar pada '+esc(p.label)+
     ', diurutkan dari yang terbaru.</div>'+
-    '<div class="table-scroll" style="max-height:420px;overflow-y:auto;"><table class="dtab"><thead><tr>'+
+    (list.length?'<input type="text" id="drillSearch2" placeholder="Cari tanggal, ref, atau keterangan..." '+
+      'style="width:100%;box-sizing:border-box;padding:8px 10px;margin-bottom:10px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;">':'')+
+    '<div class="table-scroll" style="max-height:420px;overflow-y:auto;"><table class="dtab" id="drillTable2"><thead><tr>'+
     '<th>Tanggal</th><th>Ref No</th><th>Description</th><th style="text-align:right;">Jumlah</th>'+
     '</tr></thead><tbody>'+
     (list.length?list.map(function(r){
-      return '<tr><td>'+fmtDate(r.tgl)+'</td><td class="mono" style="font-size:11.5px;">'+esc(r.ref||'–')+'</td>'+
+      var key=esc((fmtDate(r.tgl)+' '+(r.ref||'')+' '+(r.ket||'')).toLowerCase());
+      return '<tr data-drill-row data-drill-key="'+key+'"><td>'+fmtDate(r.tgl)+'</td><td class="mono" style="font-size:11.5px;">'+esc(r.ref||'–')+'</td>'+
         '<td class="wrap">'+esc(r.ket||'–')+'</td><td style="text-align:right;" class="'+(r.amount<0?'neg':'pos')+'">'+
         (r.amount<0?'('+num0(Math.abs(r.amount))+')':num0(r.amount))+'</td></tr>';
     }).join(''):'<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:18px;">Tidak ada transaksi.</td></tr>')+
     '</tbody></table></div>';
   openModal('Rincian Saldo Akhir — '+p.label, body, {wide:true, saveLabel:null});
+  if(list.length) wireDrilldownSearch('drillSearch2','drillTable2',null);
 }
 
 /* Ref No scheme shared by manual entry, the Excel importer, and the
@@ -2961,6 +2999,20 @@ function registerPages(){
     return rows.sort(function(a,b){ return compareKode(a.kode,b.kode); });
   }
 
+  /* Every kas/bank + jurnal posting behind one Laba Rugi account line
+     (matched by name, coded or plain — same rule as groupByHead()),
+     feeding the click-to-drilldown on each row. */
+  function labaRugiAccountTxns(accName, from, to, project){
+    var list=[];
+    allEntries().forEach(function(e){
+      if(!inRange(e.tgl,from,to)) return;
+      if(project && e.project!==project) return;
+      if(akunNamaOnly(e.akun)!==accName) return;
+      list.push({tgl:e.tgl, ref:e.ref, ket:(e.ket||'')+(e.project?' — '+e.project:''), debet:e.debet, kredit:e.kredit});
+    });
+    return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+  }
+
   /* ---------------- LABA RUGI ---------------- */
   PAGES.laba_rugi=function(c){
     var years=Array.from(new Set(DB.txns.map(function(t){ return t.tgl.slice(0,4); })
@@ -3011,14 +3063,18 @@ function registerPages(){
       var html='<div class="panel"><div class="table-scroll"><table class="dtab"><thead><tr>'+
         '<th class="nosort">Keterangan</th><th class="nosort num">Jumlah</th></tr></thead><tbody>'+
         '<tr><td colspan="2" style="background:var(--safe-bg);font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:11.5px;">PENDAPATAN</td></tr>';
+      function akunCell(r){
+        if(Math.abs(r.val)<0.5) return esc(r.akun);
+        return '<button type="button" class="linklike" data-lr-akun="'+esc(akunNamaOnly(r.akun))+'">'+esc(r.akun)+'</button>';
+      }
       pend.rows.forEach(function(r){
-        html+='<tr><td class="wrap">'+esc(r.akun)+'</td><td class="num">'+
+        html+='<tr><td class="wrap">'+akunCell(r)+'</td><td class="num">'+
           (Math.abs(r.val)<0.5?'<span class="faint-italic">–</span>':num0(r.val))+'</td></tr>';
       });
       html+='<tr><td><b>Total Pendapatan</b></td><td class="num"><b>'+num0(pend.total)+'</b></td></tr>'+
         '<tr><td colspan="2" style="background:var(--warn-bg);font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:11.5px;">BEBAN</td></tr>';
       beban.rows.forEach(function(r){
-        html+='<tr><td class="wrap">'+esc(r.akun)+'</td><td class="num">'+
+        html+='<tr><td class="wrap">'+akunCell(r)+'</td><td class="num">'+
           (Math.abs(r.val)<0.5?'<span class="faint-italic">–</span>':num0(Math.abs(r.val)))+'</td></tr>';
       });
       html+='<tr><td><b>Total Beban</b></td><td class="num"><b>'+num0(Math.abs(beban.total))+'</b></td></tr>'+
@@ -3027,6 +3083,14 @@ function registerPages(){
         '</tbody></table></div></div>';
       document.getElementById('reportBody').innerHTML=html;
       window._lrLastRows={pend:pend, beban:beban, labaBersih:labaBersih};
+      document.querySelectorAll('#reportBody [data-lr-akun]').forEach(function(b){
+        b.onclick=function(){
+          var akun=b.getAttribute('data-lr-akun');
+          var raw=labaRugiAccountTxns(akun, from, to, project||null);
+          var list=raw.map(function(e){ return {tgl:e.tgl, ref:e.ref, ket:e.ket, amount:e.kredit-e.debet}; });
+          showTxnDrilldown(akun, 'Rincian transaksi & jurnal yang membentuk angka ini', list);
+        };
+      });
     }
     refresh();
     document.getElementById('btnFilter').onclick=refresh;
