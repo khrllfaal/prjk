@@ -947,21 +947,27 @@ function hutangStatusInfo(status){
 /* Generic read-only drill-down: click an amount/label anywhere in the
    app -> see the list of transactions behind it (Cash Flow, Laba Rugi,
    Dashboard progress, Trial Hutang, etc). list items: {tgl,ref,ket,amount}. */
-function showTxnDrilldown(title, subtitle, list){
+function showTxnDrilldown(title, subtitle, list, summary){
   var total=list.reduce(function(a,b){ return a+(b.amount||0); },0);
-  var body=(subtitle?'<div class="panel-desc" style="margin-bottom:10px;">'+esc(subtitle)+'</div>':'')+
+  var hasStatus=list.some(function(r){ return r.status; });
+  var summaryHtml=(summary&&summary.length)?'<div class="kpi-grid" style="margin-bottom:12px;">'+
+    summary.map(function(s){ return kpiCard(s.label, num0(s.value), '', 'accent'); }).join('')+'</div>':'';
+  var body=summaryHtml+
+    (subtitle?'<div class="panel-desc" style="margin-bottom:10px;">'+esc(subtitle)+'</div>':'')+
     (list.length?'<input type="text" id="drillSearch" placeholder="Cari tanggal, ref, atau keterangan..." '+
       'style="width:100%;box-sizing:border-box;padding:8px 10px;margin-bottom:10px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;">':'')+
     '<div class="table-scroll"><table class="dtab" id="drillTable"><thead><tr>'+
-    '<th>Tanggal</th><th>Ref No</th><th>Description</th><th style="text-align:right;">Amount</th>'+
+    '<th>Tanggal</th><th>Ref No</th><th>Description</th>'+(hasStatus?'<th>Status</th>':'')+'<th style="text-align:right;">Amount</th>'+
     '</tr></thead><tbody>'+
     (list.length?list.map(function(r){
-      var key=esc((fmtDate(r.tgl)+' '+(r.ref||'')+' '+(r.ket||'')).toLowerCase());
+      var key=esc((fmtDate(r.tgl)+' '+(r.ref||'')+' '+(r.ket||'')+' '+(r.status||'')).toLowerCase());
       return '<tr data-drill-row data-drill-key="'+key+'" data-drill-amt="'+(r.amount||0)+'">'+
         '<td>'+fmtDate(r.tgl)+'</td><td class="mono" style="font-size:11.5px;">'+esc(r.ref||'–')+'</td>'+
-        '<td class="wrap">'+esc(r.ket||'–')+'</td><td style="text-align:right;">'+num0(r.amount)+'</td></tr>';
-    }).join(''):'<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:18px;">Tidak ada transaksi.</td></tr>')+
-    '</tbody><tfoot><tr><td colspan="3"><b>Total</b></td><td style="text-align:right;" id="drillTotal"><b>'+num0(total)+'</b></td></tr></tfoot>'+
+        '<td class="wrap">'+esc(r.ket||'–')+'</td>'+
+        (hasStatus?'<td class="status-'+(r.status==='Hutang'||r.status==='Piutang/Akrual'?'warn':'safe')+'">'+esc(r.status||'–')+'</td>':'')+
+        '<td style="text-align:right;">'+num0(r.amount)+'</td></tr>';
+    }).join(''):'<tr><td colspan="'+(hasStatus?5:4)+'" style="text-align:center;color:var(--text-faint);padding:18px;">Tidak ada transaksi.</td></tr>')+
+    '</tbody><tfoot><tr><td colspan="'+(hasStatus?4:3)+'"><b>Total</b></td><td style="text-align:right;" id="drillTotal"><b>'+num0(total)+'</b></td></tr></tfoot>'+
     '</table></div>';
   openModal(title, body, {wide:true, saveLabel:null});
   if(list.length) wireDrilldownSearch('drillSearch','drillTable','drillTotal');
@@ -3008,7 +3014,7 @@ function registerPages(){
       if(!inRange(e.tgl,from,to)) return;
       if(project && e.project!==project) return;
       if(akunNamaOnly(e.akun)!==accName) return;
-      list.push({tgl:e.tgl, ref:e.ref, ket:(e.ket||'')+(e.project?' — '+e.project:''), debet:e.debet, kredit:e.kredit});
+      list.push({tgl:e.tgl, ref:e.ref, ket:(e.ket||'')+(e.project?' — '+e.project:''), debet:e.debet, kredit:e.kredit, src:e.src});
     });
     return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
   }
@@ -3086,9 +3092,32 @@ function registerPages(){
       document.querySelectorAll('#reportBody [data-lr-akun]').forEach(function(b){
         b.onclick=function(){
           var akun=b.getAttribute('data-lr-akun');
+          // Beban (heads 5-8) is debit-heavy, Pendapatan (head 4) is
+          // credit-heavy — match the sign shown on the row itself.
+          var isBeban=akunHead(akun)!=='4';
           var raw=labaRugiAccountTxns(akun, from, to, project||null);
-          var list=raw.map(function(e){ return {tgl:e.tgl, ref:e.ref, ket:e.ket, amount:e.kredit-e.debet}; });
-          showTxnDrilldown(akun, 'Rincian transaksi & jurnal yang membentuk angka ini', list);
+          // A Kas Keluar/Masuk posting is cash that has actually moved;
+          // a Jurnal Umum posting here is the accrual side of a
+          // purchase/sale on credit (Debit Biaya.../Kredit Hutang Dagang
+          // or the reverse) — split "sudah dibayar/diterima" vs
+          // "hutang/piutang" by that source, per the owner's request to
+          // see this breakdown on Laba Rugi cost accounts.
+          var list=raw.map(function(e){
+            var amount=isBeban?(e.debet-e.kredit):(e.kredit-e.debet);
+            var status=isBeban
+              ?(e.src==='jurnal'?'Hutang':'Sudah Dibayar')
+              :(e.src==='jurnal'?'Piutang/Akrual':'Sudah Diterima');
+            return {tgl:e.tgl, ref:e.ref, ket:e.ket, amount:amount, status:status};
+          });
+          var cashSum=list.filter(function(r){ return r.status==='Sudah Dibayar'||r.status==='Sudah Diterima'; })
+            .reduce(function(a,b){ return a+b.amount; },0);
+          var accrualSum=list.filter(function(r){ return r.status==='Hutang'||r.status==='Piutang/Akrual'; })
+            .reduce(function(a,b){ return a+b.amount; },0);
+          var summary=[
+            {label:isBeban?'Sudah Dibayar (Kas Keluar)':'Sudah Diterima (Kas Masuk)', value:cashSum},
+            {label:isBeban?'Hutang (Jurnal Umum — belum dibayar)':'Piutang/Akrual (Jurnal Umum)', value:accrualSum},
+          ];
+          showTxnDrilldown(akun, 'Rincian transaksi & jurnal yang membentuk angka ini', list, summary);
         };
       });
     }
