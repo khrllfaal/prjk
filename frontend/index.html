@@ -3353,22 +3353,37 @@ function registerPages(){
             var bucket=isBeban
               ?(e.src==='jurnal'?'Hutang':'Sudah Dibayar')
               :(e.src==='jurnal'?'Piutang/Akrual':'Sudah Diterima');
-            var status=bucket, cls=null;
+            // paidPortion/sisaPortion split this leg's own amount by how
+            // much of its Hutang Dagang nota has actually been settled —
+            // so the KPI totals below stay honest instead of counting a
+            // partially-paid debt as fully outstanding forever.
+            var status=bucket, cls=null, paidPortion=0, sisaPortion=amount;
             if(bucket==='Hutang'){
               var h=hutangByRef[e.ref];
+              if(h){
+                paidPortion=Math.min(h.paid, amount);
+                sisaPortion=amount-paidPortion;
+              }
               if(h && h.sisa<=0.5){ status='Hutang — Sudah Lunas Dibayar'; cls='safe'; }
               else if(h && h.paid>0){ status='Hutang — Dibayar Sebagian (sisa '+num0(h.sisa)+')'; cls='warn'; }
               else { status='Hutang — Belum Dibayar'; cls='warn'; }
             }
-            return {tgl:e.tgl, ref:e.ref, ket:e.ket, amount:amount, status:status, cls:cls, bucket:bucket};
+            return {tgl:e.tgl, ref:e.ref, ket:e.ket, amount:amount, status:status, cls:cls,
+              bucket:bucket, paidPortion:paidPortion, sisaPortion:sisaPortion};
           });
-          var cashSum=list.filter(function(r){ return r.bucket==='Sudah Dibayar'||r.bucket==='Sudah Diterima'; })
-            .reduce(function(a,b){ return a+b.amount; },0);
-          var accrualSum=list.filter(function(r){ return r.bucket==='Hutang'||r.bucket==='Piutang/Akrual'; })
-            .reduce(function(a,b){ return a+b.amount; },0);
+          var cashSum=list.reduce(function(a,r){
+            if(r.bucket==='Sudah Dibayar'||r.bucket==='Sudah Diterima') return a+r.amount;
+            if(r.bucket==='Hutang') return a+r.paidPortion;
+            return a;
+          },0);
+          var accrualSum=list.reduce(function(a,r){
+            if(r.bucket==='Hutang') return a+r.sisaPortion;
+            if(r.bucket==='Piutang/Akrual') return a+r.amount;
+            return a;
+          },0);
           var summary=[
-            {label:isBeban?'Sudah Dibayar (Kas Keluar)':'Sudah Diterima (Kas Masuk)', value:cashSum},
-            {label:isBeban?'Hutang (Jurnal Umum — belum dibayar)':'Piutang/Akrual (Jurnal Umum)', value:accrualSum},
+            {label:isBeban?'Sudah Dibayar (Kas Keluar + Hutang Lunas)':'Sudah Diterima (Kas Masuk)', value:cashSum},
+            {label:isBeban?'Hutang (belum dibayar — dari Trial Hutang)':'Piutang/Akrual (Jurnal Umum)', value:accrualSum},
           ];
           showTxnDrilldown(akun, 'Rincian transaksi & jurnal yang membentuk angka ini', list, summary);
         };
