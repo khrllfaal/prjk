@@ -928,13 +928,30 @@ function computeHutangDagangRows(){
 
   var byVendor={};
   notas.forEach(function(n){ (byVendor[n.vendor]=byVendor[n.vendor]||[]).push(n); });
-  Object.keys(byVendor).forEach(function(v){
-    var left=pool[v]||0;
-    byVendor[v].forEach(function(n){
+  var poolLeftover=0;
+  Object.keys(pool).forEach(function(v){
+    var left=pool[v];
+    (byVendor[v]||[]).forEach(function(n){
       if(n.direct>0) return; // already settled by a direct-tagged payment
-      var take=Math.min(left, n.amount);
-      n.paid=take; left-=take;
+      var take=Math.min(left, n.amount-n.paid);
+      n.paid+=take; left-=take;
     });
+    poolLeftover+=left; // unmatched vendor name, or "(Tanpa Vendor)" itself
+  });
+
+  // The bulk-imported Cash Out/Bank Out reports carry no vendor column at
+  // all, so every such payment reaches this point with a blank relasi and
+  // pools under "(Tanpa Vendor)" — a bucket no real nota's vendor name can
+  // ever match. That money still genuinely paid down Hutang Dagang, so
+  // apply it globally to the oldest still-open nota first (notas is sorted
+  // oldest-first above), the same rule real AP aging uses for a payment
+  // with no bill reference, instead of leaving it stuck unattributed.
+  notas.forEach(function(n){
+    if(poolLeftover<=0 || n.direct>0) return;
+    var remaining=n.amount-n.paid;
+    if(remaining<=0) return;
+    var take=Math.min(poolLeftover, remaining);
+    n.paid+=take; poolLeftover-=take;
   });
 
   var overrides=DB.hutangOverrides||{};
