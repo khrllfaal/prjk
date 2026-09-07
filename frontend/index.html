@@ -1286,25 +1286,90 @@ function bindCurrencyInput(id){
 }
 function fnumC(id){ var v=fv(id).replace(/\D/g,''); return v?parseInt(v,10):0; }
 
-/* ---------------- CSV export ---------------- */
-function exportCSV(filename, headers, rows){
-  var esc2=function(v){
-    var s=String(v==null?'':v);
-    // neutralise CSV/formula injection: a cell starting with =+-@ can be
-    // read as a formula by Excel/Sheets when the file is opened later
-    if(/^[=+\-@]/.test(s)) s="'"+s;
-    if(/[",\n;]/.test(s)) return '"'+s.replace(/"/g,'""')+'"';
-    return s;
-  };
-  var lines=[headers.map(esc2).join(';')];
-  rows.forEach(function(r){ lines.push(r.map(esc2).join(';')); });
-  var blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8;'});
+/* ---------------- Excel (.xlsx) export ----------------
+   A real workbook via ExcelJS (vendored locally, vendor/exceljs.min.js,
+   lazy-loaded on first export so it never slows down initial page
+   load) — real number cells with thousands-separator formatting,
+   a bold navy header row matching the app's own table styling,
+   auto-sized columns, and a frozen header, instead of a bare CSV that
+   opened in Excel with no formatting, no widths, and every number
+   read back as text. */
+var _exceljsLoading=null;
+function loadExcelJS(){
+  if(window.ExcelJS) return Promise.resolve();
+  if(_exceljsLoading) return _exceljsLoading;
+  _exceljsLoading=new Promise(function(resolve,reject){
+    var s=document.createElement('script');
+    s.src='vendor/exceljs.min.js';
+    s.onload=function(){ resolve(); };
+    s.onerror=function(){ _exceljsLoading=null; reject(new Error('Gagal memuat modul Excel.')); };
+    document.head.appendChild(s);
+  });
+  return _exceljsLoading;
+}
+async function exportExcel(filename, headers, rows, opts){
+  opts=opts||{};
+  try{ await loadExcelJS(); }
+  catch(e){ toast('Gagal memuat modul Excel — cek koneksi lalu coba lagi.','danger'); return; }
+
+  var wb=new ExcelJS.Workbook();
+  wb.creator='Prakasa Group — ACC v2';
+  wb.created=new Date();
+  var ws=wb.addWorksheet((opts.sheetName||filename).slice(0,31).replace(/[\\/*?:\[\]]/g,' '));
+
+  var title=opts.title||filename.replace(/_/g,' ');
+  var titleRow=ws.addRow([title]);
+  titleRow.font={bold:true, size:13, name:'Calibri', color:{argb:'FF1F3864'}};
+  ws.mergeCells(titleRow.number,1,titleRow.number,Math.max(headers.length,1));
+  var subRow=ws.addRow(['Diekspor '+fmtDate(todayISO())+' dari Prakasa Group — ACC v2']);
+  subRow.font={italic:true, size:9.5, name:'Calibri', color:{argb:'FF888888'}};
+  ws.mergeCells(subRow.number,1,subRow.number,Math.max(headers.length,1));
+  ws.addRow([]);
+
+  var headerRow=ws.addRow(headers);
+  headerRow.eachCell(function(cell){
+    cell.font={bold:true, color:{argb:'FFFFFFFF'}, name:'Calibri', size:10.5};
+    cell.fill={type:'pattern', pattern:'solid', fgColor:{argb:'FF1F3864'}};
+    cell.alignment={vertical:'middle', horizontal:'center', wrapText:true};
+  });
+  headerRow.height=20;
+  ws.views=[{state:'frozen', ySplit:headerRow.number}];
+
+  // A column counts as numeric only if every value in it is a real
+  // number or blank — mixed/text columns stay left-aligned strings.
+  var isNumCol=headers.map(function(_,ci){
+    return rows.length>0 && rows.every(function(r){ return r[ci]==null || typeof r[ci]==='number'; });
+  });
+
+  rows.forEach(function(r, ri){
+    var row=ws.addRow(r);
+    row.eachCell({includeEmpty:true}, function(cell, ci){
+      cell.font={name:'Calibri', size:10.5};
+      cell.border={bottom:{style:'hair', color:{argb:'FFE3E7EE'}}};
+      if(isNumCol[ci-1]){ cell.numFmt='#,##0'; cell.alignment={horizontal:'right'}; }
+      else cell.alignment={horizontal:'left'};
+      if(ri%2===1) cell.fill={type:'pattern', pattern:'solid', fgColor:{argb:'FFF7F9FC'}};
+    });
+  });
+
+  headers.forEach(function(h, i){
+    var maxLen=String(h).length;
+    rows.forEach(function(r){
+      var v=r[i];
+      var len=(typeof v==='number')?num0(v).length:String(v==null?'':v).length;
+      if(len>maxLen) maxLen=len;
+    });
+    ws.getColumn(i+1).width=Math.min(Math.max(maxLen+2, 10), 48);
+  });
+
+  var buf=await wb.xlsx.writeBuffer();
+  var blob=new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   var a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
-  a.download=filename+'.csv';
+  a.download=filename+'.xlsx';
   document.body.appendChild(a); a.click();
   setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },400);
-  toast('File '+filename+'.csv diunduh — bisa dibuka di Excel.','success');
+  toast('File '+filename+'.xlsx diunduh.','success');
 }
 function printPage(){ window.print(); }
 
@@ -1638,7 +1703,7 @@ function exportBtns(idPrefix){
 }
 function bindExport(idPrefix, filename, headers, rowsFn){
   var e=document.getElementById(idPrefix+'Excel');
-  if(e) e.onclick=function(){ exportCSV(filename, headers, rowsFn()); };
+  if(e) e.onclick=function(){ exportExcel(filename, headers, rowsFn()); };
   var p=document.getElementById(idPrefix+'Print');
   if(p) p.onclick=printPage;
 }
@@ -3394,10 +3459,10 @@ function registerPages(){
     document.getElementById('fProject').addEventListener('change',refresh);
     bindExport('exp','Laba_Rugi',['Keterangan','Jumlah'],function(){
       var d=window._lrLastRows;
-      var out=[['PENDAPATAN','']];
+      var out=[['PENDAPATAN',null]];
       d.pend.rows.forEach(function(r){ out.push([r.akun,r.val]); });
       out.push(['Total Pendapatan',d.pend.total]);
-      out.push(['BEBAN','']);
+      out.push(['BEBAN',null]);
       d.beban.rows.forEach(function(r){ out.push([r.akun,Math.abs(r.val)]); });
       out.push(['Total Beban',Math.abs(d.beban.total)]);
       out.push(['LABA BERSIH',d.labaBersih]);
@@ -3456,16 +3521,26 @@ function registerPages(){
         '<td class="num"><b>'+num0(selisih)+'</b></td></tr>'+
         '</tbody></table></div></div>';
       document.getElementById('reportBody').innerHTML=html;
+
+      // Real numbers for export — built alongside the HTML above from the
+      // same figures, never scraped back out of rendered/formatted text
+      // (which would hand Excel dot-separated strings instead of numbers).
+      var out=[['1-AKTIVA', null]];
+      aktiva.forEach(function(r){ var v=r.debet-r.kredit; out.push([r.akun, Math.abs(v)<0.5?0:v]); });
+      out.push(['TOTAL AKTIVA', totalAktiva]);
+      out.push(['2-PASIVA', null]);
+      kewajiban.forEach(function(r){ var v=-(r.debet-r.kredit); out.push([r.akun, Math.abs(v)<0.5?0:v]); });
+      out.push(['TOTAL HUTANG', totalHutang]);
+      ekuitas.forEach(function(r){ var v=-(r.debet-r.kredit); out.push([r.akun, Math.abs(v)<0.5?0:v]); });
+      out.push(['Laba/Rugi Berjalan', labaBerjalan]);
+      out.push(['TOTAL EKUITAS', totalEkuitas]);
+      out.push(['TOTAL PASIVA', totalPasiva]);
+      out.push(['NERACA BALANCE', selisih]);
+      window._neracaLastRows=out;
     }
     refresh();
     document.getElementById('btnFilter').onclick=refresh;
-    bindExport('exp','Neraca',['Keterangan','Jumlah'],function(){
-      var out=[]; document.querySelectorAll('#tblNeraca tr').forEach(function(tr){
-        var td=tr.querySelectorAll('td');
-        if(td.length===2) out.push([td[0].textContent.trim(), td[1].textContent.trim()]);
-      });
-      return out;
-    });
+    bindExport('exp','Neraca',['Keterangan','Jumlah'],function(){ return window._neracaLastRows||[]; });
   };
 
   /* ---------------- CASH FLOW ---------------- */
@@ -3561,11 +3636,11 @@ function registerPages(){
        ['BANK MASUK','bank_masuk','Total Bank Masuk'],['BANK KELUAR','bank_keluar','Total Bank Keluar']]
       .forEach(function(sec){
         var list=lastByJenis[sec[1]]||[];
-        rows.push([sec[0],'']);
+        rows.push([sec[0],null]);
         list.forEach(function(r){ rows.push([r.label, r.amount]); });
         rows.push([sec[2], list.reduce(function(a,b){ return a+b.amount; },0)]);
       });
-      exportCSV('Cash_Flow', ['Keterangan','Jumlah'], rows);
+      exportExcel('Cash_Flow', ['Keterangan','Jumlah'], rows);
     };
     document.getElementById('cfPdf').onclick=printPage;
   };
