@@ -2415,9 +2415,27 @@ function registerPages(){
   PAGES.bank_masuk=financePage('bank_masuk','Data Bank Masuk','Penerimaan melalui rekening bank');
   PAGES.bank_keluar=financePage('bank_keluar','Data Bank Keluar','Pengeluaran melalui rekening bank');
 
+  // A balanced journal entry ("bukti jurnal") is stored as one row per leg
+  // (same shape as Accurate's underlying ledger), but shown and entered as
+  // ONE voucher with multiple Akun/Debit/Kredit lines under a shared ref —
+  // grouping purely for display/input, the stored rows are unchanged.
+  function groupJurnalByRef(rows){
+    var order=[], map={};
+    rows.forEach(function(j){
+      if(!map[j.ref]){
+        map[j.ref]={ref:j.ref, tgl:j.tgl, project:j.project||'', relasi:j.relasi||'',
+          kategori:j.kategori||'', ket:j.ket||'', lines:[], debet:0, kredit:0};
+        order.push(j.ref);
+      }
+      var g=map[j.ref];
+      g.lines.push(j); g.debet+=j.debet; g.kredit+=j.kredit;
+    });
+    return order.map(function(ref){ return map[ref]; });
+  }
+
   PAGES.jurnal=function(c){
-    c.innerHTML = pageHead('Jurnal Umum','Pencatatan jurnal di luar transaksi kas & bank',
-      '<button class="btn btn-primary" id="btnAdd">+ Tambah Jurnal</button>'+exportBtns('exp'))+
+    c.innerHTML = pageHead('Jurnal Umum','Pencatatan jurnal di luar transaksi kas & bank — satu bukti jurnal bisa berisi beberapa baris akun, seperti di Accurate',
+      '<button class="btn btn-primary" id="btnAdd">+ Tambah Bukti Jurnal</button>'+exportBtns('exp'))+
       '<div class="filterbar">'+
         '<div class="field"><label>Dari Tanggal</label><input type="date" id="fFrom"></div>'+
         '<div class="field"><label>Sampai Tanggal</label><input type="date" id="fTo"></div>'+
@@ -2432,11 +2450,10 @@ function registerPages(){
     var tbl;
     function refresh(){
       var from=fv('fFrom'), to=fv('fTo');
-      var rows=DB.jurnal.filter(function(j){ return inRange(j.tgl,from,to); })
-        .sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+      var legRows=DB.jurnal.filter(function(j){ return inRange(j.tgl,from,to); });
 
-      var totDebet=rows.reduce(function(a,b){ return a+b.debet; },0);
-      var totKredit=rows.reduce(function(a,b){ return a+b.kredit; },0);
+      var totDebet=legRows.reduce(function(a,b){ return a+b.debet; },0);
+      var totKredit=legRows.reduce(function(a,b){ return a+b.kredit; },0);
       var selisih=totDebet-totKredit;
       var balanced=Math.abs(selisih)<=0.5;
       document.getElementById('kpiJurnal').innerHTML=[
@@ -2446,95 +2463,170 @@ function registerPages(){
           balanced?'Balance':'⚠ Tidak balance — cek entri jurnal pada rentang ini', balanced?'safe':'danger')
       ].join('');
 
+      var rows=groupJurnalByRef(legRows).sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+
       tbl=DataTable('tbl',[
         {key:'_no',label:'No',sort:false,render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
         {key:'tgl',label:'Tanggal',render:function(r){ return fmtDate(r.tgl); }},
-        {key:'ref',label:'Ref',render:function(r){ return '<span class="mono" style="font-size:11.5px;">'+esc(r.ref)+'</span>'; }},
-        {key:'akun',label:'Nama Akun',cls:'wrap',render:function(r){ return esc(r.akun||'–'); }},
+        {key:'ref',label:'No. Bukti',render:function(r){ return '<span class="mono" style="font-size:11.5px;">'+esc(r.ref)+'</span>'; }},
+        {key:'_akun',label:'Akun (Debit → Kredit)',cls:'wrap',sort:false,render:function(r){
+          var d=r.lines.filter(function(l){ return l.debet>0; }).map(function(l){ return esc(l.akun); });
+          var k=r.lines.filter(function(l){ return l.kredit>0; }).map(function(l){ return esc(l.akun); });
+          return '<button type="button" class="linklike" data-detail="'+esc(r.ref)+'">'+d.join(', ')+' → '+k.join(', ')+'</button>';
+        }},
         {key:'project',label:'Project',render:function(r){ return esc(r.project||'–'); }},
         {key:'relasi',label:'Relasi',render:function(r){ return r.relasi?esc(r.relasi):'<span class="faint-italic">–</span>'; }},
         {key:'ket',label:'Keterangan',cls:'wrap',render:function(r){ return esc(r.ket||'–'); }},
-        {key:'debet',label:'Debet',num:true,render:function(r){ return r.debet?num0(r.debet):'<span class="faint-italic">–</span>'; },
+        {key:'debet',label:'Total Debet',num:true,render:function(r){ return num0(r.debet); },
          foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+b.debet;},0))+'</b>'; }},
-        {key:'kredit',label:'Kredit',num:true,render:function(r){ return r.kredit?num0(r.kredit):'<span class="faint-italic">–</span>'; },
+        {key:'kredit',label:'Total Kredit',num:true,render:function(r){ return num0(r.kredit); },
          foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+b.kredit;},0))+'</b>'; }},
         {key:'_act',label:'Aksi',sort:false,render:function(r){
-          return '<div class="btn-row"><button class="btn btn-warn btn-sm" data-edit="'+r.id+'">Edit</button>'+
-            '<button class="btn btn-danger btn-sm" data-del="'+r.id+'">Hapus</button></div>';
+          return '<div class="btn-row"><button class="btn btn-warn btn-sm" data-edit="'+esc(r.ref)+'">Edit</button>'+
+            '<button class="btn btn-danger btn-sm" data-del="'+esc(r.ref)+'">Hapus</button></div>';
         }}
       ], rows, {defaultSort:'tgl',defaultDir:'desc',perPage:15,showFoot:true,countId:'cnt',
-        searchFn:function(r){ return [r.ket,r.akun,r.project,r.relasi].join(' '); },
+        searchFn:function(r){ return [r.ket,r.project,r.relasi].concat(r.lines.map(function(l){ return l.akun; })).join(' '); },
         emptyText:'Belum ada jurnal pada rentang ini.',
         onRender:function(){
+          document.querySelectorAll('[data-detail]').forEach(function(b){ b.onclick=function(){ showVoucherDetail(b.getAttribute('data-detail')); }; });
           document.querySelectorAll('[data-edit]').forEach(function(b){ b.onclick=function(){ form(b.getAttribute('data-edit')); }; });
           document.querySelectorAll('[data-del]').forEach(function(b){ b.onclick=function(){ del(b.getAttribute('data-del')); }; });
         }});
       bindSearch('q',tbl);
     }
 
-    function form(id){
-      var rec=id?DB.jurnal.find(function(x){ return x.id===id; }):null;
+    function showVoucherDetail(ref){
+      var lines=DB.jurnal.filter(function(j){ return j.ref===ref; });
+      var list=lines.map(function(l){
+        return {tgl:l.tgl, ref:l.akun, ket:(l.debet>0?'Debit':'Kredit'), amount:l.debet>0?l.debet:l.kredit};
+      });
+      showTxnDrilldown('Bukti Jurnal '+ref, 'Rincian baris debit/kredit bukti jurnal ini', list);
+    }
+
+    var rowSeq=0;
+    function lineRowHtml(line){
+      rowSeq++;
+      var rid='jr'+rowSeq;
+      return {rid:rid, html:
+        '<div class="jvoucher-row" data-row="'+rid+'" style="display:grid;grid-template-columns:1fr 140px 140px 32px;gap:8px;align-items:center;margin-bottom:6px;">'+
+          '<div id="'+rid+'_akun_ssel"></div>'+
+          '<input type="text" inputmode="numeric" id="'+rid+'_debet" placeholder="Debit" value="'+(line&&line.debet?line.debet:'')+'">'+
+          '<input type="text" inputmode="numeric" id="'+rid+'_kredit" placeholder="Kredit" value="'+(line&&line.kredit?line.kredit:'')+'">'+
+          '<button type="button" class="btn btn-ghost btn-sm" data-rmrow="'+rid+'" title="Hapus baris">✕</button>'+
+          '<input type="hidden" id="'+rid+'_akun" value="'+esc(line?line.akun:'')+'">'+
+        '</div>'};
+    }
+
+    function form(ref){
+      var lines=ref?DB.jurnal.filter(function(j){ return j.ref===ref; }):null;
+      var head=lines?lines[0]:null;
       var akunOpts=DB.coa.filter(function(a){ return a.level>=3; }).map(function(a){ return a.kode+'-'+a.nama; });
       var relasiOpts=DB.customers.concat(DB.vendors).map(function(r){ return r.nama; });
       var kategoriSet={}; DB.jurnal.forEach(function(j){ if(j.kategori) kategoriSet[j.kategori]=1; });
       var kategoriOpts=Object.keys(kategoriSet);
-      var v=function(k,d){ return rec?(rec[k]!==undefined?rec[k]:d):d; };
-      var jenisAwal=rec?(rec.debet>0?'debet':'kredit'):'debet';
-      var amountAwal=rec?(rec.debet>0?rec.debet:rec.kredit):'';
+      var rowDefs=(lines||[null,null]).map(lineRowHtml);
 
       var html='<div class="form-grid">'+
-        '<div class="field"><label>Ref</label><input type="text" id="f_refPreview" value="'+
-          esc(rec?rec.ref:nextJurnalRef())+'" disabled></div>'+
-        '<div class="field"><label>Tanggal *</label><input type="date" id="f_tgl" value="'+esc(v('tgl',todayISO()))+'"></div>'+
-        '<div class="field full"><label>Akun *</label>'+
-          '<div id="f_akun_ssel"></div><input type="hidden" id="f_akun" value="'+esc(v('akun',''))+'"></div>'+
-        '<div class="field"><label>Project</label>'+
-          '<div id="f_project_ssel"></div><input type="hidden" id="f_project" value="'+esc(v('project',''))+'"></div>'+
-        '<div class="field"><label>Relasi (Customer/Vendor)</label>'+
-          '<div id="f_relasi_ssel"></div><input type="hidden" id="f_relasi" value="'+esc(v('relasi',''))+'"></div>'+
-        '<div class="field"><label>Kategori</label>'+
-          '<div id="f_kategori_ssel"></div><input type="hidden" id="f_kategori" value="'+esc(v('kategori',''))+'"></div>'+
-        '<div class="field"><label>Jenis *</label><select id="f_jenis">'+
-          '<option value="debet"'+(jenisAwal==='debet'?' selected':'')+'>Debet</option>'+
-          '<option value="kredit"'+(jenisAwal==='kredit'?' selected':'')+'>Kredit</option></select></div>'+
-        '<div class="field"><label>Jumlah (Rp) *</label><input type="text" inputmode="numeric" id="f_amount" value="'+esc(amountAwal)+'"></div>'+
-        '<div class="field full"><label>Keterangan</label><input type="text" id="f_ket" value="'+esc(v('ket',''))+'"></div>'+
+        '<div class="field"><label>No. Bukti</label><input type="text" id="f_refPreview" value="'+esc(ref||nextJurnalRef())+'" disabled></div>'+
+        '<div class="field"><label>Tanggal *</label><input type="date" id="f_tgl" value="'+esc(head?head.tgl:todayISO())+'"></div>'+
+        '<div class="field"><label>Project</label><div id="f_project_ssel"></div><input type="hidden" id="f_project" value="'+esc(head?head.project:'')+'"></div>'+
+        '<div class="field"><label>Relasi (Customer/Vendor)</label><div id="f_relasi_ssel"></div><input type="hidden" id="f_relasi" value="'+esc(head?head.relasi:'')+'"></div>'+
+        '<div class="field"><label>Kategori</label><div id="f_kategori_ssel"></div><input type="hidden" id="f_kategori" value="'+esc(head?head.kategori:'')+'"></div>'+
+        '<div class="field full"><label>Keterangan</label><input type="text" id="f_ket" value="'+esc(head?head.ket:'')+'"></div>'+
+      '</div>'+
+      '<div style="margin-top:10px;">'+
+        '<div style="display:grid;grid-template-columns:1fr 140px 140px 32px;gap:8px;font-size:11.5px;color:var(--text-mute);margin-bottom:4px;">'+
+          '<span>Akun</span><span>Debit (Rp)</span><span>Kredit (Rp)</span><span></span>'+
+        '</div>'+
+        '<div id="jvoucherRows">'+rowDefs.map(function(r){ return r.html; }).join('')+'</div>'+
+        '<button type="button" class="btn btn-ghost btn-sm" id="btnAddRow" style="margin-top:4px;">+ Tambah Baris</button>'+
+        '<div id="jvoucherBalance" style="margin-top:10px;font-size:12.5px;font-weight:600;"></div>'+
       '</div>';
 
-      openModal((id?'Edit ':'Tambah ')+'Jurnal Umum', html, {wide:true, onSave:function(){
-        var tgl=fv('f_tgl'), akun=fv('f_akun'), amt=fnumC('f_amount'), jenisPilih=fv('f_jenis');
+      openModal((ref?'Edit ':'Tambah ')+'Bukti Jurnal', html, {wide:true, saveLabel:'Simpan Bukti Jurnal', onSave:function(){
+        var tgl=fv('f_tgl');
         if(!tgl){ toast('Tanggal wajib diisi.','danger'); return; }
-        if(!akun){ toast('Akun wajib dipilih.','danger'); return; }
-        if(!amt || amt<=0){ toast('Jumlah harus lebih besar dari 0.','danger'); return; }
-        var obj=rec||{id:uid('j')};
-        obj.tgl=tgl; obj.akun=akun; obj.project=fv('f_project'); obj.relasi=fv('f_relasi');
-        obj.kategori=fv('f_kategori'); obj.ket=fv('f_ket');
-        obj.debet=jenisPilih==='debet'?amt:0;
-        obj.kredit=jenisPilih==='kredit'?amt:0;
-        if(!id){ obj.ref=nextJurnalRef(); DB.jurnal.push(obj); }
-        saveDB(); syncUpsert('jurnal_umum', obj); closeModal(); refresh();
-        toast(id?'Jurnal diperbarui.':'Jurnal ditambahkan.','success');
+        var rowEls=Array.prototype.slice.call(document.querySelectorAll('#jvoucherRows [data-row]'));
+        var newLines=[], totD=0, totK=0;
+        for(var i=0;i<rowEls.length;i++){
+          var rid=rowEls[i].getAttribute('data-row');
+          var akun=fv(rid+'_akun'), d=fnumC(rid+'_debet'), k=fnumC(rid+'_kredit');
+          if(!akun && !d && !k) continue; // skip a row left fully empty
+          if(!akun){ toast('Pilih akun pada setiap baris.','danger'); return; }
+          if(d>0 && k>0){ toast('Satu baris hanya boleh diisi Debit ATAU Kredit, tidak dua-duanya.','danger'); return; }
+          if(!d && !k){ toast('Isi Debit atau Kredit pada setiap baris.','danger'); return; }
+          newLines.push({akun:akun, debet:d, kredit:k});
+          totD+=d; totK+=k;
+        }
+        if(newLines.length<2){ toast('Bukti jurnal minimal 2 baris (sisi Debit dan sisi Kredit).','danger'); return; }
+        if(Math.abs(totD-totK)>0.5){ toast('Tidak balance — Total Debit ('+num0(totD)+') harus sama dengan Total Kredit ('+num0(totK)+').','danger'); return; }
+
+        var project=fv('f_project'), relasi=fv('f_relasi'), kategori=fv('f_kategori'), ket=fv('f_ket');
+        var useRef=ref||nextJurnalRef();
+
+        if(ref){
+          var oldIds=lines.map(function(l){ return l.id; });
+          DB.jurnal=DB.jurnal.filter(function(j){ return j.ref!==ref; });
+          oldIds.forEach(function(id){ delete DB.hutangOverrides[id]; syncDelete('jurnal_umum', id); });
+        }
+        newLines.forEach(function(nl){
+          var obj={id:uid('j'), ref:useRef, tgl:tgl, akun:nl.akun, project:project, relasi:relasi,
+            kategori:kategori, ket:ket, debet:nl.debet, kredit:nl.kredit};
+          DB.jurnal.push(obj);
+          syncUpsert('jurnal_umum', obj);
+        });
+        saveDB(); closeModal(); refresh();
+        toast(ref?'Bukti jurnal diperbarui.':'Bukti jurnal ditambahkan.','success');
       }});
-      searchableSelect('f_akun_ssel','f_akun',{options:akunOpts.map(function(a){ return {value:a,label:a}; }), placeholder:'Cari kode / nama akun…'});
+
+      function updateBalance(){
+        var rowEls=Array.prototype.slice.call(document.querySelectorAll('#jvoucherRows [data-row]'));
+        var totD=0, totK=0;
+        rowEls.forEach(function(rowEl){
+          var rid=rowEl.getAttribute('data-row');
+          totD+=fnumC(rid+'_debet'); totK+=fnumC(rid+'_kredit');
+        });
+        var sel=totD-totK, bal=Math.abs(sel)<=0.5;
+        document.getElementById('jvoucherBalance').innerHTML=
+          'Total Debit: '+num0(totD)+' &nbsp;|&nbsp; Total Kredit: '+num0(totK)+' &nbsp;|&nbsp; '+
+          '<span style="color:'+(bal?'var(--safe)':'var(--danger)')+';">'+(bal?'✓ Balance':'⚠ Selisih '+num0(sel))+'</span>';
+      }
+      function wireRow(rid){
+        searchableSelect(rid+'_akun_ssel', rid+'_akun', {options:akunOpts.map(function(a){ return {value:a,label:a}; }), placeholder:'Cari kode / nama akun…'});
+        bindCurrencyInput(rid+'_debet');
+        bindCurrencyInput(rid+'_kredit');
+        document.getElementById(rid+'_debet').addEventListener('input', updateBalance);
+        document.getElementById(rid+'_kredit').addEventListener('input', updateBalance);
+        document.querySelector('[data-rmrow="'+rid+'"]').onclick=function(){
+          var row=document.querySelector('[data-row="'+rid+'"]');
+          if(row) row.remove();
+          updateBalance();
+        };
+      }
+
+      rowDefs.forEach(function(rd){ wireRow(rd.rid); });
       searchableSelect('f_project_ssel','f_project',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }), placeholder:'Cari project…'});
       searchableSelect('f_relasi_ssel','f_relasi',{options:relasiOpts.map(function(r){ return {value:r,label:r}; }), allowCustom:true, placeholder:'Cari / ketik relasi…'});
       searchableSelect('f_kategori_ssel','f_kategori',{options:kategoriOpts.map(function(k){ return {value:k,label:k}; }), allowCustom:true, placeholder:'Cari / ketik kategori…'});
-      if(!rec){
-        document.getElementById('f_tgl').addEventListener('change', function(){
-          document.getElementById('f_refPreview').value=nextJurnalRef();
-        });
-      }
-      bindCurrencyInput('f_amount');
+      document.getElementById('btnAddRow').onclick=function(){
+        var rd=lineRowHtml(null);
+        document.getElementById('jvoucherRows').insertAdjacentHTML('beforeend', rd.html);
+        wireRow(rd.rid);
+      };
+      updateBalance();
     }
 
-    function del(id){
-      var rec=DB.jurnal.find(function(x){ return x.id===id; });
-      confirmModal('Hapus jurnal','Hapus jurnal <b>'+esc(rec.ref)+'</b> — <b>'+esc(rec.akun)+'</b> senilai <b>'+rp(rec.debet||rec.kredit)+'</b>?'+
-        ' Kalau ini nota Hutang Dagang, statusnya di Trial Hutang ikut hilang.',function(){
-        DB.jurnal=DB.jurnal.filter(function(x){ return x.id!==id; });
-        delete DB.hutangOverrides[id];
-        saveDB(); syncDelete('jurnal_umum', id); refresh();
-        toast('Jurnal dihapus.','success');
+    function del(ref){
+      var lines=DB.jurnal.filter(function(j){ return j.ref===ref; });
+      var total=lines.reduce(function(a,b){ return a+b.debet; },0);
+      confirmModal('Hapus bukti jurnal','Hapus seluruh bukti jurnal <b>'+esc(ref)+'</b> ('+lines.length+' baris, total <b>'+rp(total)+'</b>)?'+
+        ' Kalau ada baris Hutang Dagang di dalamnya, statusnya di Trial Hutang ikut hilang.',function(){
+        var ids=lines.map(function(l){ return l.id; });
+        DB.jurnal=DB.jurnal.filter(function(x){ return x.ref!==ref; });
+        ids.forEach(function(id){ delete DB.hutangOverrides[id]; syncDelete('jurnal_umum', id); });
+        saveDB(); refresh();
+        toast('Bukti jurnal dihapus.','success');
       });
     }
 
@@ -2542,8 +2634,13 @@ function registerPages(){
     document.getElementById('btnAdd').onclick=function(){ form(null); };
     bindReportFilter(refresh);
     bindExport('exp','Jurnal_Umum',['Tanggal','Ref','Akun','Project','Relasi','Keterangan','Debet','Kredit'],
-      function(){ return tbl.getFiltered().map(function(r){
-        return [r.tgl,r.ref,r.akun,r.project,r.relasi,r.ket,r.debet,r.kredit]; }); });
+      function(){
+        var from=fv('fFrom'), to=fv('fTo'), out=[];
+        DB.jurnal.filter(function(j){ return inRange(j.tgl,from,to); }).forEach(function(j){
+          out.push([j.tgl,j.ref,j.akun,j.project,j.relasi,j.ket,j.debet,j.kredit]);
+        });
+        return out;
+      });
   };
 
   /* ---------------- LAPORAN: HUTANG / PIUTANG / PRIVE ---------------- */
