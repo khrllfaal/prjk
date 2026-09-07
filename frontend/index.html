@@ -906,23 +906,34 @@ function computeHutangDagangRows(){
     return akunKode(j.akun)===HUTANG_DAGANG_CODE && j.kredit>0;
   }).map(function(j){
     return {id:j.id, tgl:j.tgl, ref:j.ref, vendor:j.relasi||'(Tanpa Vendor)', project:j.project||'',
-      ket:j.ket, amount:j.kredit, paid:0};
+      ket:j.ket, amount:j.kredit, paid:0, direct:0};
   }).sort(function(a,b){ return a.tgl<b.tgl?-1:1; });
+  var byRef={}; notas.forEach(function(n){ byRef[n.ref]=n; });
 
-  var paymentsByVendor={};
+  // A payment whose description carries "(Nota:<ref>)" — always added by
+  // the Trial Hutang "Bayar" button — pays that exact nota directly, no
+  // guessing needed. Every other (all historical bulk-imported) payment
+  // has no such tag and falls through to the vendor-level FIFO pool below,
+  // oldest open nota first, same as before.
+  var pool={};
   DB.txns.forEach(function(t){
     if(!/keluar$/.test(t.jenis) || akunKode(t.akunLawan)!==HUTANG_DAGANG_CODE) return;
+    var m=/\(Nota:([^)]+)\)/.exec(t.ket||'');
+    var target=m?byRef[m[1]]:null;
+    if(target){ target.direct+=t.kredit; return; }
     var v=t.relasi||'(Tanpa Vendor)';
-    paymentsByVendor[v]=(paymentsByVendor[v]||0)+t.kredit;
+    pool[v]=(pool[v]||0)+t.kredit;
   });
+  notas.forEach(function(n){ n.paid=Math.min(n.direct, n.amount); });
 
   var byVendor={};
   notas.forEach(function(n){ (byVendor[n.vendor]=byVendor[n.vendor]||[]).push(n); });
   Object.keys(byVendor).forEach(function(v){
-    var pool=paymentsByVendor[v]||0;
+    var left=pool[v]||0;
     byVendor[v].forEach(function(n){
-      var take=Math.min(pool, n.amount);
-      n.paid=take; pool-=take;
+      if(n.direct>0) return; // already settled by a direct-tagged payment
+      var take=Math.min(left, n.amount);
+      n.paid=take; left-=take;
     });
   });
 
@@ -2604,6 +2615,9 @@ function registerPages(){
         '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
       '</div>'+
       '<div class="kpi-grid" id="kpiHutang" style="margin-bottom:14px;"></div>'+
+      '<div class="panel" style="margin-bottom:14px;"><h3>Ringkasan Hutang per Project</h3>'+
+      '<div class="panel-desc">Total nota, sudah dibayar, dan sisa — dijumlahkan per project (sesuai filter di atas)</div>'+
+      '<div class="table-scroll"><div id="tblHutangProject"></div></div></div>'+
       '<div class="panel"><div class="toolbar">'+
         '<div class="search-box"><span class="ic">⌕</span><input type="text" id="q" placeholder="Cari vendor / project / keterangan…"></div>'+
         '<span class="result-count" id="cnt"></span></div>'+
@@ -2632,6 +2646,25 @@ function registerPages(){
         kpiCard('Sisa Belum Dibayar', rp(totalSisa), belumCount+' nota belum lunas', totalSisa>0?'danger':'safe')
       ].join('');
 
+      var byProject={}, projOrder=[];
+      rows.forEach(function(r){
+        var key=r.project||'(Tanpa Project)';
+        if(!byProject[key]){ byProject[key]={project:key, nota:0, paid:0, sisa:0, count:0}; projOrder.push(key); }
+        byProject[key].nota+=r.amount; byProject[key].paid+=r.paid; byProject[key].sisa+=r.sisa; byProject[key].count++;
+      });
+      var projRows=projOrder.map(function(k){ return byProject[k]; }).sort(function(a,b){ return b.sisa-a.sisa; });
+      DataTable('tblHutangProject',[
+        {key:'project',label:'Project',cls:'wrap',render:function(r){ return esc(r.project); }},
+        {key:'count',label:'Jumlah Nota',num:true,render:function(r){ return num0(r.count); }},
+        {key:'nota',label:'Total Hutang',num:true,render:function(r){ return num0(r.nota); },
+         foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){ return a+b.nota; },0))+'</b>'; }},
+        {key:'paid',label:'Sudah Dibayar',num:true,render:function(r){ return r.paid?num0(r.paid):'<span class="faint-italic">–</span>'; },
+         foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){ return a+b.paid; },0))+'</b>'; }},
+        {key:'sisa',label:'Sisa Belum Dibayar',num:true,render:function(r){ return r.sisa?'<b class="neg">'+num0(r.sisa)+'</b>':num0(0); },
+         foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){ return a+b.sisa; },0))+'</b>'; }}
+      ], projRows, {perPage:10, showFoot:true, defaultSort:'sisa', defaultDir:'desc',
+        emptyText:'Tidak ada data pada rentang/filter ini.'});
+
       tbl=DataTable('tblHutang',[
         {key:'_no',label:'No',sort:false,render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
         {key:'tgl',label:'Tanggal',render:function(r){ return fmtDate(r.tgl); }},
@@ -2650,7 +2683,9 @@ function registerPages(){
         {key:'status',label:'Status',cls:function(r){ return 'status-'+hutangStatusInfo(r.status).cls; },
           render:function(r){ return esc(hutangStatusInfo(r.status).label)+(r.manual?' <span class="faint-italic" style="font-size:10.5px;">(manual)</span>':''); }},
         {key:'_act',label:'Aksi',sort:false,render:function(r){
-          return '<button type="button" class="btn btn-warn btn-sm" data-upd-hutang="'+esc(r.id)+'">Update</button>';
+          if(r.sisa<=0.5) return '<span class="faint-italic">✓ Lunas</span>';
+          return '<button type="button" class="btn btn-success btn-sm" data-bayar-hutang="'+esc(r.id)+'">Bayar</button>'+
+            (r.manual?' <button type="button" class="btn btn-ghost btn-sm" data-reset-hutang="'+esc(r.id)+'" title="Hapus koreksi manual">↺</button>':'');
         }}
       ], rows, {searchFn:function(r){ return r.vendor+' '+r.project+' '+r.ket; }, countId:'cnt', perPage:15,
         defaultSort:'tgl', defaultDir:'desc', showFoot:true,
@@ -2666,59 +2701,63 @@ function registerPages(){
               showTxnDrilldown('Pembayaran Hutang — '+vendor, 'Seluruh pembayaran kas/bank ke vendor ini untuk Hutang Dagang', list);
             };
           });
-          document.querySelectorAll('#tblHutang [data-upd-hutang]').forEach(function(b){
-            b.onclick=function(){ openHutangUpdateModal(b.getAttribute('data-upd-hutang')); };
+          document.querySelectorAll('#tblHutang [data-bayar-hutang]').forEach(function(b){
+            b.onclick=function(){ openBayarHutangModal(b.getAttribute('data-bayar-hutang')); };
+          });
+          document.querySelectorAll('#tblHutang [data-reset-hutang]').forEach(function(b){
+            b.onclick=function(){
+              var notaId=b.getAttribute('data-reset-hutang');
+              delete DB.hutangOverrides[notaId];
+              saveDB(); syncHutangOverrideDelete(notaId); allRows=computeHutangDagangRows(); refresh();
+              toast('Koreksi manual dihapus, kembali ke perhitungan otomatis.','success');
+            };
           });
         }});
       bindSearch('q', tbl);
     }
 
-    function openHutangUpdateModal(notaId){
+    /* One-click "sudah dibayar": creates a real Kas Keluar transaction
+       (akun lawan Hutang Dagang, project & vendor from the nota) — the
+       nota's paid/sisa/status is then just the normal FIFO computation
+       in computeHutangDagangRows() picking up that new payment, exactly
+       like any other Hutang Dagang payment already in the books. No
+       separate "mark as paid" flag disconnected from real money. */
+    function openBayarHutangModal(notaId){
       var row=allRows.find(function(r){ return r.id===notaId; });
       if(!row) return;
-
-      function saveOverride(paid){
-        var status=paid<=0?'BELUM_BAYAR':(paid>=row.amount-0.5?'LUNAS':'SEBAGIAN');
-        DB.hutangOverrides[notaId]={paid:paid, status:status};
-        saveDB(); syncHutangOverride(notaId, paid, status); closeModal(); allRows=computeHutangDagangRows(); refresh();
-        toast('Status hutang diperbarui.','success');
-      }
+      var kasAkun=DB.coa.filter(function(a){ return /^1\.1\.[12]$/.test(a.kode); }).map(function(a){ return a.nama; });
+      if(!kasAkun.length) kasAkun=['Kas Besar','Kas Kecil'];
 
       var html='<div class="field full"><label>Nota</label><div style="padding:8px 0;font-size:13px;">'+
-          esc(row.vendor)+' — '+esc(row.ket||'')+' <span class="faint-italic">('+fmtDate(row.tgl)+', '+num0(row.amount)+')</span></div></div>'+
-        '<div class="btn-row" style="margin-top:6px;flex-wrap:wrap;">'+
-          '<button type="button" class="btn btn-success" id="hutangChooseLunas">✓ Lunas</button>'+
-          '<button type="button" class="btn btn-warn" id="hutangChooseSebagian">◐ Dibayar Sebagian</button>'+
-          (row.paid>0?'<button type="button" class="btn btn-ghost" id="hutangChooseBelum">Belum Dibayar</button>':'')+
-          (row.manual?'<button type="button" class="btn btn-ghost" id="hutangResetAuto">Kembalikan ke Otomatis</button>':'')+
+          esc(row.vendor)+' — '+esc(row.ket||'')+
+          '<br><span class="faint-italic">Tanggal nota '+fmtDate(row.tgl)+' · Total '+num0(row.amount)+' · Sisa '+num0(row.sisa)+'</span></div></div>'+
+        '<div class="form-grid">'+
+          '<div class="field"><label>Tanggal Bayar *</label><input type="date" id="f_bayarTgl" value="'+esc(todayISO())+'"></div>'+
+          '<div class="field"><label>Akun Kas *</label><div id="f_bayarAkunKas_ssel"></div>'+
+            '<input type="hidden" id="f_bayarAkunKas" value="'+esc(kasAkun[0]||'')+'"></div>'+
+          '<div class="field"><label>Jumlah Dibayar (Rp) *</label><input type="text" inputmode="numeric" id="f_bayarJumlah" value="'+row.sisa+'"></div>'+
         '</div>'+
-        '<div id="hutangPartialWrap" style="display:none;margin-top:14px;">'+
-          '<div class="field"><label>Jumlah Dibayar (Rp)</label>'+
-          '<input type="text" inputmode="numeric" id="f_hutangPaid" value="'+esc(row.paid||'')+'"></div>'+
-          '<button type="button" class="btn btn-primary btn-sm" id="hutangSavePartial" style="margin-top:10px;">Simpan</button>'+
-        '</div>';
-      openModal('Update Status Hutang', html, {saveLabel:null});
-
-      document.getElementById('hutangChooseLunas').onclick=function(){ saveOverride(row.amount); };
-      var belumBtn=document.getElementById('hutangChooseBelum');
-      if(belumBtn) belumBtn.onclick=function(){ saveOverride(0); };
-      document.getElementById('hutangChooseSebagian').onclick=function(){
-        document.getElementById('hutangPartialWrap').style.display='block';
-        bindCurrencyInput('f_hutangPaid');
-        document.getElementById('f_hutangPaid').focus();
-      };
-      document.getElementById('hutangSavePartial').onclick=function(){
-        var paid=fnumC('f_hutangPaid');
-        if(paid<=0){ toast('Isi jumlah yang sudah dibayar.','danger'); return; }
-        if(paid>=row.amount-0.5){ toast('Jumlah ini sudah senilai lunas — pakai tombol Lunas.','danger'); return; }
-        saveOverride(paid);
-      };
-      var resetBtn=document.getElementById('hutangResetAuto');
-      if(resetBtn) resetBtn.onclick=function(){
-        delete DB.hutangOverrides[notaId];
-        saveDB(); syncHutangOverrideDelete(notaId); closeModal(); allRows=computeHutangDagangRows(); refresh();
-        toast('Dikembalikan ke perhitungan otomatis.','success');
-      };
+        '<div class="panel-desc" style="margin-top:6px;">Menyimpan akan langsung membuat transaksi baru di <b>Kas Keluar</b> '+
+          '(akun lawan Hutang Dagang) — nota ini otomatis ter-update jadi lunas/sebagian sesuai jumlah yang dibayar.</div>';
+      openModal('Bayar Hutang', html, {wide:true, saveLabel:'Simpan & Catat ke Kas Keluar', onSave:function(){
+        var tgl=fv('f_bayarTgl'), akunKas=fv('f_bayarAkunKas'), jumlah=fnumC('f_bayarJumlah');
+        if(!tgl){ toast('Tanggal wajib diisi.','danger'); return; }
+        if(!akunKas){ toast('Pilih akun kas.','danger'); return; }
+        if(!jumlah || jumlah<=0){ toast('Jumlah harus lebih besar dari 0.','danger'); return; }
+        var vendorRec=DB.vendors.find(function(v){ return v.nama===row.vendor; });
+        var obj={id:uid('t'), jenis:'kas_keluar', tgl:tgl, ref:nextRefFor('kas_keluar', tgl),
+          akunKas:akunKas, akunLawan:'Hutang Dagang', project:row.project||'',
+          relasi:row.vendor==='(Tanpa Vendor)'?'':row.vendor,
+          customerId:null, vendorId:vendorRec?vendorRec.id:null,
+          ket:'Pembayaran hutang (Nota:'+row.ref+') — '+(row.ket||row.ref), debet:0, kredit:jumlah};
+        DB.txns.push(obj);
+        saveDB(); syncUpsert('transactions', obj); closeModal();
+        allRows=computeHutangDagangRows(); refresh();
+        toast('Pembayaran dicatat ke Kas Keluar — status hutang diperbarui.','success');
+      }});
+      searchableSelect('f_bayarAkunKas_ssel','f_bayarAkunKas',{options:kasAkun.map(function(a){ return {value:a,label:a}; }),
+        placeholder:'Cari akun kas…'});
+      bindCurrencyInput('f_bayarJumlah');
     }
     refresh();
     document.getElementById('btnFilter').onclick=refresh;
