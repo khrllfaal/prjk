@@ -671,6 +671,14 @@ function isHutangPiutangName(akunLawan){
   var n=akunNamaOnly(akunLawan).toLowerCase();
   return n.indexOf('hutang')===0 || n.indexOf('piutang')===0;
 }
+// A voucher saved as Draft is still being reviewed/completed — like an
+// unposted journal entry in Accurate, it must not affect any report
+// (Laba Rugi, Neraca, Dashboard, Trial Hutang) until marked Posted. Rows
+// with no status at all (legacy data from before this field existed)
+// count as posted, so nothing already in the books silently disappears.
+function postedJurnal(){
+  return DB.jurnal.filter(function(j){ return j.status!=='draft'; });
+}
 function computeProjectProgressRows(from, to){
   return DB.projects.map(function(p, i){
     var ledger=p.ledgerName||p.nama;
@@ -690,7 +698,7 @@ function computeProjectProgressRows(from, to){
       // balance-sheet movement either way, so neither counts as cost.
       else if(t.jenis==='kas_keluar' && !isHutangPiutangName(t.akunLawan)) costCenter+=t.kredit;
     });
-    DB.jurnal.forEach(function(j){
+    postedJurnal().forEach(function(j){
       if(j.project!==ledger) return;
       if(from && j.tgl<from) return;
       if(to && j.tgl>to) return;
@@ -876,7 +884,7 @@ function projectCostTxns(projectNama, kind, from, to){
     if(kind!=='all' && cat!==kind) return;
     list.push({tgl:t.tgl, ref:t.ref, ket:t.ket+' — '+t.akunLawan, amount:t.kredit});
   });
-  DB.jurnal.forEach(function(j){
+  postedJurnal().forEach(function(j){
     if(j.project!==projectNama) return;
     if(from && j.tgl<from) return;
     if(to && j.tgl>to) return;
@@ -902,33 +910,38 @@ var HUTANG_DAGANG_CODE='2.1.1';
    which nota they cover. Adjust manually if that ordering is wrong for
    a specific case.  */
 function computeHutangDagangRows(){
-  var notas=DB.jurnal.filter(function(j){
+  var notas=postedJurnal().filter(function(j){
     return akunKode(j.akun)===HUTANG_DAGANG_CODE && j.kredit>0;
   }).map(function(j){
-    return {id:j.id, tgl:j.tgl, ref:j.ref, vendor:j.relasi||'(Tanpa Vendor)', project:j.project||'',
+    return {id:j.id, tgl:j.tgl, ref:j.ref, noFaktur:j.noFaktur||'', vendor:j.relasi||'(Tanpa Vendor)', project:j.project||'',
       ket:j.ket, amount:j.kredit, paid:0, direct:0};
   }).sort(function(a,b){ return a.tgl<b.tgl?-1:1; });
   var byRef={}; notas.forEach(function(n){ byRef[n.ref]=n; });
 
   // A payment whose description carries "(Nota:<ref>)" — always added by
   // the Trial Hutang "Bayar" button — pays that exact nota directly, no
-  // guessing needed. Every other (all historical bulk-imported) payment
-  // has no such tag and falls through to the vendor-level FIFO pool below,
-  // oldest open nota first, same as before.
-  var pool={};
+  // guessing needed. A payment with an actual vendor name falls through to
+  // that vendor's own FIFO pool below. A payment with NO vendor at all
+  // (blank relasi — every bulk-imported Cash Out/Bank Out report row) can
+  // never be attributed to any specific vendor, so it is kept apart in
+  // `unattributed` rather than a "(Tanpa Vendor)" pool key — a nota that
+  // itself genuinely has no vendor also displays as "(Tanpa Vendor)", and
+  // sharing one key would incorrectly let it cut in line ahead of older,
+  // properly vendor-attributed notas.
+  var pool={}, unattributed=0;
   DB.txns.forEach(function(t){
     if(!/keluar$/.test(t.jenis) || akunKode(t.akunLawan)!==HUTANG_DAGANG_CODE) return;
     var m=/\(Nota:([^)]+)\)/.exec(t.ket||'');
     var target=m?byRef[m[1]]:null;
     if(target){ target.direct+=t.kredit; return; }
-    var v=t.relasi||'(Tanpa Vendor)';
-    pool[v]=(pool[v]||0)+t.kredit;
+    if(t.relasi) pool[t.relasi]=(pool[t.relasi]||0)+t.kredit;
+    else unattributed+=t.kredit;
   });
   notas.forEach(function(n){ n.paid=Math.min(n.direct, n.amount); });
 
   var byVendor={};
   notas.forEach(function(n){ (byVendor[n.vendor]=byVendor[n.vendor]||[]).push(n); });
-  var poolLeftover=0;
+  var poolLeftover=unattributed;
   Object.keys(pool).forEach(function(v){
     var left=pool[v];
     (byVendor[v]||[]).forEach(function(n){
@@ -936,16 +949,16 @@ function computeHutangDagangRows(){
       var take=Math.min(left, n.amount-n.paid);
       n.paid+=take; left-=take;
     });
-    poolLeftover+=left; // unmatched vendor name, or "(Tanpa Vendor)" itself
+    poolLeftover+=left; // this vendor's payments exceeded this vendor's notas
   });
 
-  // The bulk-imported Cash Out/Bank Out reports carry no vendor column at
-  // all, so every such payment reaches this point with a blank relasi and
-  // pools under "(Tanpa Vendor)" — a bucket no real nota's vendor name can
-  // ever match. That money still genuinely paid down Hutang Dagang, so
-  // apply it globally to the oldest still-open nota first (notas is sorted
-  // oldest-first above), the same rule real AP aging uses for a payment
-  // with no bill reference, instead of leaving it stuck unattributed.
+  // Every payment with no vendor at all (blank relasi — every
+  // bulk-imported Cash Out/Bank Out report row) plus any vendor pool that
+  // outpaid its own vendor's notas: that money still genuinely paid down
+  // Hutang Dagang, so apply it globally to the oldest still-open nota
+  // first (notas is sorted oldest-first above), the same rule real AP
+  // aging uses for a payment with no bill reference, instead of leaving
+  // it stuck unattributed.
   notas.forEach(function(n){
     if(poolLeftover<=0 || n.direct>0) return;
     var remaining=n.amount-n.paid;
@@ -962,7 +975,7 @@ function computeHutangDagangRows(){
     var paid=ov?ov.paid:n.paid;
     var sisa=Math.max(0, n.amount-paid);
     var status=ov?ov.status:(sisa<=0.5?'LUNAS':(paid>0?'SEBAGIAN':'BELUM_BAYAR'));
-    return {id:n.id, tgl:n.tgl, ref:n.ref, vendor:n.vendor, project:n.project, ket:n.ket,
+    return {id:n.id, tgl:n.tgl, ref:n.ref, noFaktur:n.noFaktur, vendor:n.vendor, project:n.project, ket:n.ket,
       amount:n.amount, paid:paid, sisa:sisa, status:status, manual:!!ov};
   });
 }
@@ -1484,7 +1497,7 @@ function allEntries(){
       debet:t.kredit, kredit:t.debet, leg:'lawan'
     }));
   });
-  DB.jurnal.forEach(function(j){
+  postedJurnal().forEach(function(j){
     out.push({tgl:j.tgl, ref:j.ref, akun:j.akun, akunKas:'—', project:j.project,
       relasi:j.relasi, kategori:j.kategori, ket:j.ket, debet:j.debet, kredit:j.kredit, src:'jurnal', leg:'jurnal'});
   });
@@ -2424,7 +2437,8 @@ function registerPages(){
     rows.forEach(function(j){
       if(!map[j.ref]){
         map[j.ref]={ref:j.ref, tgl:j.tgl, project:j.project||'', relasi:j.relasi||'',
-          kategori:j.kategori||'', ket:j.ket||'', lines:[], debet:0, kredit:0};
+          kategori:j.kategori||'', noFaktur:j.noFaktur||'', status:j.status||'posted',
+          ket:j.ket||'', lines:[], debet:0, kredit:0};
         order.push(j.ref);
       }
       var g=map[j.ref];
@@ -2469,6 +2483,7 @@ function registerPages(){
         {key:'_no',label:'No',sort:false,render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
         {key:'tgl',label:'Tanggal',render:function(r){ return fmtDate(r.tgl); }},
         {key:'ref',label:'No. Bukti',render:function(r){ return '<span class="mono" style="font-size:11.5px;">'+esc(r.ref)+'</span>'; }},
+        {key:'noFaktur',label:'No. Faktur/PO',render:function(r){ return r.noFaktur?esc(r.noFaktur):'<span class="faint-italic">–</span>'; }},
         {key:'_akun',label:'Akun (Debit → Kredit)',cls:'wrap',sort:false,render:function(r){
           var d=r.lines.filter(function(l){ return l.debet>0; }).map(function(l){ return esc(l.akun); });
           var k=r.lines.filter(function(l){ return l.kredit>0; }).map(function(l){ return esc(l.akun); });
@@ -2477,6 +2492,11 @@ function registerPages(){
         {key:'project',label:'Project',render:function(r){ return esc(r.project||'–'); }},
         {key:'relasi',label:'Relasi',render:function(r){ return r.relasi?esc(r.relasi):'<span class="faint-italic">–</span>'; }},
         {key:'ket',label:'Keterangan',cls:'wrap',render:function(r){ return esc(r.ket||'–'); }},
+        {key:'status',label:'Status',render:function(r){
+          return r.status==='draft'
+            ? '<span class="chip warn"><span class="sig"></span>Draft</span>'
+            : '<span class="chip safe"><span class="sig"></span>Posted</span>';
+        }},
         {key:'debet',label:'Total Debet',num:true,render:function(r){ return num0(r.debet); },
          foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+b.debet;},0))+'</b>'; }},
         {key:'kredit',label:'Total Kredit',num:true,render:function(r){ return num0(r.kredit); },
@@ -2486,7 +2506,7 @@ function registerPages(){
             '<button class="btn btn-danger btn-sm" data-del="'+esc(r.ref)+'">Hapus</button></div>';
         }}
       ], rows, {defaultSort:'tgl',defaultDir:'desc',perPage:15,showFoot:true,countId:'cnt',
-        searchFn:function(r){ return [r.ket,r.project,r.relasi].concat(r.lines.map(function(l){ return l.akun; })).join(' '); },
+        searchFn:function(r){ return [r.ket,r.project,r.relasi,r.noFaktur,r.ref].concat(r.lines.map(function(l){ return l.akun; })).join(' '); },
         emptyText:'Belum ada jurnal pada rentang ini.',
         onRender:function(){
           document.querySelectorAll('[data-detail]').forEach(function(b){ b.onclick=function(){ showVoucherDetail(b.getAttribute('data-detail')); }; });
@@ -2527,9 +2547,15 @@ function registerPages(){
       var kategoriOpts=Object.keys(kategoriSet);
       var rowDefs=(lines||[null,null]).map(lineRowHtml);
 
+      var statusAwal=head?(head.status||'posted'):'posted';
       var html='<div class="form-grid">'+
         '<div class="field"><label>No. Bukti</label><input type="text" id="f_refPreview" value="'+esc(ref||nextJurnalRef())+'" disabled></div>'+
         '<div class="field"><label>Tanggal *</label><input type="date" id="f_tgl" value="'+esc(head?head.tgl:todayISO())+'"></div>'+
+        '<div class="field"><label>No. Faktur/PO Vendor</label><input type="text" id="f_noFaktur" placeholder="Nomor faktur/PO asli dari vendor" value="'+esc(head?head.noFaktur:'')+'"></div>'+
+        '<div class="field"><label>Status</label><select id="f_status">'+
+          '<option value="posted"'+(statusAwal==='posted'?' selected':'')+'>Posted (sudah final, masuk laporan)</option>'+
+          '<option value="draft"'+(statusAwal==='draft'?' selected':'')+'>Draft (belum final, belum masuk laporan)</option>'+
+        '</select></div>'+
         '<div class="field"><label>Project</label><div id="f_project_ssel"></div><input type="hidden" id="f_project" value="'+esc(head?head.project:'')+'"></div>'+
         '<div class="field"><label>Relasi (Customer/Vendor)</label><div id="f_relasi_ssel"></div><input type="hidden" id="f_relasi" value="'+esc(head?head.relasi:'')+'"></div>'+
         '<div class="field"><label>Kategori</label><div id="f_kategori_ssel"></div><input type="hidden" id="f_kategori" value="'+esc(head?head.kategori:'')+'"></div>'+
@@ -2563,6 +2589,7 @@ function registerPages(){
         if(Math.abs(totD-totK)>0.5){ toast('Tidak balance — Total Debit ('+num0(totD)+') harus sama dengan Total Kredit ('+num0(totK)+').','danger'); return; }
 
         var project=fv('f_project'), relasi=fv('f_relasi'), kategori=fv('f_kategori'), ket=fv('f_ket');
+        var noFaktur=fv('f_noFaktur'), status=fv('f_status')||'posted';
         var useRef=ref||nextJurnalRef();
 
         if(ref){
@@ -2572,7 +2599,7 @@ function registerPages(){
         }
         newLines.forEach(function(nl){
           var obj={id:uid('j'), ref:useRef, tgl:tgl, akun:nl.akun, project:project, relasi:relasi,
-            kategori:kategori, ket:ket, debet:nl.debet, kredit:nl.kredit};
+            kategori:kategori, noFaktur:noFaktur, status:status, ket:ket, debet:nl.debet, kredit:nl.kredit};
           DB.jurnal.push(obj);
           syncUpsert('jurnal_umum', obj);
         });
@@ -2633,11 +2660,11 @@ function registerPages(){
     refresh();
     document.getElementById('btnAdd').onclick=function(){ form(null); };
     bindReportFilter(refresh);
-    bindExport('exp','Jurnal_Umum',['Tanggal','Ref','Akun','Project','Relasi','Keterangan','Debet','Kredit'],
+    bindExport('exp','Jurnal_Umum',['Tanggal','Ref','No Faktur','Status','Akun','Project','Relasi','Keterangan','Debet','Kredit'],
       function(){
         var from=fv('fFrom'), to=fv('fTo'), out=[];
         DB.jurnal.filter(function(j){ return inRange(j.tgl,from,to); }).forEach(function(j){
-          out.push([j.tgl,j.ref,j.akun,j.project,j.relasi,j.ket,j.debet,j.kredit]);
+          out.push([j.tgl,j.ref,j.noFaktur||'',j.status||'posted',j.akun,j.project,j.relasi,j.ket,j.debet,j.kredit]);
         });
         return out;
       });
@@ -2783,6 +2810,7 @@ function registerPages(){
         {key:'_no',label:'No',sort:false,render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
         {key:'tgl',label:'Tanggal',render:function(r){ return fmtDate(r.tgl); }},
         {key:'ref',label:'Ref No',render:function(r){ return '<span class="mono" style="font-size:11.5px;">'+esc(r.ref)+'</span>'; }},
+        {key:'noFaktur',label:'No. Faktur/PO',render:function(r){ return r.noFaktur?esc(r.noFaktur):'<span class="faint-italic">–</span>'; }},
         {key:'vendor',label:'Vendor',render:function(r){ return esc(r.vendor); }},
         {key:'project',label:'Project',render:function(r){ return r.project?esc(r.project):'<span class="faint-italic">–</span>'; }},
         {key:'ket',label:'Description',cls:'wrap',render:function(r){ return esc(r.ket||'–'); }},
@@ -2801,7 +2829,7 @@ function registerPages(){
           return '<button type="button" class="btn btn-success btn-sm" data-bayar-hutang="'+esc(r.id)+'">Bayar</button>'+
             (r.manual?' <button type="button" class="btn btn-ghost btn-sm" data-reset-hutang="'+esc(r.id)+'" title="Hapus koreksi manual">↺</button>':'');
         }}
-      ], rows, {searchFn:function(r){ return r.vendor+' '+r.project+' '+r.ket; }, countId:'cnt', perPage:15,
+      ], rows, {searchFn:function(r){ return r.vendor+' '+r.project+' '+r.ket+' '+(r.noFaktur||'')+' '+r.ref; }, countId:'cnt', perPage:15,
         defaultSort:'tgl', defaultDir:'desc', showFoot:true,
         emptyText:'Tidak ada nota Hutang Dagang pada rentang/filter ini.',
         onRender:function(){
@@ -2879,9 +2907,9 @@ function registerPages(){
       ['fFrom','fTo','fStatus','fVendor','fProject'].forEach(function(id){ document.getElementById(id).value=''; });
       refresh();
     };
-    bindExport('exp','Trial_Hutang',['Tanggal','Ref No','Vendor','Project','Description','Jumlah Nota','Sudah Dibayar','Sisa','Status'],
+    bindExport('exp','Trial_Hutang',['Tanggal','Ref No','No Faktur/PO','Vendor','Project','Description','Jumlah Nota','Sudah Dibayar','Sisa','Status'],
       function(){ return tbl.getFiltered().map(function(r){
-        return [r.tgl,r.ref,r.vendor,r.project,r.ket,r.amount,r.paid,r.sisa,hutangStatusInfo(r.status).label]; }); });
+        return [r.tgl,r.ref,r.noFaktur||'',r.vendor,r.project,r.ket,r.amount,r.paid,r.sisa,hutangStatusInfo(r.status).label]; }); });
   };
 
   PAGES.lap_piutang=relasiReport({

@@ -108,6 +108,8 @@ CREATE TABLE IF NOT EXISTS jurnal_umum (
   project     VARCHAR(255) NOT NULL DEFAULT '',
   relasi      VARCHAR(255) NOT NULL DEFAULT '',
   kategori    VARCHAR(120) NOT NULL DEFAULT '',
+  no_faktur   VARCHAR(80) NOT NULL DEFAULT '',
+  status      VARCHAR(10) NOT NULL DEFAULT 'posted',
   ket         TEXT NULL,
   debet       DECIMAL(18,2) NOT NULL DEFAULT 0,
   kredit      DECIMAL(18,2) NOT NULL DEFAULT 0,

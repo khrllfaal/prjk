@@ -58,11 +58,13 @@ function projectToDb(obj){
 }
 function jurnalFromDb(r){
   return {id:r.id, tgl:r.tgl, ref:r.ref, akun:r.akun, project:r.project||'', relasi:r.relasi||'',
-    kategori:r.kategori||'', ket:r.ket||'', debet:Number(r.debet)||0, kredit:Number(r.kredit)||0};
+    kategori:r.kategori||'', noFaktur:r.no_faktur||'', status:r.status||'posted',
+    ket:r.ket||'', debet:Number(r.debet)||0, kredit:Number(r.kredit)||0};
 }
 function jurnalToDb(obj){
   return {id:obj.id, tgl:obj.tgl, ref:obj.ref, akun:obj.akun, project:obj.project||'', relasi:obj.relasi||'',
-    kategori:obj.kategori||'', ket:obj.ket||'', debet:obj.debet||0, kredit:obj.kredit||0};
+    kategori:obj.kategori||'', no_faktur:obj.noFaktur||'', status:obj.status||'posted',
+    ket:obj.ket||'', debet:obj.debet||0, kredit:obj.kredit||0};
 }
 
 var TABLE_MAP = {
