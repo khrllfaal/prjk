@@ -1,0 +1,12 @@
+# Without this, a browser (or Hostinger's server-side cache) can keep
+# serving an old cached copy of index.html/auth.js/data-sync.js after a
+# new version is uploaded, making a real fix look like it "didn't work"
+# when it's actually just stale. Force every visit to re-check with the
+# server instead of trusting a locally cached copy.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(html|js)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>
+
+Options -Indexes
