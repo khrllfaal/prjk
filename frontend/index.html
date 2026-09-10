@@ -1124,7 +1124,12 @@ function coaTipe(kode){
   return ({'1':'asset','2':'liability','3':'equity','4':'revenue','5':'cogs','6':'expense','7':'other','8':'tax'})[head]||'other';
 }
 
-function loadDB(){
+/* Returns the cached DB only if a real previous save exists — unlike
+   loadDB(), never falls back to seedDB()'s fictional placeholder data.
+   Used for the cache-first instant boot in auth.js: showing seed data as
+   if it were real (even for a split second) would be actively wrong, not
+   just stale. */
+function tryLoadCachedDB(){
   try{
     var raw=localStorage.getItem(STORE_KEY);
     if(raw){
@@ -1134,8 +1139,11 @@ function loadDB(){
         return parsed;
       }
     }
-  }catch(e){ console.warn('load failed',e); }
-  return seedDB();
+  }catch(e){ console.warn('cache read failed',e); }
+  return null;
+}
+function loadDB(){
+  return tryLoadCachedDB() || seedDB();
 }
 function saveDB(){
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }

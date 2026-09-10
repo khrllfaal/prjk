@@ -43,12 +43,39 @@ function hideBootLoading(){
   document.getElementById('loginForm').style.display='';
 }
 
+function enterApp(){
+  hideLogin();
+  var start=(location.hash||'').replace('#/','');
+  go(PAGES[start]?start:'dashboard');
+}
+
 /* profile: {id, email, nama, role} — same shape regardless of backend. */
 async function bootAfterLogin(profile){
   CURRENT_PROFILE = profile;
   document.getElementById('tbUserName').textContent = profile.nama+' ('+(profile.role==='admin'?'Admin':'Owner')+')';
   document.getElementById('tbAvatar').textContent = (profile.nama||'?').slice(0,2).toUpperCase();
   document.getElementById('btnLogout').style.display = '';
+
+  // Cache-first boot: if this browser already has a real previous sync,
+  // show it immediately instead of blocking on the network — the app
+  // feels instant even on a slow connection. fetchAllData() still runs
+  // right after, silently replacing DB once it resolves; only the
+  // read-only landing pages (Dashboard/Insight) re-render automatically,
+  // so a form the user is mid-editing on another page is never yanked
+  // out from under them — it just picks up the fresh data on next visit.
+  var cached=tryLoadCachedDB();
+  if(cached){
+    DB=cached;
+    enterApp();
+    fetchAllData().then(function(fresh){
+      DB=fresh; saveDB();
+      if(CURRENT==='dashboard'||CURRENT==='insight') go(CURRENT);
+    }).catch(function(e){
+      console.error('background refresh failed, keeping cached data', e);
+      toast('Tidak bisa memperbarui data dari server — menampilkan data terakhir yang tersimpan.', 'danger');
+    });
+    return;
+  }
 
   showBootLoading('Memuat data…');
   try{
@@ -60,9 +87,7 @@ async function bootAfterLogin(profile){
     toast('Tidak bisa terhubung ke server, menampilkan data cache terakhir.', 'danger');
   }
 
-  hideLogin();
-  var start=(location.hash||'').replace('#/','');
-  go(PAGES[start]?start:'dashboard');
+  enterApp();
 }
 
 function initAuthGate(){
