@@ -1613,7 +1613,10 @@ function akunNamaOnly(s){ return String(s||'').replace(/^[\d.]+-/,'').trim()||'(
    ROUTER
    ============================================================ */
 var NAV=[
-  {sec:null, items:[{id:'dashboard', label:'Dashboard', ic:'◈'}]},
+  {sec:null, items:[
+    {id:'dashboard', label:'Dashboard', ic:'◈'},
+    {id:'insight', label:'Catatan Insight', ic:'★'}
+  ]},
   {sec:'Master Data', items:[
     {id:'customer', label:'Master Customer', ic:'☺'},
     {id:'vendor', label:'Master Vendor', ic:'⛟'},
@@ -2071,7 +2074,8 @@ function registerPages(){
     if(belum.length) alerts.push(alertHTML('warn','⚠','Progress lapangan belum lengkap',
       belum.length+' dari '+rows.length+' proyek belum melaporkan progress lapangan.'));
 
-    c.innerHTML = pageHead('Dashboard','Ringkasan kas, kumulatif tahun berjalan, dan status RAP seluruh proyek') +
+    c.innerHTML = pageHead('Dashboard','Ringkasan kas, kumulatif tahun berjalan, dan status RAP seluruh proyek',
+        '<button class="btn btn-steel btn-sm" id="btnInsight">★ Catatan Insight</button>') +
       '<div class="alerts">'+alerts.join('')+'</div>'+
       '<div class="section-head"><h2><span class="icon-chip">$</span>Posisi Kas — Per Periode</h2>'+
         '<span class="desc">Pilih minggu yang ingin ditampilkan</span></div>'+
@@ -2119,6 +2123,8 @@ function registerPages(){
         '<span class="result-count" id="cntProg"></span></div>'+
         '<div class="panel-desc" id="progPeriodDesc" style="padding:0 16px 8px;"></div>'+
         '<div class="table-scroll"><div id="tblProg"></div></div></div>';
+
+    document.getElementById('btnInsight').onclick=function(){ go('insight'); };
 
     /* --- period logic --- */
     var cashPeriods=computeCashPeriods();
@@ -3643,6 +3649,169 @@ function registerPages(){
       exportExcel('Cash_Flow', ['Keterangan','Jumlah'], rows);
     };
     document.getElementById('cfPdf').onclick=printPage;
+  };
+
+  /* ---------------- CATATAN INSIGHT ---------------- */
+  /* Recomputed from DB.txns/DB.projects/DB.coa/DB.jurnal every time this
+     page is opened — never a saved/cached snapshot, so it always reflects
+     whatever is in the database right now. "Ayat Silang Kas Besar
+     Kas-Bank" is excluded from Masuk/Keluar (internal kas<->bank transfer,
+     not real cash flow) — same method verified against the legacy Cash
+     Flow dashboard. "Cost Center" and "Prive" are financing/personal, not
+     project spend, so they're split out of the Top Project ranking. */
+  function computeInsightData(){
+    var AYAT_SILANG='Ayat Silang Kas Besar Kas-Bank';
+    var real=DB.txns.filter(function(t){
+      return /^(kas|bank)_(masuk|keluar)$/.test(t.jenis) && t.akunLawan!==AYAT_SILANG;
+    });
+    if(!real.length) return null;
+
+    var coaAwal=(DB.coa||[]).reduce(function(a,x){ return a+(x.saldoAwal||0); },0);
+    var totalMasuk=0, totalKeluar=0;
+    var monthly={}, alMasuk={}, alKeluar={}, projMasuk={}, projKeluar={};
+    real.forEach(function(t){
+      var isIn=/masuk$/.test(t.jenis), v=isIn?t.debet:t.kredit;
+      if(isIn) totalMasuk+=v; else totalKeluar+=v;
+      var ym=t.tgl.slice(0,7);
+      if(!monthly[ym]) monthly[ym]={masuk:0,keluar:0};
+      monthly[ym][isIn?'masuk':'keluar']+=v;
+      var al=t.akunLawan||'(Tanpa Akun Lawan)';
+      var bucket=isIn?alMasuk:alKeluar;
+      bucket[al]=(bucket[al]||0)+v;
+      var pj=t.project||'(Tanpa Project)';
+      var pbucket=isIn?projMasuk:projKeluar;
+      pbucket[pj]=(pbucket[pj]||0)+v;
+    });
+    var saldoAkhir=coaAwal+totalMasuk-totalKeluar;
+
+    var monthRows=Object.keys(monthly).sort().map(function(ym){
+      var m=monthly[ym]; return {ym:ym, masuk:m.masuk, keluar:m.keluar, net:m.masuk-m.keluar};
+    });
+    var deficitMonths=monthRows.filter(function(m){ return m.net<0; });
+
+    function topN(obj, excl){
+      return Object.keys(obj).filter(function(k){ return !excl || !/^(Cost Center|Prive|\(Tanpa Project\))$/.test(k); })
+        .map(function(k){ return {nama:k, val:obj[k]}; }).sort(function(a,b){ return b.val-a.val; });
+    }
+    var topAlMasuk=topN(alMasuk).slice(0,5), topAlKeluar=topN(alKeluar).slice(0,5);
+    var topProjKeluar=topN(projKeluar,true).slice(0,5), topProjMasuk=topN(projMasuk,true).slice(0,5);
+
+    var ccMasuk=projMasuk['Cost Center']||0, ccKeluar=projKeluar['Cost Center']||0;
+    var priveKeluar=projKeluar['Prive']||0, priveMasuk=projMasuk['Prive']||0;
+    var opMasuk=totalMasuk-ccMasuk, opKeluar=totalKeluar-ccKeluar;
+
+    var hutangMasuk=0;
+    Object.keys(alMasuk).forEach(function(k){ if(/hutang/i.test(k)) hutangMasuk+=alMasuk[k]; });
+
+    var nProj=DB.projects.length;
+    var nKontrak=DB.projects.filter(function(p){ return (p.kontrak||0)>0; }).length;
+    var nRap=DB.projects.filter(function(p){ return (p.rap||0)>0; }).length;
+    var nProgress=DB.projects.filter(function(p){ return p.progress!==null && p.progress!==undefined; }).length;
+
+    var hutangJurnal=0;
+    postedJurnal().forEach(function(j){
+      if(/^2\.1/.test(j.akun||'')) hutangJurnal+=(j.kredit||0)-(j.debet||0);
+    });
+
+    return {
+      periodFrom:monthRows[0].ym, periodTo:monthRows[monthRows.length-1].ym,
+      coaAwal:coaAwal, totalMasuk:totalMasuk, totalKeluar:totalKeluar, saldoAkhir:saldoAkhir,
+      monthRows:monthRows, deficitMonths:deficitMonths,
+      topAlMasuk:topAlMasuk, topAlKeluar:topAlKeluar, topProjKeluar:topProjKeluar, topProjMasuk:topProjMasuk,
+      ccMasuk:ccMasuk, ccKeluar:ccKeluar, priveKeluar:priveKeluar, priveMasuk:priveMasuk,
+      opMasuk:opMasuk, opKeluar:opKeluar, hutangMasuk:hutangMasuk,
+      nProj:nProj, nKontrak:nKontrak, nRap:nRap, nProgress:nProgress, hutangJurnal:hutangJurnal
+    };
+  }
+
+  function buildInsightCards(d){
+    var cards=[];
+    var opNet=d.opMasuk-d.opKeluar;
+    if(d.ccMasuk>0 || d.ccKeluar>0){
+      cards.push(alertHTML(opNet<0?'danger':'info', opNet<0?'⚠':'✓',
+        opNet<0?'Kas operasional defisit di luar pembiayaan (Cost Center)':'Kas operasional surplus di luar pembiayaan (Cost Center)',
+        'Uang masuk operasional (di luar Cost Center): <b>'+rp(d.opMasuk)+'</b>, uang keluar operasional: <b>'+rp(d.opKeluar)+'</b> &mdash; selisih '+numSigned(opNet)+'. '+
+        (opNet<0?'Pos "Cost Center" (pencairan/pembayaran pinjaman) menyumbang '+pct(d.totalMasuk?d.ccMasuk/d.totalMasuk:0)+' dari total uang masuk — surplus pada Ringkasan di atas ditopang oleh pembiayaan, bukan murni hasil proyek. Pantau rasio ini tiap bulan.'
+          :'Operasional proyek sehat tanpa bergantung pencairan pinjaman baru pada periode ini.')));
+    }
+    var hutangRatio=d.totalMasuk?d.hutangMasuk/d.totalMasuk:0;
+    if(hutangRatio>0.3){
+      cards.push(alertHTML('warn','⚠','Sebagian besar uang masuk berasal dari utang, bukan pendapatan',
+        'Akun lawan yang mengandung kata "Hutang" (pinjaman bank, pihak ketiga, dst.) menyumbang <b>'+pct(hutangRatio)+'</b> dari total uang masuk ('+rp(d.hutangMasuk)+'). '+
+        'Sehat selama dipakai membiayai proyek berjalan — tapi layak jadi salah satu angka yang dipantau tiap bulan, bukan cuma total kas.'));
+    }
+    var pctProgress=d.nProj?d.nProgress/d.nProj:0, pctRap=d.nProj?d.nRap/d.nProj:0;
+    if(d.nProj>0 && pctProgress<0.5){
+      cards.push(alertHTML('danger','⚠','Alat pemantauan RAP &amp; progress proyek belum bisa dipakai',
+        'Dari <b>'+d.nProj+' proyek</b> di Master Project, hanya <b>'+d.nKontrak+'</b> yang punya nilai Kontrak terisi, <b>'+d.nRap+'</b> yang punya RAP terisi ('+pct(pctRap)+'), dan <b>'+d.nProgress+'</b> yang sudah melaporkan progress lapangan ('+pct(pctProgress)+'). '+
+        'Tanpa data ini, fitur deteksi "proyek melebihi RAP" tidak bisa memberi early-warning. Prioritaskan pengisian Kontrak &amp; RAP untuk proyek bernilai besar (lihat Top Project di bawah).'));
+    }
+    if(d.deficitMonths.length){
+      cards.push(alertHTML('warn','⚠', d.deficitMonths.length+' bulan defisit pada periode berjalan',
+        d.deficitMonths.map(function(m){ return '<b>'+m.ym+'</b> ('+numSigned(m.net)+')'; }).join(', ')+
+        ' &mdash; uang keluar melebihi uang masuk pada bulan tersebut. Cek nota besar bulan itu; kalau berulang, antisipasi kebutuhan kas sebelum jatuh tempo.'));
+    }
+    if(d.priveKeluar>0){
+      cards.push(alertHTML(d.priveKeluar>d.priveMasuk?'warn':'info','ⓘ','Prive (pengambilan pribadi) tercatat '+rp(d.priveKeluar),
+        d.priveMasuk?('Ada juga setoran balik via Prive sebesar '+rp(d.priveMasuk)+'.'):'Tidak ada setoran modal balik pada periode yang sama.'+
+        ' Pastikan sesuai kesepakatan pembagian — tarikan pribadi mengalir langsung dari Kas/Bank operasional.'));
+    }
+    if(d.hutangJurnal>0){
+      cards.push(alertHTML('info','ⓘ','Hutang Dagang senilai '+rp(d.hutangJurnal)+' tercatat di Jurnal Umum',
+        'Ini baru dicatat sebagai kewajiban (akun 2.1.x), belum keluar sebagai transaksi Kas/Bank. Siapkan proyeksi kas untuk menutupnya saat jatuh tempo — cek rincian di menu Trial Hutang.'));
+    }
+    if(!cards.length){
+      cards.push(alertHTML('info','✓','Tidak ada sinyal yang perlu perhatian khusus pada data saat ini',
+        'Posisi kas dan kelengkapan data proyek terlihat wajar berdasarkan aturan yang dipantau halaman ini.'));
+    }
+    return cards;
+  }
+
+  PAGES.insight=function(c){
+    var d=computeInsightData();
+    c.innerHTML=pageHead('Catatan Insight','Ringkasan otomatis posisi kas &amp; proyek, dihitung ulang setiap halaman ini dibuka — siap dibaca owner untuk pengambilan keputusan',
+      '<button class="btn btn-steel btn-sm" id="insPdf">⎙ Cetak / Unduh PDF</button>') +
+      '<div id="insBody"></div>';
+    var body=document.getElementById('insBody');
+    if(!d){
+      body.innerHTML='<div class="panel"><p class="faint-italic">Belum ada transaksi Kas/Bank untuk dianalisis.</p></div>';
+    } else {
+      body.innerHTML=
+        '<div class="panel-desc" style="margin:-4px 0 14px;">Periode data: <b>'+esc(d.periodFrom)+' &ndash; '+esc(d.periodTo)+'</b>'+
+          ' &middot; dihasilkan otomatis '+fmtDate(todayISO())+' dari seluruh transaksi tercatat (ayat silang kas&harr;bank dikeluarkan).</div>'+
+        '<div class="kpi-grid" style="margin-bottom:16px;">'+
+          kpiCard('Saldo Awal', rp(d.coaAwal),'dari Saldo Awal Master COA','accent')+
+          kpiCard('Uang Masuk', rp(d.totalMasuk),'kas + bank','accent')+
+          kpiCard('Uang Keluar', rp(d.totalKeluar),'kas + bank','accent')+
+          kpiCard('Saldo Akhir', rp(d.saldoAkhir), d.saldoAkhir<0?'Defisit':'Surplus &middot; '+pct(d.totalMasuk?d.saldoAkhir/d.totalMasuk:0)+' dari uang masuk', d.saldoAkhir<0?'danger':'safe')+
+        '</div>'+
+        '<div class="section-head"><h2><span class="icon-chip">★</span>Insight &amp; Implikasi</h2>'+
+          '<span class="desc">Diurutkan otomatis, paling penting lebih dulu</span></div>'+
+        '<div class="alerts" style="margin-bottom:16px;">'+buildInsightCards(d).join('')+'</div>'+
+        '<div class="panel tick"><h3>Tren Bulanan (Selisih Masuk &minus; Keluar)</h3>'+
+          '<div class="panel-desc">Merah = bulan defisit</div><div id="insMonthly"></div></div>'+
+        '<div class="grid-2" style="margin-top:14px;">'+
+          '<div class="panel tick"><h3>Sumber Uang Masuk Terbesar</h3><div id="insAlMasuk"></div></div>'+
+          '<div class="panel tick"><h3>Pos Uang Keluar Terbesar</h3><div id="insAlKeluar"></div></div>'+
+        '</div>'+
+        '<div class="grid-2" style="margin-top:14px;">'+
+          '<div class="panel tick"><h3>Pengeluaran Terbesar per Project</h3><div class="panel-desc">Di luar Cost Center / Prive</div><div id="insProjKeluar"></div></div>'+
+          '<div class="panel tick"><h3>Pemasukan Terbesar per Project</h3><div class="panel-desc">Di luar Cost Center / Prive</div><div id="insProjMasuk"></div></div>'+
+        '</div>';
+
+      renderBarList(document.getElementById('insMonthly'), d.monthRows,{
+        labelFn:function(r){ return r.ym; }, valueFn:function(r){ return r.net; },
+        colorFn:function(r){ return r.net<0?'var(--danger)':'var(--safe)'; }, formatFn:function(v){ return numSigned(v); }});
+      renderBarList(document.getElementById('insAlMasuk'), d.topAlMasuk,{
+        labelFn:function(r){ return r.nama; }, valueFn:function(r){ return r.val; }, colorFn:function(){ return 'var(--safe)'; }});
+      renderBarList(document.getElementById('insAlKeluar'), d.topAlKeluar,{
+        labelFn:function(r){ return r.nama; }, valueFn:function(r){ return r.val; }, colorFn:function(){ return 'var(--danger)'; }});
+      renderBarList(document.getElementById('insProjKeluar'), d.topProjKeluar,{
+        labelFn:function(r){ return r.nama; }, valueFn:function(r){ return r.val; }, colorFn:function(){ return 'var(--danger)'; }});
+      renderBarList(document.getElementById('insProjMasuk'), d.topProjMasuk,{
+        labelFn:function(r){ return r.nama; }, valueFn:function(r){ return r.val; }, colorFn:function(){ return 'var(--safe)'; }});
+    }
+    document.getElementById('insPdf').onclick=printPage;
   };
 
   /* ---------------- ANALISA PENGELUARAN ---------------- */
