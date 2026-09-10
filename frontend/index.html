@@ -389,6 +389,11 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 .login-err{margin-top:12px; padding:9px 11px; border-radius:8px; background:var(--danger-bg); color:var(--danger);
   font-size:12.5px; display:none;}
 .login-err.on{display:block;}
+.login-loading{display:flex; flex-direction:column; align-items:center; gap:12px; padding:18px 0 4px;}
+.login-loading .spinner{width:28px; height:28px; border-radius:50%; border:3px solid var(--line);
+  border-top-color:var(--steel); animation:spin .8s linear infinite;}
+.login-loading-text{font-size:12.5px; color:var(--text-mute);}
+@keyframes spin{to{transform:rotate(360deg);}}
 #appRoot.pre-auth{display:none;}
 .tb-user{display:flex; align-items:center; gap:9px;}
 .tb-user #btnLogout{margin-left:8px;}
@@ -409,6 +414,10 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
       <button type="submit" id="loginSubmit">Masuk</button>
       <div class="login-err" id="loginErr"></div>
     </form>
+    <div class="login-loading" id="loginLoading" style="display:none;">
+      <div class="spinner"></div>
+      <div class="login-loading-text" id="loginLoadingText">Memuat data…</div>
+    </div>
   </div>
 </div>
 

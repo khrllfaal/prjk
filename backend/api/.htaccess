@@ -15,6 +15,11 @@ Options -Indexes
 <IfModule mod_headers.c>
     Header set X-Content-Type-Options "nosniff"
     Header set X-Frame-Options "DENY"
+    # Browsers ignore this header entirely when a response arrives over
+    # plain HTTP (per the HSTS spec), so it's safe to send unconditionally
+    # here even during local XAMPP/http testing — it only takes effect
+    # once the site is actually served over HTTPS (e.g. on Hostinger).
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
 </IfModule>
 
 # JSON compresses very well (often 80%+ smaller) — this API's biggest

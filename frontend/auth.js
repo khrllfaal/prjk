@@ -18,6 +18,7 @@ function bootLocalMode(){
 }
 
 function showLogin(msg){
+  hideBootLoading(); // logging in again after a logout must show the form, not a stale spinner
   document.getElementById('loginScreen').style.display='flex';
   document.getElementById('appRoot').classList.add('pre-auth');
   var err=document.getElementById('loginErr');
@@ -27,6 +28,20 @@ function hideLogin(){
   document.getElementById('loginScreen').style.display='none';
   document.getElementById('appRoot').classList.remove('pre-auth');
 }
+/* Swaps the login card's form for a spinner while fetchAllData() runs —
+   covers both a fresh login AND restoring an existing session on page
+   load, since both funnel through bootAfterLogin(). Without this, a slow
+   connection made the app look frozen on an empty-looking login card
+   while the full dataset downloaded in the background. */
+function showBootLoading(msg){
+  document.getElementById('loginForm').style.display='none';
+  document.getElementById('loginLoadingText').textContent=msg||'Memuat data…';
+  document.getElementById('loginLoading').style.display='flex';
+}
+function hideBootLoading(){
+  document.getElementById('loginLoading').style.display='none';
+  document.getElementById('loginForm').style.display='';
+}
 
 /* profile: {id, email, nama, role} — same shape regardless of backend. */
 async function bootAfterLogin(profile){
@@ -35,6 +50,7 @@ async function bootAfterLogin(profile){
   document.getElementById('tbAvatar').textContent = (profile.nama||'?').slice(0,2).toUpperCase();
   document.getElementById('btnLogout').style.display = '';
 
+  showBootLoading('Memuat data…');
   try{
     DB = await fetchAllData();
     saveDB(); // keep a local cache so a flaky connection later still shows last-known data

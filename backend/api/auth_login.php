@@ -5,6 +5,10 @@ send_cors_headers();
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Method not allowed', 405);
 
+// IP throttling first — stops an attacker spraying many different email
+// addresses from ever reaching the per-account checks below.
+check_ip_lockout();
+
 $body = read_json_body();
 $email = trim(strtolower((string)($body['email'] ?? '')));
 $password = (string)($body['password'] ?? '');
@@ -18,6 +22,7 @@ $generic_error = 'Email atau password salah.';
 
 if (!$user) {
     // Don't reveal whether the email exists at all.
+    register_ip_failure();
     json_error($generic_error, 401);
 }
 
@@ -30,11 +35,14 @@ if (!password_verify($password, $user['password_hash'])) {
     $lockUntil = $attempts >= 5 ? date('Y-m-d H:i:s', time() + 15 * 60) : null;
     $upd = db()->prepare('UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?');
     $upd->execute([$attempts, $lockUntil, $user['id']]);
+    register_ip_failure();
     json_error($generic_error, 401);
 }
 
-// success — reset lockout state, rotate session id (session fixation defence)
+// success — reset lockout state (both per-account and per-IP), rotate
+// session id (session fixation defence)
 db()->prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?')->execute([$user['id']]);
+reset_ip_attempts();
 start_session();
 session_regenerate_id(true);
 $_SESSION['user'] = ['id' => $user['id'], 'email' => $user['email'], 'nama' => $user['nama'], 'role' => $user['role']];
