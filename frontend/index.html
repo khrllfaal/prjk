@@ -1123,6 +1123,107 @@ function saldoAkhirTxns(from, to){
   });
   return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
 }
+/* Postings that count toward the Uang Masuk / Uang Keluar KPI cards
+   specifically — same classification as sumRange() inside
+   computeCashPeriods(), just itemized instead of summed, so each
+   drill-down list's total reconciles exactly to the KPI card it was
+   opened from. A non-loan Bank Keluar shows up as a negative line
+   inside masukTxns (it reduces Uang Masuk, per bankFlows()), not as a
+   positive line in keluarTxns. */
+function masukTxns(from,to){
+  var list=[];
+  DB.txns.forEach(function(t){
+    if(t.tgl<from||t.tgl>to) return;
+    if(t.jenis==='kas_masuk'){
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Kas Masuk', amount:t.debet});
+    } else if(t.jenis==='bank_masuk'){
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Masuk', amount:t.debet});
+    } else if(t.jenis==='bank_keluar' && !isLoanServiceAkun(t.akunLawan)){
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Keluar (pengurang, bukan Hutang/Bunga)', amount:-t.kredit});
+    }
+  });
+  return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+}
+function keluarTxns(from,to){
+  var list=[];
+  DB.txns.forEach(function(t){
+    if(t.tgl<from||t.tgl>to) return;
+    if(t.jenis==='kas_keluar'){
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Kas Keluar', amount:t.kredit});
+    } else if(t.jenis==='bank_keluar' && isLoanServiceAkun(t.akunLawan)){
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Keluar (Hutang/Bunga)', amount:t.kredit});
+    }
+  });
+  return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+}
+function showMasukDrilldown(p){
+  var list=masukTxns(p.from,p.to).map(function(r){ return {tgl:r.tgl, ref:r.ref, ket:r.ket, amount:r.amount}; });
+  showTxnDrilldown('Rincian Uang Masuk — '+p.label,
+    'Seluruh yang dihitung sebagai Uang Masuk pada '+p.label+' — baris minus adalah Bank Keluar yang mengurangi (lihat catatan #2 di Dashboard untuk kenapa).',
+    list, [{label:'Total Uang Masuk', value:p.uang_masuk}]);
+}
+function showKeluarDrilldown(p){
+  var list=keluarTxns(p.from,p.to).map(function(r){ return {tgl:r.tgl, ref:r.ref, ket:r.ket, amount:r.amount}; });
+  showTxnDrilldown('Rincian Uang Keluar — '+p.label,
+    'Seluruh yang dihitung sebagai Uang Keluar pada '+p.label+'.',
+    list, [{label:'Total Uang Keluar', value:p.uang_keluar}]);
+}
+
+/* Saldo Awal is a running balance carried from the very start of the
+   ledger, not a per-period figure — for a week late in the year that
+   can mean thousands of underlying postings, too many to usefully list
+   one by one. Break it down by month instead: Master COA's fixed
+   opening balance, then each month's own net (same Masuk/Keluar
+   classification as everywhere else) up to the day before this
+   period starts. Sums to exactly p.saldo_awal. */
+function saldoAwalBreakdown(before){
+  var coaAwal=(DB.coa||[]).reduce(function(a,c){ return a+(c.saldoAwal||0); },0);
+  var monthly={};
+  DB.txns.forEach(function(t){
+    if(t.tgl>=before) return;
+    if(!/^(kas|bank)_(masuk|keluar)$/.test(t.jenis)) return;
+    var ym=t.tgl.slice(0,7);
+    if(!monthly[ym]) monthly[ym]={masuk:0,keluar:0};
+    if(t.jenis==='kas_masuk') monthly[ym].masuk+=t.debet;
+    else if(t.jenis==='kas_keluar') monthly[ym].keluar+=t.kredit;
+    else if(t.jenis==='bank_masuk') monthly[ym].masuk+=t.debet;
+    else if(t.jenis==='bank_keluar'){
+      if(isLoanServiceAkun(t.akunLawan)) monthly[ym].keluar+=t.kredit;
+      else monthly[ym].masuk-=t.kredit;
+    }
+  });
+  var rows=Object.keys(monthly).sort().map(function(ym){
+    var m=monthly[ym]; return {ym:ym, masuk:m.masuk, keluar:m.keluar, net:m.masuk-m.keluar};
+  });
+  var totalMasuk=rows.reduce(function(a,r){ return a+r.masuk; },0);
+  var totalKeluar=rows.reduce(function(a,r){ return a+r.keluar; },0);
+  return {coaAwal:coaAwal, rows:rows, totalMasuk:totalMasuk, totalKeluar:totalKeluar,
+    saldoAwal:coaAwal+totalMasuk-totalKeluar};
+}
+/* Klik Saldo Awal -> rumus (Saldo Awal Master COA + kumulatif Masuk −
+   kumulatif Keluar sebelum periode ini) plus rincian per bulan. */
+function showSaldoAwalDrilldown(p){
+  var b=saldoAwalBreakdown(p.from);
+  var body='<div class="kpi-grid" style="margin-bottom:14px;">'+
+    kpiCard('Saldo Awal Master COA', rp(b.coaAwal), 'Dari kolom Saldo Awal di Master COA','accent')+
+    kpiCard('Kumulatif Uang Masuk', '+ '+rp(b.totalMasuk), 'Sebelum '+fmtDate(p.from),'accent')+
+    kpiCard('Kumulatif Uang Keluar', '− '+rp(b.totalKeluar), 'Sebelum '+fmtDate(p.from),'accent')+
+    kpiCard('= Saldo Awal '+esc(p.label), rp(b.saldoAwal), 'Posisi kas tepat sebelum '+fmtDate(p.from),'safe')+
+    '</div>'+
+    '<div class="panel-desc" style="margin-bottom:8px;">Rincian per bulan, sejak transaksi pertama sampai sebelum '+fmtDate(p.from)+
+    '. Klik Uang Masuk/Keluar di kartu Posisi Kas untuk rincian per transaksi pada periode yang sedang ditampilkan.</div>'+
+    '<div class="table-scroll" style="max-height:380px;overflow-y:auto;"><table class="dtab"><thead><tr>'+
+    '<th>Bulan</th><th style="text-align:right;">Uang Masuk</th><th style="text-align:right;">Uang Keluar</th><th style="text-align:right;">Net</th>'+
+    '</tr></thead><tbody>'+
+    (b.rows.length?b.rows.map(function(r){
+      return '<tr><td>'+esc(r.ym)+'</td><td style="text-align:right;">'+num0(r.masuk)+'</td>'+
+        '<td style="text-align:right;">'+num0(r.keluar)+'</td>'+
+        '<td style="text-align:right;" class="'+(r.net<0?'neg':'pos')+'">'+numSigned(r.net)+'</td></tr>';
+    }).join(''):'<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:18px;">Belum ada transaksi sebelum periode ini — Saldo Awal = Saldo Awal Master COA saja.</td></tr>')+
+    '</tbody></table></div>';
+  openModal('Rincian Saldo Awal — '+p.label, body, {wide:true, saveLabel:null});
+}
+
 /* Klik Saldo Akhir pada widget "Posisi Kas — Per Periode" -> rincian
    perhitungan (Saldo Awal + Uang Masuk − Uang Keluar) plus daftar tiap
    transaksi Kas Masuk/Keluar yang membentuknya. */
@@ -2243,20 +2344,23 @@ function registerPages(){
       var p=period();
       document.getElementById('periodNote').textContent='Menampilkan data '+p.label;
       var cards=[];
-      if(p.saldo_awal) cards.push(kpiCard('Saldo Awal / Dana Tersedia', rp(p.saldo_awal),'Posisi kas di awal periode','accent'));
+      var hasSaldoAwal=!!p.saldo_awal;
+      if(hasSaldoAwal) cards.push(kpiCard('Saldo Awal / Dana Tersedia', rp(p.saldo_awal),'Posisi kas di awal periode · klik untuk rincian','accent'));
       cards.push(kpiCard('Uang Masuk', rp(p.uang_masuk),
-        p.banding?bandingText(p.uang_masuk,p.banding.masukLalu):p.label,'accent'));
+        (p.banding?bandingText(p.uang_masuk,p.banding.masukLalu):p.label)+' · klik untuk rincian','accent'));
       cards.push(kpiCard('Uang Keluar', rp(p.uang_keluar),
-        p.banding?bandingText(p.uang_keluar,p.banding.keluarLalu):p.label,'accent'));
+        (p.banding?bandingText(p.uang_keluar,p.banding.keluarLalu):p.label)+' · klik untuk rincian','accent'));
       cards.push(kpiCard('Saldo Akhir', rp(p.saldo_akhir),
         (p.saldo_akhir<0?'Defisit — uang keluar melebihi masuk':'Surplus periode ini')+' · klik untuk rincian',
         p.saldo_akhir<0?'danger':'safe'));
       document.getElementById('kpiKas').innerHTML=cards.join('');
       var kpiKids=document.getElementById('kpiKas').children;
-      var saldoAkhirCard=kpiKids[kpiKids.length-1];
-      saldoAkhirCard.style.cursor='pointer';
-      saldoAkhirCard.title='Klik untuk lihat rincian Saldo Akhir';
-      saldoAkhirCard.onclick=function(){ showSaldoAkhirDrilldown(p); };
+      var kIdx=0;
+      function wireClick(el, title, fn){ el.style.cursor='pointer'; el.title=title; el.onclick=fn; }
+      if(hasSaldoAwal) wireClick(kpiKids[kIdx++], 'Klik untuk lihat rincian Saldo Awal', function(){ showSaldoAwalDrilldown(p); });
+      wireClick(kpiKids[kIdx++], 'Klik untuk lihat rincian Uang Masuk', function(){ showMasukDrilldown(p); });
+      wireClick(kpiKids[kIdx++], 'Klik untuk lihat rincian Uang Keluar', function(){ showKeluarDrilldown(p); });
+      wireClick(kpiKids[kIdx++], 'Klik untuk lihat rincian Saldo Akhir', function(){ showSaldoAkhirDrilldown(p); });
 
       var kEl=document.getElementById('kompKas'), kD=document.getElementById('kompDesc');
       if(p.komposisi_masuk && p.komposisi_masuk.length){
