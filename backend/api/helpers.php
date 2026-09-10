@@ -123,45 +123,6 @@ function require_login(): array {
     return $u;
 }
 
-// IP-based login throttling — complements the per-account lockout in
-// auth_login.php. The per-account lockout alone doesn't stop an attacker
-// spraying different email addresses from the same source, since each
-// account only sees a handful of failures. Threshold is deliberately
-// higher than the per-account one (5) since one IP can legitimately be
-// several people on the same office network failing a password here and
-// there.
-const IP_LOCKOUT_THRESHOLD = 20;
-const IP_LOCKOUT_MINUTES = 15;
-
-function client_ip(): string {
-    return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-}
-
-function check_ip_lockout(): void {
-    $stmt = db()->prepare('SELECT locked_until FROM login_ip_attempts WHERE ip_address = ?');
-    $stmt->execute([client_ip()]);
-    $row = $stmt->fetch();
-    if ($row && !empty($row['locked_until']) && strtotime($row['locked_until']) > time()) {
-        json_error('Terlalu banyak percobaan login dari jaringan ini. Coba lagi beberapa menit lagi.', 429);
-    }
-}
-
-function register_ip_failure(): void {
-    $ip = client_ip();
-    $stmt = db()->prepare('SELECT attempts FROM login_ip_attempts WHERE ip_address = ?');
-    $stmt->execute([$ip]);
-    $attempts = (int)($stmt->fetchColumn() ?: 0) + 1;
-    $lockUntil = $attempts >= IP_LOCKOUT_THRESHOLD ? date('Y-m-d H:i:s', time() + IP_LOCKOUT_MINUTES * 60) : null;
-    db()->prepare(
-        'INSERT INTO login_ip_attempts (ip_address, attempts, locked_until) VALUES (?,?,?)
-         ON DUPLICATE KEY UPDATE attempts = VALUES(attempts), locked_until = VALUES(locked_until)'
-    )->execute([$ip, $attempts, $lockUntil]);
-}
-
-function reset_ip_attempts(): void {
-    db()->prepare('DELETE FROM login_ip_attempts WHERE ip_address = ?')->execute([client_ip()]);
-}
-
 function audit(string $action, string $entity, string $entityId, string $detail = ''): void {
     $u = current_user();
     $stmt = db()->prepare(

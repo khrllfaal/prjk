@@ -26,18 +26,6 @@ CREATE TABLE IF NOT EXISTS users (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
--- 1b. per-IP login throttling — complements users.failed_attempts, which
--- only stops brute-forcing ONE account. This stops one source spraying
--- many different email addresses (see check_ip_lockout() in helpers.php).
--- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS login_ip_attempts (
-  ip_address   VARCHAR(45) PRIMARY KEY,
-  attempts     INT NOT NULL DEFAULT 0,
-  locked_until DATETIME NULL,
-  updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ---------------------------------------------------------------------
 -- 2. master data
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS customers (
