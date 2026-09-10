@@ -745,6 +745,16 @@ function computeProjectProgressRows(from, to){
   });
 }
 
+// Bank Keluar counter-accounts treated as real cash leaving for debt
+// service (loan principal / interest) rather than money still sitting
+// inside the bank ledger — see bankFlows() in computeCashPeriods() and
+// computeInsightData() for how this is used. Named exactly as posted in
+// the ledger; add more here if the company starts using another loan
+// account name.
+function isLoanServiceAkun(nama){
+  return nama==='Hutang Bank Jk.Pendek PT' || nama==='Biaya Bunga Bank';
+}
+
 /* Weekly + all-time cash position for the Dashboard's "Posisi Kas — Per
    Periode" widget, computed live from DB.txns. Weeks run Friday-Thursday
    (how this company counts a week), anchored to today's real date.
@@ -763,13 +773,34 @@ function computeCashPeriods(){
     var dow=(d.getDay()+2)%7; // 0=Fri..6=Thu
     return addDays(iso,-dow);
   }
-  // Bank Masuk/Keluar are deliberately out of this whole widget — owner's
-  // call: Posisi Kas tracks the Kas Besar/Kas Kecil ledger only. What
-  // used to sit in the tracked bank accounts before this ledger started
-  // is folded in separately as a fixed opening balance (see coaAwal
-  // below), not as ongoing bank transactions.
   function isKasMasuk(t){ return t.jenis==='kas_masuk'; }
   function isKasKeluar(t){ return t.jenis==='kas_keluar'; }
+  // Bank Masuk/Keluar folds into Posisi Kas the same way the reference
+  // Dashboard Cash Flow does — verified against it transaction-by-
+  // transaction (see conversation), not just approximated:
+  //  - Bank Keluar whose akun lawan is loan principal/interest
+  //    (isLoanServiceAkun) counts straight as Uang Keluar — real cash
+  //    leaving for debt service.
+  //  - Every OTHER Bank Keluar reduces Uang Masuk instead of adding to
+  //    Uang Keluar: it's money that arrived in a bank account and got
+  //    spent again without ever becoming free/available cash, so only
+  //    what's left over (Bank Masuk minus that spend) counts as Masuk.
+  // The split only changes how the SAME net flow is labelled Masuk vs
+  // Keluar — Saldo Akhir is unaffected either way (see saldoAwal below,
+  // which folds all Bank Masuk/Keluar in unconditionally for exactly
+  // that reason).
+  function bankFlows(from,to){
+    var masuk=0, keluarNonLoan=0, keluarLoan=0;
+    DB.txns.forEach(function(t){
+      if(t.tgl<from||t.tgl>to) return;
+      if(t.jenis==='bank_masuk') masuk+=t.debet;
+      else if(t.jenis==='bank_keluar'){
+        if(isLoanServiceAkun(t.akunLawan)) keluarLoan+=t.kredit;
+        else keluarNonLoan+=t.kredit;
+      }
+    });
+    return {masuk:masuk, keluarNonLoan:keluarNonLoan, keluarLoan:keluarLoan};
+  }
   function sumRange(from,to){
     var masuk=0, keluar=0;
     DB.txns.forEach(function(t){
@@ -777,6 +808,9 @@ function computeCashPeriods(){
       if(isKasMasuk(t)) masuk+=t.debet;
       else if(isKasKeluar(t)) keluar+=t.kredit;
     });
+    var bf=bankFlows(from,to);
+    masuk += bf.masuk - bf.keluarNonLoan;
+    keluar += bf.keluarLoan;
     return {masuk:masuk, keluar:keluar};
   }
   // Fixed opening balance carried in Master COA's Saldo Awal — what was
@@ -791,6 +825,8 @@ function computeCashPeriods(){
       if(t.tgl>=before) return;
       if(isKasMasuk(t)) s+=t.debet;
       else if(isKasKeluar(t)) s-=t.kredit;
+      else if(t.jenis==='bank_masuk') s+=t.debet;
+      else if(t.jenis==='bank_keluar') s-=t.kredit;
     });
     return s;
   }
@@ -802,15 +838,36 @@ function computeCashPeriods(){
       if(!map[label]){ map[label]={sumber:label, jumlah:0}; order.push(label); }
       map[label].jumlah+=t.debet;
     });
+    // Keeps this breakdown summing to the same Uang Masuk shown on the
+    // KPI card above it — otherwise the bank-derived portion folded into
+    // sumRange() would silently be missing from the chart.
+    var bf=bankFlows(from,to), bankNet=bf.masuk-bf.keluarNonLoan;
+    if(bankNet){
+      var bl='Saldo Bank (bersih, di luar Hutang/Bunga)';
+      if(!map[bl]){ map[bl]={sumber:bl, jumlah:0}; order.push(bl); }
+      map[bl].jumlah+=bankNet;
+    }
     return order.map(function(k){ return map[k]; }).sort(function(a,b){ return b.jumlah-a.jumlah; }).slice(0,8);
   }
   function projectBreakdown(from,to){
     var map={}, order=[];
-    DB.txns.forEach(function(t){
-      if(t.tgl<from||t.tgl>to||(!isKasMasuk(t)&&!isKasKeluar(t))) return;
-      var key=t.project||'(Tanpa Project)';
+    function bump(key,masukAdd,keluarAdd){
       if(!map[key]){ map[key]={nama:key, masuk:0, keluar:0}; order.push(key); }
-      if(isKasMasuk(t)) map[key].masuk+=t.debet; else map[key].keluar+=t.kredit;
+      map[key].masuk+=masukAdd; map[key].keluar+=keluarAdd;
+    }
+    DB.txns.forEach(function(t){
+      if(t.tgl<from||t.tgl>to) return;
+      var key=t.project||'(Tanpa Project)';
+      if(isKasMasuk(t)) bump(key,t.debet,0);
+      else if(isKasKeluar(t)) bump(key,0,t.kredit);
+      else if(t.jenis==='bank_masuk') bump(key,t.debet,0);
+      else if(t.jenis==='bank_keluar'){
+        // Mirrors sumRange()'s split exactly, per project this time, so
+        // every project's rows still add up to the same Uang Masuk/Keluar
+        // shown on the KPI cards.
+        if(isLoanServiceAkun(t.akunLawan)) bump(key,0,t.kredit);
+        else bump(key,-t.kredit,0);
+      }
     });
     return order.map(function(k){ return map[k]; });
   }
@@ -1042,17 +1099,26 @@ function wireDrilldownSearch(searchId, tableId, totalId){
   };
 }
 
-/* All individual Kas Masuk/Kas Keluar postings inside [from,to], signed
-   (masuk positive, keluar negative) — feeds the Saldo Akhir drill-down
-   below. Newest first. */
+/* All individual Kas + Bank postings inside [from,to], signed (masuk
+   positive, keluar negative) — feeds the Saldo Akhir drill-down below.
+   Bank Masuk/Keluar are included in full here regardless of
+   isLoanServiceAkun(): that split only decides which KPI card (Uang
+   Masuk vs Uang Keluar) a Bank Keluar posting's amount is counted
+   under in computeCashPeriods() — it doesn't change the sign of the
+   posting itself, so the flat list below sums to the same Saldo Akhir
+   either way. Newest first. */
 function saldoAkhirTxns(from, to){
   var list=[];
   DB.txns.forEach(function(t){
     if(t.tgl<from||t.tgl>to) return;
     if(t.jenis==='kas_masuk'){
-      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Masuk', amount:t.debet});
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Kas Masuk', amount:t.debet});
     } else if(t.jenis==='kas_keluar'){
-      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Keluar', amount:-t.kredit});
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Kas Keluar', amount:-t.kredit});
+    } else if(t.jenis==='bank_masuk'){
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Masuk', amount:t.debet});
+    } else if(t.jenis==='bank_keluar'){
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Keluar', amount:-t.kredit});
     }
   });
   return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
@@ -1068,7 +1134,7 @@ function showSaldoAkhirDrilldown(p){
     kpiCard('Uang Keluar', '− '+rp(p.uang_keluar), '', 'accent')+
     kpiCard('Saldo Akhir', rp(p.saldo_akhir), 'Saldo Awal + Masuk − Keluar', p.saldo_akhir<0?'danger':'safe')+
     '</div>'+
-    '<div class="panel-desc" style="margin-bottom:8px;">Seluruh transaksi Kas Masuk &amp; Kas Keluar pada '+esc(p.label)+
+    '<div class="panel-desc" style="margin-bottom:8px;">Seluruh transaksi Kas &amp; Bank Masuk/Keluar pada '+esc(p.label)+
     ', diurutkan dari yang terbaru.</div>'+
     (list.length?'<input type="text" id="drillSearch2" placeholder="Cari tanggal, ref, atau keterangan..." '+
       'style="width:100%;box-sizing:border-box;padding:8px 10px;margin-bottom:10px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;">':'')+
@@ -2196,7 +2262,8 @@ function registerPages(){
       if(p.komposisi_masuk && p.komposisi_masuk.length){
         kD.textContent='Sumber dana masuk pada '+p.label;
         renderBarList(kEl,p.komposisi_masuk,{labelFn:function(d){return d.sumber;},
-          valueFn:function(d){return d.jumlah;},colorFn:function(){return 'var(--safe)';},formatFn:rpShort});
+          valueFn:function(d){return d.jumlah;},
+          colorFn:function(d){return d.jumlah<0?'var(--danger)':'var(--safe)';},formatFn:rpShort});
       } else {
         kD.textContent='';
         kEl.innerHTML='<div class="na-box">Tidak ada transaksi pemasukan pada periode ini.</div>';
@@ -2210,7 +2277,11 @@ function registerPages(){
         {key:'nama',label:'Nama Proyek / Pos Biaya',render:function(r){
           return '<span class="wrap">'+esc(r.nama)+(/Cost Center|Prive/i.test(r.nama)?'<span class="name-tag">Overhead</span>':'')+'</span>'; }},
         {key:'masuk',label:'Pemasukan',num:true,render:function(r){
-          return r.masuk?'<b class="pos">'+num0(r.masuk)+'</b>':'<span class="faint-italic">–</span>'; },
+          // r.masuk can go slightly negative for a project whose only bank
+          // activity that period was a non-loan Bank Keluar (see
+          // projectBreakdown() in computeCashPeriods) — keep it out of the
+          // green "pos" styling in that rare case.
+          return r.masuk?'<b class="'+(r.masuk>0?'pos':'neg')+'">'+numSigned(r.masuk)+'</b>':'<span class="faint-italic">–</span>'; },
           foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+b.masuk;},0))+'</b>'; }},
         {key:'keluar',label:'Pengeluaran',num:true,render:function(r){
           return r.keluar?num0(r.keluar):'<span class="faint-italic">–</span>'; },
@@ -3317,7 +3388,19 @@ function registerPages(){
       matched[key]=true;
       var s=(!claimed[key] && sumsByName[key])?sumsByName[key]:{debet:0,kredit:0};
       claimed[key]=true;
-      return {akun:c.kode+'-'+c.nama, kode:c.kode, head:String(c.kode).split('.')[0], debet:s.debet, kredit:s.kredit};
+      var head=String(c.kode).split('.')[0];
+      var debet=s.debet, kredit=s.kredit;
+      // Master COA's Saldo Awal only ever means "the balance this account
+      // already carried before any transaction in this ledger" — so it
+      // only belongs in a true from-the-beginning snapshot (from===null,
+      // which is all Neraca ever passes) of a balance-sheet head (Aktiva/
+      // Kewajiban/Ekuitas). A dated Laba Rugi range must never see it —
+      // heads 4-8 (P&L) are excluded on purpose, income/expense accounts
+      // don't carry an opening balance the way a Neraca account does.
+      if(from===null && c.saldoAwal && /^[123]$/.test(head)){
+        if(head==='1') debet+=c.saldoAwal; else kredit+=c.saldoAwal;
+      }
+      return {akun:c.kode+'-'+c.nama, kode:c.kode, head:head, debet:debet, kredit:kredit};
     });
     Object.keys(sumsByName).forEach(function(key){
       if(matched[key]) return;
@@ -3522,7 +3605,23 @@ function registerPages(){
       var totalHutang=kewajiban.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
       var totalEkuitasAkun=ekuitas.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
       var labaBerjalan=labaRows.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
-      var totalEkuitas=totalEkuitasAkun+labaBerjalan;
+      // Master COA's Saldo Awal is currently only ever filled in on the
+      // Aktiva side (Kas/Bank) — nobody has entered what the company
+      // already owed, or what equity it already had, before this ledger
+      // started. Aktiva's saldoAwal (now folded into groupByHead above)
+      // would otherwise make the sheet stop balancing by exactly that
+      // amount; booking the gap to equity — the standard treatment for
+      // an unexplained opening balance — keeps it balanced AND visible,
+      // instead of silently vanishing the way it did before this account
+      // for Saldo Awal at all. Shrinks to 0 on its own once/if a matching
+      // opening Hutang/Ekuitas balance is ever entered.
+      var openingPlug=(DB.coa||[]).reduce(function(a,c){
+        var head=String(c.kode).split('.')[0], v=c.saldoAwal||0;
+        if(head==='1') return a+v;
+        if(head==='2'||head==='3') return a-v;
+        return a;
+      },0);
+      var totalEkuitas=totalEkuitasAkun+labaBerjalan+openingPlug;
       var totalPasiva=totalHutang+totalEkuitas;
       var selisih=totalAktiva-totalPasiva;
 
@@ -3537,6 +3636,10 @@ function registerPages(){
       kewajiban.forEach(function(r){ html+=acctRow(r,-1); });
       html+='<tr><td><b>TOTAL HUTANG</b></td><td class="num"><b>'+num0(totalHutang)+'</b></td></tr>';
       ekuitas.forEach(function(r){ html+=acctRow(r,-1); });
+      if(Math.abs(openingPlug)>=0.5){
+        html+='<tr><td class="wrap" style="padding-left:20px;">Saldo Awal (Master COA, belum ada pasangan Hutang/Ekuitas pembuka)</td>'+
+          '<td class="num">'+numSigned(openingPlug)+'</td></tr>';
+      }
       html+='<tr><td class="wrap" style="padding-left:20px;">Laba/Rugi Berjalan</td><td class="num">'+numSigned(labaBerjalan)+'</td></tr>'+
         '<tr><td><b>TOTAL EKUITAS</b></td><td class="num"><b>'+num0(totalEkuitas)+'</b></td></tr>'+
         '<tr><td><b>TOTAL PASIVA</b></td><td class="num"><b>'+num0(totalPasiva)+'</b></td></tr>'+
@@ -3555,6 +3658,7 @@ function registerPages(){
       kewajiban.forEach(function(r){ var v=-(r.debet-r.kredit); out.push([r.akun, Math.abs(v)<0.5?0:v]); });
       out.push(['TOTAL HUTANG', totalHutang]);
       ekuitas.forEach(function(r){ var v=-(r.debet-r.kredit); out.push([r.akun, Math.abs(v)<0.5?0:v]); });
+      if(Math.abs(openingPlug)>=0.5) out.push(['Saldo Awal (Master COA)', openingPlug]);
       out.push(['Laba/Rugi Berjalan', labaBerjalan]);
       out.push(['TOTAL EKUITAS', totalEkuitas]);
       out.push(['TOTAL PASIVA', totalPasiva]);
@@ -3671,33 +3775,37 @@ function registerPages(){
   /* ---------------- CATATAN INSIGHT ---------------- */
   /* Recomputed from DB.txns/DB.projects/DB.coa/DB.jurnal every time this
      page is opened — never a saved/cached snapshot, so it always reflects
-     whatever is in the database right now. "Ayat Silang Kas Besar
-     Kas-Bank" is excluded from Masuk/Keluar (internal kas<->bank transfer,
-     not real cash flow) — same method verified against the legacy Cash
-     Flow dashboard. "Cost Center" and "Prive" are financing/personal, not
-     project spend, so they're split out of the Top Project ranking. */
+     whatever is in the database right now. Uses the same Kas/Bank split
+     as the Dashboard's Posisi Kas widget (isLoanServiceAkun, see
+     computeCashPeriods()) so the two pages always agree on Uang Masuk/
+     Keluar/Saldo Akhir. "Cost Center" and "Prive" are financing/personal,
+     not project spend, so they're split out of the Top Project ranking. */
   function computeInsightData(){
-    var AYAT_SILANG='Ayat Silang Kas Besar Kas-Bank';
-    var real=DB.txns.filter(function(t){
-      return /^(kas|bank)_(masuk|keluar)$/.test(t.jenis) && t.akunLawan!==AYAT_SILANG;
-    });
+    var real=DB.txns.filter(function(t){ return /^(kas|bank)_(masuk|keluar)$/.test(t.jenis); });
     if(!real.length) return null;
 
     var coaAwal=(DB.coa||[]).reduce(function(a,x){ return a+(x.saldoAwal||0); },0);
     var totalMasuk=0, totalKeluar=0;
     var monthly={}, alMasuk={}, alKeluar={}, projMasuk={}, projKeluar={};
-    real.forEach(function(t){
-      var isIn=/masuk$/.test(t.jenis), v=isIn?t.debet:t.kredit;
-      if(isIn) totalMasuk+=v; else totalKeluar+=v;
-      var ym=t.tgl.slice(0,7);
+    // Same Kas-vs-Bank split as computeCashPeriods()'s bankFlows(), so
+    // this page's totals match the Dashboard's Posisi Kas exactly: Bank
+    // Masuk always adds to Masuk; Bank Keluar adds to Keluar only when
+    // it's loan principal/interest (isLoanServiceAkun), otherwise it
+    // reduces Masuk instead (money that arrived in a bank account and
+    // left again without ever becoming free/available cash).
+    function bump(bucket, ym, al, pj, v){
+      if(bucket==='masuk') totalMasuk+=v; else totalKeluar+=v;
       if(!monthly[ym]) monthly[ym]={masuk:0,keluar:0};
-      monthly[ym][isIn?'masuk':'keluar']+=v;
-      var al=t.akunLawan||'(Tanpa Akun Lawan)';
-      var bucket=isIn?alMasuk:alKeluar;
-      bucket[al]=(bucket[al]||0)+v;
-      var pj=t.project||'(Tanpa Project)';
-      var pbucket=isIn?projMasuk:projKeluar;
-      pbucket[pj]=(pbucket[pj]||0)+v;
+      monthly[ym][bucket]+=v;
+      (bucket==='masuk'?alMasuk:alKeluar)[al]=((bucket==='masuk'?alMasuk:alKeluar)[al]||0)+v;
+      (bucket==='masuk'?projMasuk:projKeluar)[pj]=((bucket==='masuk'?projMasuk:projKeluar)[pj]||0)+v;
+    }
+    real.forEach(function(t){
+      var ym=t.tgl.slice(0,7), al=t.akunLawan||'(Tanpa Akun Lawan)', pj=t.project||'(Tanpa Project)';
+      if(t.jenis==='kas_masuk'||t.jenis==='bank_masuk') bump('masuk',ym,al,pj,t.debet);
+      else if(t.jenis==='kas_keluar') bump('keluar',ym,al,pj,t.kredit);
+      else if(isLoanServiceAkun(t.akunLawan)) bump('keluar',ym,al,pj,t.kredit); // bank_keluar, loan/interest
+      else bump('masuk',ym,al,pj,-t.kredit); // bank_keluar, everything else
     });
     var saldoAkhir=coaAwal+totalMasuk-totalKeluar;
 
