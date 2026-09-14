@@ -725,11 +725,11 @@ function computeProjectProgressRows(from, to){
       else if(isCostAkun(j.akun)) costCenter+=j.debet;
     });
     var totalRap=bahan+upah+akomodasi;
-    // Nilai RAP is always 60% of Nilai Kontrak — computed directly here
+    // Nilai RAP is always 65% of Nilai Kontrak — computed directly here
     // rather than read from a separately-maintained project.rap field,
     // which was left at 0 for almost every project and made Status RAP
     // come out blank ("Data Tidak Lengkap") for the whole table.
-    var rapValue=(p.kontrak||0)*0.6;
+    var rapValue=(p.kontrak||0)*0.65;
     var sisaRap=rapValue-totalRap;
     var ratio=rapValue?totalRap/rapValue:null;
     var statusRap=ratio===null?'':(ratio>1?'MELEBIHI':(ratio>0.9?'HAMPIR':'AMAN'));
@@ -2570,7 +2570,7 @@ function registerPages(){
             (r.linked?'':' · <span style="color:var(--danger);">⚠ belum tertaut ke transaksi — atur di Master Project</span>')+
             '</div>'; }},
         {key:'kontrak',label:'Nilai Kontrak',num:true,render:function(r){ return num0(r.kontrak); }},
-        {key:'rap',label:'Nilai RAP (60%)',num:true,render:function(r){ return num0(r.rap); }},
+        {key:'rap',label:'Nilai RAP (65%)',num:true,render:function(r){ return num0(r.rap); }},
         {key:'bahan',label:'Biaya Bahan',num:true,render:function(r){ return drillCell(r.bahan,r,'bahan'); }},
         {key:'bahanPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.bahanPct):'–'; }},
         {key:'upah',label:'Biaya Upah',num:true,render:function(r){ return drillCell(r.upah,r,'upah'); }},
@@ -3430,12 +3430,14 @@ function registerPages(){
 
     reportShell(c,'Buku Besar','Rincian mutasi dan saldo berjalan per akun',
       '<div class="field grow"><label>Pilih Akun</label><select id="fAkun">'+
-      akunList.map(function(a,i){ return '<option'+(i===0?' selected':'')+'>'+esc(a)+'</option>'; }).join('')+'</select></div>');
+      akunList.map(function(a,i){ return '<option'+(i===0?' selected':'')+'>'+esc(a)+'</option>'; }).join('')+'</select></div>'+
+      '<div class="field grow"><label>Project</label>'+
+      '<div id="fProject_ssel"></div><input type="hidden" id="fProject" value=""></div>');
 
     var tbl;
     function refresh(){
-      var from=fv('fFrom'), to=fv('fTo'), akun=fv('fAkun');
-      var all=allEntries().filter(function(e){ return akunLabel(e.akun)===akun; });
+      var from=fv('fFrom'), to=fv('fTo'), akun=fv('fAkun'), proj=fv('fProject');
+      var all=allEntries().filter(function(e){ return akunLabel(e.akun)===akun && (!proj || e.project===proj); });
       var awal=0;
       all.forEach(function(e){ if(from && e.tgl<from) awal+=e.debet-e.kredit; });
       var rows=all.filter(function(e){ return inRange(e.tgl,from,to); })
@@ -3472,8 +3474,11 @@ function registerPages(){
         emptyText:'Tidak ada mutasi pada akun & rentang ini.'});
       bindSearch('q',tbl);
     }
-    refresh(); bindReportFilter(refresh,['fAkun']);
+    searchableSelect('fProject_ssel','fProject',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
+      placeholder:'Cari / semua project…'});
+    refresh(); bindReportFilter(refresh,['fAkun','fProject']);
     document.getElementById('fAkun').addEventListener('change',refresh);
+    document.getElementById('fProject').addEventListener('change',refresh);
     bindExport('exp','Buku_Besar',['Tanggal','Ref','Keterangan','Project','Debet','Kredit','Saldo'],
       function(){ return tbl.getFiltered().map(function(r){ return [r.tgl,r.ref,r.ket,r.project,r.debet,r.kredit,r._saldo]; }); });
   };
