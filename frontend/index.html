@@ -672,13 +672,20 @@ function matchesPlainCost(akunLawan, kind){
    scopes every figure to that window (used by the "Minggu Ini" filter);
    omit both for all-time totals ("Semua"). Kontrak/RAP stay the
    project's fixed budget figures regardless of window. */
-/* A cash payment that settles a debt (Hutang) or funds a receivable
-   (Piutang) is a balance-sheet event, not a project expense — excluded
-   from the Cost Center bucket below the same way Bank Keluar transfers
-   are, so debt/receivable movements never inflate Cost Center. */
-function isHutangPiutangName(akunLawan){
-  var n=akunNamaOnly(akunLawan).toLowerCase();
-  return n.indexOf('hutang')===0 || n.indexOf('piutang')===0;
+/* A Cost Center charge must actually be a P&L expense — same COA head
+   5-8 classification Laba Rugi's Total Beban uses — not just "not named
+   Hutang/Piutang". A kas_keluar/jurnal posting can move project cash
+   while still being a balance-sheet or equity event: a Hutang/Piutang
+   settlement, a Prive (owner's draw, head 3), a fixed-asset purchase,
+   prepaid expense, or inventory buy (all head 1) — none of those are a
+   project cost even though they're tagged to one, so counting them
+   inflated "Total Pengeluaran" above what Laba Rugi shows for the same
+   data. An account name that doesn't match any Master COA entry (head
+   comes back empty) still counts as cost — safer than silently
+   dropping real, if unclassified, spending. */
+function isCostAkun(akunLawan){
+  var head=akunHead(akunLawan);
+  return head===''||head==='5'||head==='6'||head==='7'||head==='8';
 }
 // A voucher saved as Draft is still being reviewed/completed — like an
 // unposted journal entry in Accurate, it must not affect any report
@@ -703,9 +710,10 @@ function computeProjectProgressRows(from, to){
       // Cost Center is a residual "other project cost" bucket — Bank
       // Keluar postings linked to a project are almost always internal
       // Kas<->Bank transfers ("Ayat Silang...") or loan
-      // repayments/drawdowns, and a Hutang/Piutang settlement is a
-      // balance-sheet movement either way, so neither counts as cost.
-      else if(t.jenis==='kas_keluar' && !isHutangPiutangName(t.akunLawan)) costCenter+=t.kredit;
+      // repayments/drawdowns (never a P&L account), and a Hutang/Piutang/
+      // Prive/fixed-asset kas_keluar isn't a cost either — isCostAkun()
+      // excludes all of those by COA head, same as Laba Rugi.
+      else if(t.jenis==='kas_keluar' && isCostAkun(t.akunLawan)) costCenter+=t.kredit;
     });
     postedJurnal().forEach(function(j){
       if(j.project!==ledger) return;
@@ -714,7 +722,7 @@ function computeProjectProgressRows(from, to){
       if(matchesRapCost(j.akun,'bahan')) bahan+=j.debet;
       else if(matchesRapCost(j.akun,'upah')) upah+=j.debet;
       else if(matchesRapCost(j.akun,'akomodasi')) akomodasi+=j.debet;
-      else if(!isHutangPiutangName(j.akun)) costCenter+=j.debet;
+      else if(isCostAkun(j.akun)) costCenter+=j.debet;
     });
     var totalRap=bahan+upah+akomodasi;
     // Nilai RAP is always 60% of Nilai Kontrak — computed directly here
@@ -753,6 +761,23 @@ function computeProjectProgressRows(from, to){
 // account name.
 function isLoanServiceAkun(nama){
   return nama==='Hutang Bank Jk.Pendek PT' || nama==='Biaya Bunga Bank';
+}
+
+/* Master COA's Saldo Awal column is a full trial-balance opening figure —
+   every Aktiva/Kewajiban/Ekuitas account (Piutang, Hutang, Biaya Dibayar
+   Dimuka, ...) carries one there for the Neraca. The Dashboard's cash-
+   position "Saldo Awal" is a much narrower thing: only these 4 bank
+   accounts pre-date this ledger's tracked kas/bank transaction history —
+   Kas Besar and every other bank account already has its full history
+   recorded as transactions from zero. Summing every COA line here would
+   pull in Piutang/Hutang/prepaid-expense opening balances that belong on
+   the Neraca, not the cash flow — confirmed by the owner, who named these
+   4 accounts specifically. */
+var DASHBOARD_OPENING_AKUN=['Bank BNI PT','Bank BNI Prakasa','Bank BJB PT','Bank BJB CV Purbayanti'];
+function dashboardOpeningBalance(){
+  return (DB.coa||[]).filter(function(c){
+    return DASHBOARD_OPENING_AKUN.indexOf(String(c.nama||'').trim())>-1;
+  }).reduce(function(a,c){ return a+(c.saldoAwal||0); },0);
 }
 
 /* Weekly + all-time cash position for the Dashboard's "Posisi Kas — Per
@@ -813,12 +838,13 @@ function computeCashPeriods(){
     keluar += bf.keluarLoan;
     return {masuk:masuk, keluar:keluar};
   }
-  // Fixed opening balance carried in Master COA's Saldo Awal — what was
-  // already in hand before this ledger's tracked kas transactions began.
-  // Baked into every period's running balance (not just "Semua") so
-  // "Minggu Ini"/"1 Minggu Lalu" reconcile exactly with "Semua" once
-  // their date range covers the same underlying transaction history.
-  var coaAwal=(DB.coa||[]).reduce(function(a,c){ return a+(c.saldoAwal||0); },0);
+  // Fixed opening balance carried in Master COA's Saldo Awal, scoped to
+  // the 4 accounts dashboardOpeningBalance() covers — what was already
+  // in hand before this ledger's tracked kas transactions began. Baked
+  // into every period's running balance (not just "Semua") so "Minggu
+  // Ini"/"1 Minggu Lalu" reconcile exactly with "Semua" once their date
+  // range covers the same underlying transaction history.
+  var coaAwal=dashboardOpeningBalance();
   function saldoAwal(before){
     var s=coaAwal;
     DB.txns.forEach(function(t){
@@ -939,14 +965,14 @@ function projectCostTxns(projectNama, kind, from, to){
     if(from && t.tgl<from) return;
     if(to && t.tgl>to) return;
     // Bank Keluar residual postings (mostly internal Kas<->Bank transfers
-    // and loan repayments) and any Hutang/Piutang settlement never count
-    // as Cost Center — see computeProjectProgressRows() for the matching
-    // rule this mirrors.
+    // and loan repayments) and any non-P&L kas_keluar (Hutang/Piutang,
+    // Prive, fixed-asset, ...) never count as Cost Center — see
+    // computeProjectProgressRows() for the matching rule this mirrors.
     var cat = matchesPlainCost(t.akunLawan,'bahan') ? 'bahan'
       : matchesPlainCost(t.akunLawan,'upah') ? 'upah'
       : matchesPlainCost(t.akunLawan,'akomodasi') ? 'akomodasi'
       : matchesPlainCost(t.akunLawan,'admFee') ? 'admFee'
-      : (t.jenis==='kas_keluar' && !isHutangPiutangName(t.akunLawan) ? 'costCenter' : 'excluded');
+      : (t.jenis==='kas_keluar' && isCostAkun(t.akunLawan) ? 'costCenter' : 'excluded');
     if(kind!=='all' && cat!==kind) return;
     list.push({tgl:t.tgl, ref:t.ref, ket:t.ket+' — '+t.akunLawan, amount:t.kredit});
   });
@@ -956,7 +982,7 @@ function projectCostTxns(projectNama, kind, from, to){
     if(to && j.tgl>to) return;
     var cat = matchesRapCost(j.akun,'bahan') ? 'bahan' : matchesRapCost(j.akun,'upah') ? 'upah'
       : matchesRapCost(j.akun,'akomodasi') ? 'akomodasi'
-      : (isHutangPiutangName(j.akun) ? 'excluded' : 'costCenter');
+      : (isCostAkun(j.akun) ? 'costCenter' : 'excluded');
     if(kind!=='all' && cat!==kind) return;
     list.push({tgl:j.tgl, ref:j.ref, ket:j.ket+' — '+j.akun, amount:j.debet});
   });
@@ -1195,7 +1221,7 @@ function showKeluarDrilldown(p){
    classification as everywhere else) up to the day before this
    period starts. Sums to exactly p.saldo_awal. */
 function saldoAwalBreakdown(before){
-  var coaAwal=(DB.coa||[]).reduce(function(a,c){ return a+(c.saldoAwal||0); },0);
+  var coaAwal=dashboardOpeningBalance();
   var monthly={};
   // Gross per-menu totals (Kas Masuk/Keluar, Bank Masuk/Keluar) — unlike
   // monthly[].masuk/keluar below, these are NOT netted by
@@ -1236,7 +1262,7 @@ function saldoAwalBreakdown(before){
 function showSaldoAwalDrilldown(p){
   var b=saldoAwalBreakdown(p.from);
   var body='<div class="kpi-grid" style="margin-bottom:14px;">'+
-    kpiCard('Saldo Awal Master COA', rp(b.coaAwal), 'Dari kolom Saldo Awal di Master COA','accent')+
+    kpiCard('Saldo Awal Master COA', rp(b.coaAwal), 'Bank BNI PT/Prakasa + Bank BJB PT/CV Purbayanti','accent')+
     kpiCard('Kumulatif Uang Masuk', '+ '+rp(b.totalMasuk), 'Sebelum '+fmtDate(p.from),'accent')+
     kpiCard('Kumulatif Uang Keluar', '− '+rp(b.totalKeluar), 'Sebelum '+fmtDate(p.from),'accent')+
     kpiCard('= Saldo Awal '+esc(p.label), rp(b.saldoAwal), 'Posisi kas tepat sebelum '+fmtDate(p.from),'safe')+
@@ -1402,9 +1428,15 @@ function searchableSelect(containerId, hiddenId, opts){
   }
   function updateClearBtn(){ clearBtn.style.display=input.value?'block':'none'; }
   function setValue(v){
+    var changed=hidden.value!==(v||'');
     hidden.value=v||'';
     input.value=v?labelFor(v):'';
     updateClearBtn();
+    // Fire 'change' on the hidden input so existing native-<select>-style
+    // listeners (auto-refresh on pick) keep working after converting a
+    // plain <select> to this searchable widget — setting .value in JS
+    // alone never fires it.
+    if(changed) hidden.dispatchEvent(new Event('change',{bubbles:true}));
   }
   // Explicit clear button — typing-then-blur can't always tell "user
   // wants this field empty" from "user is mid-correction", so blur
@@ -2090,8 +2122,8 @@ function financePage(jenis, title, sub){
         '<div class="field"><label>Akun '+(isBank?'Bank':'Kas')+'</label><select id="fAkun">'+
           '<option value="">Semua</option>'+kasAkun.map(function(a){ return '<option>'+esc(a)+'</option>'; }).join('')+
         '</select></div>'+
-        '<div class="field grow"><label>Project</label><select id="fProject"><option value="">Semua</option>'+
-          DB.projects.map(function(p){ return '<option value="'+esc(p.ledgerName||p.nama)+'">'+esc(p.nama)+'</option>'; }).join('')+'</select></div>'+
+        '<div class="field grow"><label>Project</label>'+
+          '<div id="fProject_ssel"></div><input type="hidden" id="fProject" value=""></div>'+
         '<button class="btn btn-steel" id="btnFilter">Terapkan Filter</button>'+
         '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
       '</div>'+
@@ -2229,11 +2261,13 @@ function financePage(jenis, title, sub){
       });
     }
 
+    searchableSelect('fProject_ssel','fProject',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
+      placeholder:'Cari / semua project…'});
     refresh();
     document.getElementById('btnAdd').onclick=function(){ form(null); };
     document.getElementById('btnFilter').onclick=refresh;
     document.getElementById('btnReset').onclick=function(){
-      ['fFrom','fTo','fAkun','fProject'].forEach(function(i){ document.getElementById(i).value=''; });
+      clearFilterFields(['fFrom','fTo','fAkun','fProject']);
       refresh();
     };
     bindExport('exp', title.replace(/\s+/g,'_'),
@@ -2257,12 +2291,21 @@ function reportShell(c, title, sub, extraFilterHTML){
     '</div>'+
     '<div id="reportBody"></div>';
 }
+/* Resets a mix of plain inputs/<select>s and searchableSelect fields by
+   id — a searchableSelect's visible text lives in a sibling `#id_ssel`
+   container, not on the hidden input itself, so clearing just the
+   hidden value would leave the old label showing. */
+function clearFilterFields(ids){
+  ids.forEach(function(i){
+    var e=document.getElementById(i); if(e) e.value='';
+    var sselInput=document.querySelector('#'+i+'_ssel .ssel-input');
+    if(sselInput) sselInput.value='';
+  });
+}
 function bindReportFilter(refresh, extraIds){
   document.getElementById('btnFilter').onclick=refresh;
   document.getElementById('btnReset').onclick=function(){
-    ['fFrom','fTo'].concat(extraIds||[]).forEach(function(i){
-      var e=document.getElementById(i); if(e) e.value='';
-    });
+    clearFilterFields(['fFrom','fTo'].concat(extraIds||[]));
     refresh();
   };
 }
@@ -3049,8 +3092,8 @@ function registerPages(){
           '<option value="LUNAS">Lunas</option></select></div>'+
         '<div class="field"><label>Vendor</label><select id="fVendor"><option value="">Semua Vendor</option>'+
           vendorList.map(function(v){ return '<option>'+esc(v)+'</option>'; }).join('')+'</select></div>'+
-        '<div class="field grow"><label>Project</label><select id="fProject"><option value="">Semua Project</option>'+
-          projectList.map(function(p){ return '<option>'+esc(p)+'</option>'; }).join('')+'</select></div>'+
+        '<div class="field grow"><label>Project</label>'+
+          '<div id="fProject_ssel"></div><input type="hidden" id="fProject" value=""></div>'+
         '<button class="btn btn-steel" id="btnFilter">Terapkan Filter</button>'+
         '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
       '</div>'+
@@ -3258,10 +3301,12 @@ function registerPages(){
         placeholder:'Cari akun kas…'});
       bindCurrencyInput('f_bayarJumlah');
     }
+    searchableSelect('fProject_ssel','fProject',{options:projectList.map(function(p){ return {value:p,label:p}; }),
+      placeholder:'Cari / semua project…'});
     refresh();
     document.getElementById('btnFilter').onclick=refresh;
     document.getElementById('btnReset').onclick=function(){
-      ['fFrom','fTo','fStatus','fVendor','fProject'].forEach(function(id){ document.getElementById(id).value=''; });
+      clearFilterFields(['fFrom','fTo','fStatus','fVendor','fProject']);
       refresh();
     };
     bindExport('exp','Trial_Hutang',['Tanggal','Ref No','No Faktur/PO','Vendor','Project','Description','Jumlah Nota','Sudah Dibayar','Sisa','Status'],
@@ -3583,8 +3628,8 @@ function registerPages(){
           monthNames.map(function(m,i){ return '<option value="'+(i+1)+'">'+m+'</option>'; }).join('')+'</select></div>'+
         '<div class="field"><label>Tahun</label><select id="fTahun">'+
           years.map(function(y){ return '<option'+(y===thisYear?' selected':'')+'>'+y+'</option>'; }).join('')+'</select></div>'+
-        '<div class="field grow"><label>Project</label><select id="fProject"><option value="">ALL PROJECT</option>'+
-          DB.projects.map(function(p){ return '<option value="'+esc(p.ledgerName||p.nama)+'">'+esc(p.nama)+'</option>'; }).join('')+'</select></div>'+
+        '<div class="field grow"><label>Project</label>'+
+          '<div id="fProject_ssel"></div><input type="hidden" id="fProject" value=""></div>'+
         '<button class="btn btn-steel" id="btnFilter">Filter</button>'+
         exportBtns('exp')+
       '</div>'+
@@ -3704,6 +3749,8 @@ function registerPages(){
         };
       });
     }
+    searchableSelect('fProject_ssel','fProject',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
+      placeholder:'Cari / semua project…'});
     refresh();
     document.getElementById('btnFilter').onclick=refresh;
     document.getElementById('fProject').addEventListener('change',refresh);
@@ -3822,8 +3869,8 @@ function registerPages(){
       '<div class="filterbar">'+
         '<div class="field"><label>Tanggal Awal</label><input type="date" id="fFrom"></div>'+
         '<div class="field"><label>Tanggal Akhir</label><input type="date" id="fTo"></div>'+
-        '<div class="field grow"><label>Project</label><select id="fProject"><option value="">ALL PROJECT</option>'+
-          DB.projects.map(function(p){ return '<option value="'+esc(p.ledgerName||p.nama)+'">'+esc(p.nama)+'</option>'; }).join('')+'</select></div>'+
+        '<div class="field grow"><label>Project</label>'+
+          '<div id="fProject_ssel"></div><input type="hidden" id="fProject" value=""></div>'+
         '<button class="btn btn-steel" id="btnFilter">Terapkan Filter</button>'+
         '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
       '</div>'+
@@ -3895,10 +3942,12 @@ function registerPages(){
         };
       });
     }
+    searchableSelect('fProject_ssel','fProject',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
+      placeholder:'Cari / semua project…'});
     refresh();
     document.getElementById('btnFilter').onclick=refresh;
     document.getElementById('btnReset').onclick=function(){
-      ['fFrom','fTo','fProject'].forEach(function(id){ document.getElementById(id).value=''; });
+      clearFilterFields(['fFrom','fTo','fProject']);
       refresh();
     };
     document.getElementById('cfExcel').onclick=function(){
@@ -3928,7 +3977,7 @@ function registerPages(){
     var real=DB.txns.filter(function(t){ return /^(kas|bank)_(masuk|keluar)$/.test(t.jenis); });
     if(!real.length) return null;
 
-    var coaAwal=(DB.coa||[]).reduce(function(a,x){ return a+(x.saldoAwal||0); },0);
+    var coaAwal=dashboardOpeningBalance();
     var totalMasuk=0, totalKeluar=0;
     var monthly={}, alMasuk={}, alKeluar={}, projMasuk={}, projKeluar={};
     // Same Kas-vs-Bank split as computeCashPeriods()'s bankFlows(), so
