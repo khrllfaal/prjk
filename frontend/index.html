@@ -763,6 +763,19 @@ function isLoanServiceAkun(nama){
   return nama==='Hutang Bank Jk.Pendek PT' || nama==='Biaya Bunga Bank';
 }
 
+// Kas Keluar posted to "Ayat Silang Kas Besar Kas-Bank" is the Kas side
+// of an internal Kas<->Bank transfer, not real cash leaving the company —
+// its Bank Masuk counterpart (same amount, other side of the same
+// transfer) already lands in bankFlows()/bump() as Uang Masuk, so
+// counting this leg as Uang Keluar too double-counts the same rupiah in
+// both KPI cards at once. Narrow on purpose (only this one COA account,
+// not every "Ayat Silang..." name) — confirmed against the reference
+// system for this specific transfer pattern; do not widen without
+// checking the others the same way first.
+function isInternalTransferAkun(nama){
+  return akunNamaOnly(nama)==='Ayat Silang Kas Besar Kas-Bank';
+}
+
 /* Master COA's Saldo Awal column is a full trial-balance opening figure —
    every Aktiva/Kewajiban/Ekuitas account (Piutang, Hutang, Biaya Dibayar
    Dimuka, ...) carries one there for the Neraca. The Dashboard's cash-
@@ -831,7 +844,14 @@ function computeCashPeriods(){
     DB.txns.forEach(function(t){
       if(t.tgl<from||t.tgl>to) return;
       if(isKasMasuk(t)) masuk+=t.debet;
-      else if(isKasKeluar(t)) keluar+=t.kredit;
+      else if(isKasKeluar(t)){
+        // Ayat Silang Kas Besar Kas-Bank: this leg's counterpart already
+        // counts as Uang Masuk via Bank Masuk (see bankFlows below), so
+        // it reduces Masuk here instead of adding to Keluar — same
+        // treatment as a non-loan Bank Keluar just below.
+        if(isInternalTransferAkun(t.akunLawan)) masuk-=t.kredit;
+        else keluar+=t.kredit;
+      }
     });
     var bf=bankFlows(from,to);
     masuk += bf.masuk - bf.keluarNonLoan;
@@ -885,7 +905,11 @@ function computeCashPeriods(){
       if(t.tgl<from||t.tgl>to) return;
       var key=t.project||'(Tanpa Project)';
       if(isKasMasuk(t)) bump(key,t.debet,0);
-      else if(isKasKeluar(t)) bump(key,0,t.kredit);
+      else if(isKasKeluar(t)){
+        // Mirrors sumRange()'s Ayat Silang Kas Besar Kas-Bank split.
+        if(isInternalTransferAkun(t.akunLawan)) bump(key,-t.kredit,0);
+        else bump(key,0,t.kredit);
+      }
       else if(t.jenis==='bank_masuk') bump(key,t.debet,0);
       else if(t.jenis==='bank_keluar'){
         // Mirrors sumRange()'s split exactly, per project this time, so
@@ -1174,6 +1198,8 @@ function masukTxns(from,to){
     if(t.tgl<from||t.tgl>to) return;
     if(t.jenis==='kas_masuk'){
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Kas Masuk', amount:t.debet, src:'Kas Masuk'});
+    } else if(t.jenis==='kas_keluar' && isInternalTransferAkun(t.akunLawan)){
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Kas Keluar (pengurang, transfer internal Kas-Bank)', amount:-t.kredit, src:'Kas Keluar (pengurang)'});
     } else if(t.jenis==='bank_masuk'){
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Masuk', amount:t.debet, src:'Bank Masuk'});
     } else if(t.jenis==='bank_keluar' && !isLoanServiceAkun(t.akunLawan)){
@@ -1186,7 +1212,7 @@ function keluarTxns(from,to){
   var list=[];
   DB.txns.forEach(function(t){
     if(t.tgl<from||t.tgl>to) return;
-    if(t.jenis==='kas_keluar'){
+    if(t.jenis==='kas_keluar' && !isInternalTransferAkun(t.akunLawan)){
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Kas Keluar', amount:t.kredit, src:'Kas Keluar'});
     } else if(t.jenis==='bank_keluar' && isLoanServiceAkun(t.akunLawan)){
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Keluar (Hutang/Bunga)', amount:t.kredit, src:'Bank Keluar (Hutang/Bunga)'});
@@ -1238,7 +1264,10 @@ function saldoAwalBreakdown(before){
     var ym=t.tgl.slice(0,7);
     if(!monthly[ym]) monthly[ym]={masuk:0,keluar:0};
     if(t.jenis==='kas_masuk') monthly[ym].masuk+=t.debet;
-    else if(t.jenis==='kas_keluar') monthly[ym].keluar+=t.kredit;
+    else if(t.jenis==='kas_keluar'){
+      if(isInternalTransferAkun(t.akunLawan)) monthly[ym].masuk-=t.kredit;
+      else monthly[ym].keluar+=t.kredit;
+    }
     else if(t.jenis==='bank_masuk') monthly[ym].masuk+=t.debet;
     else if(t.jenis==='bank_keluar'){
       if(isLoanServiceAkun(t.akunLawan)) monthly[ym].keluar+=t.kredit;
@@ -4001,7 +4030,10 @@ function registerPages(){
     real.forEach(function(t){
       var ym=t.tgl.slice(0,7), al=t.akunLawan||'(Tanpa Akun Lawan)', pj=t.project||'(Tanpa Project)';
       if(t.jenis==='kas_masuk'||t.jenis==='bank_masuk') bump('masuk',ym,al,pj,t.debet);
-      else if(t.jenis==='kas_keluar') bump('keluar',ym,al,pj,t.kredit);
+      else if(t.jenis==='kas_keluar'){
+        if(isInternalTransferAkun(t.akunLawan)) bump('masuk',ym,al,pj,-t.kredit); // Ayat Silang Kas Besar Kas-Bank: counterpart already counted as Bank Masuk
+        else bump('keluar',ym,al,pj,t.kredit);
+      }
       else if(isLoanServiceAkun(t.akunLawan)) bump('keluar',ym,al,pj,t.kredit); // bank_keluar, loan/interest
       else bump('masuk',ym,al,pj,-t.kredit); // bank_keluar, everything else
     });
