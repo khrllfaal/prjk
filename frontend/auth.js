@@ -59,17 +59,20 @@ async function bootAfterLogin(profile){
   // Cache-first boot: if this browser already has a real previous sync,
   // show it immediately instead of blocking on the network — the app
   // feels instant even on a slow connection. fetchAllData() still runs
-  // right after, silently replacing DB once it resolves; only the
-  // read-only landing pages (Dashboard/Insight) re-render automatically,
-  // so a form the user is mid-editing on another page is never yanked
-  // out from under them — it just picks up the fresh data on next visit.
+  // right after, silently replacing DB once it resolves and re-rendering
+  // whatever page is open, so every report picks up the fresh data right
+  // away instead of quietly showing stale numbers until the user
+  // happens to navigate away and back. The one case this must NOT do is
+  // yank a form out from under someone mid-edit — an open modal (any
+  // Tambah/Edit dialog across the app) is the only thing skipped.
   var cached=tryLoadCachedDB();
   if(cached){
     DB=cached;
     enterApp();
     fetchAllData().then(function(fresh){
       DB=fresh; saveDB();
-      if(CURRENT==='dashboard'||CURRENT==='insight') go(CURRENT);
+      var modalOpen=document.getElementById('modalBack').classList.contains('on');
+      if(!modalOpen) go(CURRENT);
     }).catch(function(e){
       console.error('background refresh failed, keeping cached data', e);
       toast('Tidak bisa memperbarui data dari server — menampilkan data terakhir yang tersimpan.', 'danger');
