@@ -5,8 +5,8 @@
  */
 return [
     'db_host' => '127.0.0.1',
-    'db_name' => 'accv2',
-    'db_user' => 'accv2_user',
+    'db_name' => 'accv',
+    'db_user' => 'accv_user',
     'db_pass' => 'CHANGE-ME',
     // Comma-separated origins allowed to call this API when the
     // frontend is NOT served from the same domain (e.g. local dev).
