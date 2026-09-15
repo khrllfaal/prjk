@@ -46,16 +46,24 @@ const SESSION_IDLE_TIMEOUT = 12 * 3600;
 
 function start_session(): void {
     if (session_status() === PHP_SESSION_ACTIVE) return;
+    // Plain $_SERVER['HTTPS'] isn't set when TLS is terminated by a
+    // reverse proxy/load balancer in front of PHP (common on shared
+    // hosting) — fall back to the standard forwarded-proto header so
+    // the cookie still gets marked secure on a real HTTPS deploy.
+    $isHttps = !empty($_SERVER['HTTPS']) || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
+    // Frontend and API on the same domain (typical Hostinger deploy)
+    // work fine with the default 'Lax'. Frontend hosted separately
+    // (e.g. Netlify) needs 'None' — a cross-site fetch() never sends a
+    // Lax cookie back, so login would silently "succeed" once and then
+    // look logged-out on every next request. 'None' requires Secure, so
+    // it's forced here rather than trusted blindly from config.
+    $sameSite = (cfg()['cookie_samesite'] ?? 'Lax');
     session_set_cookie_params([
         'lifetime' => 0,
         'path' => '/',
         'httponly' => true,
-        'samesite' => 'Lax',
-        // Plain $_SERVER['HTTPS'] isn't set when TLS is terminated by a
-        // reverse proxy/load balancer in front of PHP (common on shared
-        // hosting) — fall back to the standard forwarded-proto header so
-        // the cookie still gets marked secure on a real HTTPS deploy.
-        'secure' => !empty($_SERVER['HTTPS']) || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https'),
+        'samesite' => $sameSite,
+        'secure' => $isHttps || $sameSite === 'None',
     ]);
     session_name('accv2_session');
     session_start();

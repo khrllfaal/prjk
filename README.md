@@ -11,8 +11,11 @@ Backend adalah **PHP + MySQL** — cocok langsung dengan hosting shared
 Hostinger, tanpa proses Node terpisah. Mulai dari nol (install XAMPP,
 coba di komputer sendiri dulu) lihat
 **[docs/PANDUAN_LOKAL_KE_HOSTINGER.md](docs/PANDUAN_LOKAL_KE_HOSTINGER.md)**;
-untuk detail tahap deploy ke Hostinger saja lihat
-**[docs/DEPLOY_HOSTINGER.md](docs/DEPLOY_HOSTINGER.md)**.
+untuk deploy semuanya (frontend+backend+database) jadi satu di Hostinger
+lihat **[docs/DEPLOY_HOSTINGER.md](docs/DEPLOY_HOSTINGER.md)**; untuk
+online-kan frontend lebih cepat di Netlify dulu sementara backend
+PHP+MySQL tetap terpisah, lihat
+**[docs/DEPLOY_NETLIFY_FRONTEND.md](docs/DEPLOY_NETLIFY_FRONTEND.md)**.
 
 ## Struktur repo
 
