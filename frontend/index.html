@@ -1724,14 +1724,41 @@ function loadJsPDF(){
   }).catch(function(e){ _jspdfLoading=null; throw e; });
   return _jspdfLoading;
 }
+// Same red/amber/green semantics as the on-screen status pills
+// (statusRapInfo(), hutangStatusInfo(), ...) — matched by keyword so
+// exportPdf() can recolor a status cell without every caller having to
+// say which column is a status column.
+var PDF_STATUS_COLORS=[
+  {re:/melebihi|merah|belum dibayar/i, rgb:[192,57,43]},
+  {re:/hampir|kuning|sebagian/i, rgb:[176,122,0]},
+  {re:/^aman$|hijau|^lunas$/i, rgb:[30,142,90]},
+];
+function pdfStatusColor(text){
+  for(var i=0;i<PDF_STATUS_COLORS.length;i++){ if(PDF_STATUS_COLORS[i].re.test(text)) return PDF_STATUS_COLORS[i].rgb; }
+  return null;
+}
+// A row whose first cell reads like a section label ("PENDAPATAN",
+// "TOTAL AKTIVA", "Total Kas Masuk", ...) gets the same bold+tinted
+// treatment as DataTable's .row-group rows on screen, instead of
+// blending into the normal data rows.
+function isPdfHeaderRow(cell0){
+  var s=String(cell0==null?'':cell0).trim();
+  if(!s) return false;
+  if(/^total\b/i.test(s)) return true;
+  var letters=s.replace(/[^A-Za-z]/g,'');
+  return letters.length>1 && letters===letters.toUpperCase();
+}
 /* Builds a real PDF straight from the same headers/rows data every
    report already hands to exportExcel() — NOT a screenshot/print of
    whatever happens to be on screen, so a table embedded in a bigger
    page (Dashboard's Rincian Progress, say) exports just that table,
    never the KPI cards or charts around it. Table auto-paginates with
    its header row repeated on every page; numeric columns (same
-   all-numbers-or-blank check as Excel) are right-aligned and
-   thousands-separated. */
+   all-numbers-or-blank check as Excel) are right-aligned, thousands-
+   separated, and never split across lines; column widths are measured
+   from the actual content instead of left to autoTable's generic
+   auto-fit, which is what caused headers and even numbers to wrap
+   into unreadable multi-line cells on wide tables. */
 async function exportPdf(filename, headers, rows, opts){
   opts=opts||{};
   try{ await loadJsPDF(); }
@@ -1740,16 +1767,19 @@ async function exportPdf(filename, headers, rows, opts){
   var landscape=opts.landscape!==undefined?opts.landscape:headers.length>5;
   var doc=new window.jspdf.jsPDF({orientation:landscape?'landscape':'portrait', unit:'pt', format:'a4'});
   var pageW=doc.internal.pageSize.getWidth();
-  var margin=36;
+  var margin=headers.length>8?24:36;
+  var usableW=pageW-margin*2;
 
   var title=opts.title||filename.replace(/_/g,' ');
   doc.setFont('helvetica','bold'); doc.setFontSize(14); doc.setTextColor(31,56,100);
-  doc.text(title, margin, 40);
+  doc.text(title, margin, 34);
   doc.setFont('helvetica','italic'); doc.setFontSize(9); doc.setTextColor(136,136,136);
-  doc.text('Diekspor '+fmtDate(todayISO())+' dari Prakasa Group — ACC v2', margin, 56);
+  doc.text('Diekspor '+fmtDate(todayISO())+' dari Prakasa Group — ACC v2', margin, 50);
+  var startY=64;
   if(opts.subtitle){
     doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(80,80,80);
-    doc.text(String(opts.subtitle), margin, 71);
+    doc.text(String(opts.subtitle), margin, 65);
+    startY=79;
   }
 
   var isNumCol=headers.map(function(_,ci){
@@ -1759,17 +1789,92 @@ async function exportPdf(filename, headers, rows, opts){
     return r.map(function(v,ci){ return isNumCol[ci]?(v==null?'':num0(v)):(v==null?'':String(v)); });
   });
 
+  // Many columns (Rincian Progress, Trial Hutang, ...) need a smaller,
+  // tighter grid to have any chance of fitting real numbers on one
+  // line; a short 2-column statement (Laba Rugi, Neraca) can stay at
+  // full size. Tried smallest-first-that-fits: a number column is NEVER
+  // shrunk below what it measures at the chosen font (that's exactly
+  // the mid-digit wrapping this rewrite exists to avoid) — only the
+  // free-text columns give up space, and only once they've all been
+  // capped to a sane reading width does the font itself step down.
+  var fontCandidates=headers.length>10?[7.2,6.6,6,5.5]:(headers.length>6?[8.5,7.6,7]:[9]);
+  var padding=headers.length>10?3:(headers.length>6?4:6);
+  var fontSize, colWidths, totalW;
+  for(var fi=0; fi<fontCandidates.length; fi++){
+    fontSize=fontCandidates[fi];
+    doc.setFont('helvetica','normal'); doc.setFontSize(fontSize);
+    var numW=[], textW=[];
+    headers.forEach(function(h, ci){
+      var headerW=doc.getTextWidth(String(h))+padding*2+4;
+      var maxCellW=body.reduce(function(m,r){ return Math.max(m, doc.getTextWidth(String(r[ci]))); }, 0)+padding*2;
+      var w=Math.max(headerW, maxCellW, 26);
+      if(isNumCol[ci]) numW[ci]=w; else textW[ci]=w;
+    });
+    var numTotal=numW.reduce(function(a,b){ return a+(b||0); },0);
+    var textTotal=textW.reduce(function(a,b){ return a+(b||0); },0);
+    var textBudget=usableW-numTotal;
+    // Free-text columns share whatever's left over after every numeric
+    // column gets its exact required width; capped at 150pt each so one
+    // long value never balloons the table, and never squeezed thinner
+    // than a still-readable ~50pt as long as the budget allows it.
+    var textCap=headers.length<=2?320:150;
+    var textScale=textTotal>0?Math.min(1, Math.max(textBudget,0)/textTotal):1;
+    colWidths=headers.map(function(h, ci){
+      if(isNumCol[ci]) return numW[ci];
+      return Math.max(Math.min(textW[ci]*textScale,textCap), textBudget>0?Math.min(textW[ci],50):26);
+    });
+    totalW=colWidths.reduce(function(a,b){ return a+b; },0);
+    if(totalW<=usableW || fi===fontCandidates.length-1){
+      // Table fits with room to spare (typical for a narrow 2-3 column
+      // statement) — stretch the free-text columns to use the leftover
+      // width instead of leaving the right side of the page empty, the
+      // same way a printed statement fills the sheet.
+      if(totalW<usableW && textTotal>0){
+        var extra=usableW-totalW;
+        colWidths=colWidths.map(function(w,ci){ return isNumCol[ci]?w:w+extra*(textW[ci]/textTotal); });
+        totalW=usableW;
+      }
+      break;
+    }
+  }
+  var columnStyles=headers.reduce(function(acc,_,ci){
+    acc[ci]={cellWidth:colWidths[ci], halign:isNumCol[ci]?'right':'left', overflow:isNumCol[ci]?'visible':'linebreak'};
+    return acc;
+  },{});
+
   doc.autoTable({
-    startY:opts.subtitle?82:66,
+    startY:startY,
     margin:{left:margin, right:margin},
+    tableWidth:Math.min(totalW,usableW),
+    rowPageBreak:'avoid',
     head:[headers],
     body:body,
-    styles:{font:'helvetica', fontSize:8.5, cellPadding:5, lineColor:[227,231,238], lineWidth:0.5},
-    headStyles:{fillColor:[31,56,100], textColor:255, fontStyle:'bold', halign:'center'},
+    styles:{font:'helvetica', fontSize:fontSize, cellPadding:padding, lineColor:[227,231,238], lineWidth:0.5, valign:'middle'},
+    headStyles:{fillColor:[31,56,100], textColor:255, fontStyle:'bold', halign:'center', fontSize:fontSize},
     alternateRowStyles:{fillColor:[247,249,252]},
-    columnStyles:headers.reduce(function(acc,_,ci){ if(isNumCol[ci]) acc[ci]={halign:'right'}; return acc; },{}),
+    columnStyles:columnStyles,
+    didParseCell:function(data){
+      if(data.section!=='body') return;
+      var raw=data.cell.raw;
+      // Section-divider rows ("PENDAPATAN", "TOTAL AKTIVA", ...) only
+      // ever occur in a plain 2-column statement (Laba Rugi, Neraca,
+      // Cash Flow, ...) — a wide table's first column is always a real
+      // name/label (a project called "ZIDAM" is data, not a header), so
+      // this check must not run there or it'll bold real rows by
+      // accident.
+      if(headers.length<=2 && isPdfHeaderRow(data.row.raw[0])){
+        data.cell.styles.fontStyle='bold';
+        data.cell.styles.fillColor=[234,240,249];
+        return;
+      }
+      if(isNumCol[data.column.index] && typeof raw==='string' && raw.trim().indexOf('-')===0){
+        data.cell.styles.textColor=[192,57,43];
+      } else if(!isNumCol[data.column.index]){
+        var color=pdfStatusColor(String(raw||''));
+        if(color){ data.cell.styles.textColor=color; data.cell.styles.fontStyle='bold'; }
+      }
+    },
     didDrawPage:function(data){
-      var page=doc.internal.getNumberOfPages();
       doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(150,150,150);
       doc.text('Halaman '+data.pageNumber, pageW-margin, doc.internal.pageSize.getHeight()-16, {align:'right'});
     },
