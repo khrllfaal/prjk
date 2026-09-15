@@ -687,6 +687,19 @@ function isCostAkun(akunLawan){
   var head=akunHead(akunLawan);
   return head===''||head==='5'||head==='6'||head==='7'||head==='8';
 }
+// A Kas Masuk/Bank Masuk posted against a "Biaya ..." account (a refund
+// or returned-goods credit against a cost already booked) does NOT
+// reduce that cost in the reference system — confirmed on two separate
+// cases (Rumah Dirtek Bekasi's "retur barang", Kemhan Bangun Rumdis
+// Korem Cirebon's "pengembalian bahan alumunium") where the reference
+// Laba Rugi kept the full gross cost regardless of the refund. Standard
+// double-entry bookkeeping WOULD net this, but that's not how this
+// company's own reports treat it — only Kas Keluar/Bank Keluar/Jurnal
+// Umum postings ever count toward a Biaya line; see groupByHead() and
+// computeProjectProgressRows().
+function isBiayaAkun(nama){
+  return akunNamaOnly(nama).indexOf('Biaya ')===0;
+}
 // A voucher saved as Draft is still being reviewed/completed — like an
 // unposted journal entry in Accurate, it must not affect any report
 // (Laba Rugi, Neraca, Dashboard, Trial Hutang) until marked Posted. Rows
@@ -700,22 +713,17 @@ function computeProjectProgressRows(from, to){
     var ledger=p.ledgerName||p.nama;
     var bahan=0, upah=0, akomodasi=0, admFee=0, costCenter=0;
     DB.txns.forEach(function(t){
-      if(t.project!==ledger || !/^(kas|bank)_(masuk|keluar)$/.test(t.jenis)) return;
+      if(t.project!==ledger || !/keluar$/.test(t.jenis)) return;
       if(from && t.tgl<from) return;
       if(to && t.tgl>to) return;
-      // A masuk transaction tagged to a cost account is a refund/return
-      // (money coming back against a purchase already booked as a cost)
-      // — net it against the cost the same way Laba Rugi already does
-      // (allEntries()'s "lawan" leg nets debet-kredit per account), so a
-      // returned/refunded Biaya Bahan/Upah/Akomodasi/Adm Fee purchase
-      // doesn't silently stay counted in full here while Laba Rugi
-      // already shows the reduced net figure.
-      var isKeluar=/keluar$/.test(t.jenis);
-      var amt=isKeluar?t.kredit:-t.debet;
-      if(matchesPlainCost(t.akunLawan,'bahan')) bahan+=amt;
-      else if(matchesPlainCost(t.akunLawan,'upah')) upah+=amt;
-      else if(matchesPlainCost(t.akunLawan,'akomodasi')) akomodasi+=amt;
-      else if(matchesPlainCost(t.akunLawan,'admFee')) admFee+=amt;
+      // A Kas Masuk/Bank Masuk refund against a cost account (a returned
+      // purchase) does NOT reduce that cost here, matching the reference
+      // system exactly — see isBiayaAkun(). Only Kas/Bank Keluar postings
+      // ever count toward Biaya Bahan/Upah/Akomodasi/Adm Fee.
+      if(matchesPlainCost(t.akunLawan,'bahan')) bahan+=t.kredit;
+      else if(matchesPlainCost(t.akunLawan,'upah')) upah+=t.kredit;
+      else if(matchesPlainCost(t.akunLawan,'akomodasi')) akomodasi+=t.kredit;
+      else if(matchesPlainCost(t.akunLawan,'admFee')) admFee+=t.kredit;
       // Cost Center is a residual "other project cost" bucket — Bank
       // Keluar postings linked to a project are almost always internal
       // Kas<->Bank transfers ("Ayat Silang...") or loan
@@ -1949,7 +1957,7 @@ function allEntries(){
   var out=[];
   DB.txns.forEach(function(t){
     var base={tgl:t.tgl, ref:t.ref, akunKas:t.akunKas, project:t.project,
-      relasi:t.relasi, kategori:t.kategori, ket:t.ket, src:'kas'};
+      relasi:t.relasi, kategori:t.kategori, ket:t.ket, src:'kas', jenis:t.jenis};
     // leg 1 — the cash / bank account itself
     out.push(Object.assign({}, base, {akun:kasAkunLabel(t.akunKas), debet:t.debet, kredit:t.kredit, leg:'kas'}));
     /* leg 2 — the counter account (sign inverted). A handful of source rows have an empty
@@ -3702,6 +3710,9 @@ function registerPages(){
     allEntries().forEach(function(e){
       if(!inRange(e.tgl,from,to)) return;
       if(project && e.project!==project) return;
+      // A Kas Masuk/Bank Masuk refund against a "Biaya ..." account never
+      // reduces that cost here — see isBiayaAkun().
+      if(e.leg==='lawan' && /masuk$/.test(e.jenis) && isBiayaAkun(e.akun)) return;
       var h=akunHead(e.akun);
       if(heads.indexOf(h)===-1) return;
       var key=akunNamaOnly(e.akun).toLowerCase();
