@@ -4043,8 +4043,8 @@ function registerPages(){
       '</div>'+
       '<div id="reportBody"></div>';
 
-    function acctRow(r,sign){
-      var v=sign*(r.debet-r.kredit);
+    function acctRow(r,sign,override){
+      var v=(override===undefined)?sign*(r.debet-r.kredit):override;
       return '<tr><td class="wrap" style="padding-left:20px;">'+esc(r.akun)+'</td><td class="num">'+
         (Math.abs(v)<0.5?'<span class="faint-italic">–</span>':numSigned(v))+'</td></tr>';
     }
@@ -4053,29 +4053,23 @@ function registerPages(){
       var aktiva=groupByHead(null,to,['1']);
       var kewajiban=groupByHead(null,to,['2']);
       var ekuitas=groupByHead(null,to,['3']);
-      var labaRows=groupByHead(null,to,['4','5','6','7','8']);
 
       var totalAktiva=aktiva.reduce(function(a,r){ return a+(r.debet-r.kredit); },0);
       var totalHutang=kewajiban.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
-      var totalEkuitasAkun=ekuitas.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
-      var labaBerjalan=labaRows.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
-      // Master COA's Saldo Awal is currently only ever filled in on the
-      // Aktiva side (Kas/Bank) — nobody has entered what the company
-      // already owed, or what equity it already had, before this ledger
-      // started. Aktiva's saldoAwal (now folded into groupByHead above)
-      // would otherwise make the sheet stop balancing by exactly that
-      // amount; booking the gap to equity — the standard treatment for
-      // an unexplained opening balance — keeps it balanced AND visible,
-      // instead of silently vanishing the way it did before this account
-      // for Saldo Awal at all. Shrinks to 0 on its own once/if a matching
-      // opening Hutang/Ekuitas balance is ever entered.
-      var openingPlug=(DB.coa||[]).reduce(function(a,c){
-        var head=String(c.kode).split('.')[0], v=c.saldoAwal||0;
-        if(head==='1') return a+v;
-        if(head==='2'||head==='3') return a-v;
-        return a;
+      // "Laba Tahun Berjalan" (current, not-yet-closed period earnings) is
+      // never summed from P&L accounts here — the reference system (sistem
+      // asli) books it as the balancing figure of the sheet itself: Aktiva
+      // minus Hutang minus every other Ekuitas account. That is what
+      // "current year profit not yet closed to retained earnings" means
+      // under double-entry, and matching that formula (rather than an
+      // independent P&L recomputation plus a separate opening-balance
+      // plug line) is what makes NERACA BALANCE agree with sistem asli.
+      var isLabaTahunBerjalan=function(r){ return akunNamaOnly(r.akun)==='Laba Tahun Berjalan'; };
+      var totalEkuitasLain=ekuitas.reduce(function(a,r){
+        return isLabaTahunBerjalan(r)?a:a+(r.kredit-r.debet);
       },0);
-      var totalEkuitas=totalEkuitasAkun+labaBerjalan+openingPlug;
+      var labaTahunBerjalan=totalAktiva-totalHutang-totalEkuitasLain;
+      var totalEkuitas=totalEkuitasLain+labaTahunBerjalan;
       var totalPasiva=totalHutang+totalEkuitas;
       var selisih=totalAktiva-totalPasiva;
 
@@ -4089,13 +4083,8 @@ function registerPages(){
         '<tr class="row-group"><td colspan="2">2-PASIVA</td></tr>';
       kewajiban.forEach(function(r){ html+=acctRow(r,-1); });
       html+='<tr><td><b>TOTAL HUTANG</b></td><td class="num"><b>'+num0(totalHutang)+'</b></td></tr>';
-      ekuitas.forEach(function(r){ html+=acctRow(r,-1); });
-      if(Math.abs(openingPlug)>=0.5){
-        html+='<tr><td class="wrap" style="padding-left:20px;">Saldo Awal (Master COA, belum ada pasangan Hutang/Ekuitas pembuka)</td>'+
-          '<td class="num">'+numSigned(openingPlug)+'</td></tr>';
-      }
-      html+='<tr><td class="wrap" style="padding-left:20px;">Laba/Rugi Berjalan</td><td class="num">'+numSigned(labaBerjalan)+'</td></tr>'+
-        '<tr><td><b>TOTAL EKUITAS</b></td><td class="num"><b>'+num0(totalEkuitas)+'</b></td></tr>'+
+      ekuitas.forEach(function(r){ html+=acctRow(r,-1,isLabaTahunBerjalan(r)?labaTahunBerjalan:undefined); });
+      html+='<tr><td><b>TOTAL EKUITAS</b></td><td class="num"><b>'+num0(totalEkuitas)+'</b></td></tr>'+
         '<tr><td><b>TOTAL PASIVA</b></td><td class="num"><b>'+num0(totalPasiva)+'</b></td></tr>'+
         '<tr style="background:var(--'+(Math.abs(selisih)<1?'safe':'danger')+'-bg);"><td><b>NERACA BALANCE</b></td>'+
         '<td class="num"><b>'+num0(selisih)+'</b></td></tr>'+
@@ -4111,9 +4100,7 @@ function registerPages(){
       out.push(['2-PASIVA', null]);
       kewajiban.forEach(function(r){ var v=-(r.debet-r.kredit); out.push([r.akun, Math.abs(v)<0.5?0:v]); });
       out.push(['TOTAL HUTANG', totalHutang]);
-      ekuitas.forEach(function(r){ var v=-(r.debet-r.kredit); out.push([r.akun, Math.abs(v)<0.5?0:v]); });
-      if(Math.abs(openingPlug)>=0.5) out.push(['Saldo Awal (Master COA)', openingPlug]);
-      out.push(['Laba/Rugi Berjalan', labaBerjalan]);
+      ekuitas.forEach(function(r){ var v=isLabaTahunBerjalan(r)?labaTahunBerjalan:-(r.debet-r.kredit); out.push([r.akun, Math.abs(v)<0.5?0:v]); });
       out.push(['TOTAL EKUITAS', totalEkuitas]);
       out.push(['TOTAL PASIVA', totalPasiva]);
       out.push(['NERACA BALANCE', selisih]);
