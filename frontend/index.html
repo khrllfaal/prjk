@@ -1669,6 +1669,83 @@ async function exportExcel(filename, headers, rows, opts){
 }
 function printPage(){ window.print(); }
 
+/* Same vendoring approach as ExcelJS above (local, lazy-loaded) —
+   jsPDF + its autoTable plugin, loaded as two plain <script> tags in
+   sequence since autoTable patches jsPDF's prototype as a side effect
+   once both are on the page. */
+var _jspdfLoading=null;
+function loadJsPDF(){
+  if(window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.API.autoTable) return Promise.resolve();
+  if(_jspdfLoading) return _jspdfLoading;
+  function addScript(src){
+    return new Promise(function(resolve,reject){
+      var s=document.createElement('script');
+      s.src=src;
+      s.onload=function(){ resolve(); };
+      s.onerror=function(){ reject(new Error('Gagal memuat modul PDF.')); };
+      document.head.appendChild(s);
+    });
+  }
+  _jspdfLoading=addScript('vendor/jspdf.umd.min.js').then(function(){
+    return addScript('vendor/jspdf.plugin.autotable.min.js');
+  }).catch(function(e){ _jspdfLoading=null; throw e; });
+  return _jspdfLoading;
+}
+/* Builds a real PDF straight from the same headers/rows data every
+   report already hands to exportExcel() — NOT a screenshot/print of
+   whatever happens to be on screen, so a table embedded in a bigger
+   page (Dashboard's Rincian Progress, say) exports just that table,
+   never the KPI cards or charts around it. Table auto-paginates with
+   its header row repeated on every page; numeric columns (same
+   all-numbers-or-blank check as Excel) are right-aligned and
+   thousands-separated. */
+async function exportPdf(filename, headers, rows, opts){
+  opts=opts||{};
+  try{ await loadJsPDF(); }
+  catch(e){ toast('Gagal memuat modul PDF — cek koneksi lalu coba lagi.','danger'); return; }
+
+  var landscape=opts.landscape!==undefined?opts.landscape:headers.length>5;
+  var doc=new window.jspdf.jsPDF({orientation:landscape?'landscape':'portrait', unit:'pt', format:'a4'});
+  var pageW=doc.internal.pageSize.getWidth();
+  var margin=36;
+
+  var title=opts.title||filename.replace(/_/g,' ');
+  doc.setFont('helvetica','bold'); doc.setFontSize(14); doc.setTextColor(31,56,100);
+  doc.text(title, margin, 40);
+  doc.setFont('helvetica','italic'); doc.setFontSize(9); doc.setTextColor(136,136,136);
+  doc.text('Diekspor '+fmtDate(todayISO())+' dari Prakasa Group — ACC v2', margin, 56);
+  if(opts.subtitle){
+    doc.setFont('helvetica','normal'); doc.setFontSize(9.5); doc.setTextColor(80,80,80);
+    doc.text(String(opts.subtitle), margin, 71);
+  }
+
+  var isNumCol=headers.map(function(_,ci){
+    return rows.length>0 && rows.every(function(r){ return r[ci]==null || typeof r[ci]==='number'; });
+  });
+  var body=rows.map(function(r){
+    return r.map(function(v,ci){ return isNumCol[ci]?(v==null?'':num0(v)):(v==null?'':String(v)); });
+  });
+
+  doc.autoTable({
+    startY:opts.subtitle?82:66,
+    margin:{left:margin, right:margin},
+    head:[headers],
+    body:body,
+    styles:{font:'helvetica', fontSize:8.5, cellPadding:5, lineColor:[227,231,238], lineWidth:0.5},
+    headStyles:{fillColor:[31,56,100], textColor:255, fontStyle:'bold', halign:'center'},
+    alternateRowStyles:{fillColor:[247,249,252]},
+    columnStyles:headers.reduce(function(acc,_,ci){ if(isNumCol[ci]) acc[ci]={halign:'right'}; return acc; },{}),
+    didDrawPage:function(data){
+      var page=doc.internal.getNumberOfPages();
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(150,150,150);
+      doc.text('Halaman '+data.pageNumber, pageW-margin, doc.internal.pageSize.getHeight()-16, {align:'right'});
+    },
+  });
+
+  doc.save(filename+'.pdf');
+  toast('File '+filename+'.pdf diunduh.','success');
+}
+
 /* ============================================================
    DATA TABLE COMPONENT
    columns: [{key,label,num,sort:false,cls,render,sortVal,foot}]
@@ -1998,13 +2075,13 @@ function pageHead(title, sub, actionsHTML){
 }
 function exportBtns(idPrefix){
   return '<button class="btn btn-success btn-sm" id="'+idPrefix+'Excel">▤ Excel</button>'+
-    '<button class="btn btn-steel btn-sm" id="'+idPrefix+'Print">⎙ Print</button>';
+    '<button class="btn btn-danger btn-sm" id="'+idPrefix+'Pdf">▤ PDF</button>';
 }
-function bindExport(idPrefix, filename, headers, rowsFn){
+function bindExport(idPrefix, filename, headers, rowsFn, opts){
   var e=document.getElementById(idPrefix+'Excel');
   if(e) e.onclick=function(){ exportExcel(filename, headers, rowsFn()); };
-  var p=document.getElementById(idPrefix+'Print');
-  if(p) p.onclick=printPage;
+  var p=document.getElementById(idPrefix+'Pdf');
+  if(p) p.onclick=function(){ exportPdf(filename, headers, rowsFn(), opts); };
 }
 
 /* ---------------- boot ---------------- */
@@ -3995,7 +4072,7 @@ function registerPages(){
       clearFilterFields(['fFrom','fTo','fProject']);
       refresh();
     };
-    document.getElementById('cfExcel').onclick=function(){
+    function cashFlowRows(){
       var rows=[];
       [['KAS MASUK','kas_masuk','Total Kas Masuk'],['KAS KELUAR','kas_keluar','Total Kas Keluar'],
        ['BANK MASUK','bank_masuk','Total Bank Masuk'],['BANK KELUAR','bank_keluar','Total Bank Keluar']]
@@ -4005,9 +4082,14 @@ function registerPages(){
         list.forEach(function(r){ rows.push([r.label, r.amount]); });
         rows.push([sec[2], list.reduce(function(a,b){ return a+b.amount; },0)]);
       });
-      exportExcel('Cash_Flow', ['Keterangan','Jumlah'], rows);
+      return rows;
+    }
+    document.getElementById('cfExcel').onclick=function(){
+      exportExcel('Cash_Flow', ['Keterangan','Jumlah'], cashFlowRows());
     };
-    document.getElementById('cfPdf').onclick=printPage;
+    document.getElementById('cfPdf').onclick=function(){
+      exportPdf('Cash_Flow', ['Keterangan','Jumlah'], cashFlowRows(), {title:'Laporan Cash Flow'});
+    };
   };
 
   /* ---------------- CATATAN INSIGHT ---------------- */
