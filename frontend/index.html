@@ -4043,11 +4043,19 @@ function registerPages(){
       '</div>'+
       '<div id="reportBody"></div>';
 
-    function acctRow(r,sign,override){
+    function acctRow(r,sign,override,idx){
       var v=(override===undefined)?sign*(r.debet-r.kredit):override;
-      return '<tr><td class="wrap" style="padding-left:20px;">'+esc(r.akun)+'</td><td class="num">'+
+      var label=(Math.abs(v)<0.5)
+        ?esc(r.akun)
+        :'<button type="button" class="linklike" data-neraca-idx="'+idx+'">'+esc(r.akun)+'</button>';
+      return '<tr><td class="wrap" style="padding-left:20px;">'+label+'</td><td class="num">'+
         (Math.abs(v)<0.5?'<span class="faint-italic">–</span>':numSigned(v))+'</td></tr>';
     }
+    // Every clickable row's own {r, sign, isLaba} — indexed so the click
+    // handler (wired once per refresh, after the HTML is in the DOM)
+    // knows exactly which account/sign it's showing, without re-deriving
+    // it from the button's label text.
+    var rowClickInfo=[];
     function refresh(){
       var to=fv('fPer')||todayISO();
       var aktiva=groupByHead(null,to,['1']);
@@ -4073,23 +4081,78 @@ function registerPages(){
       var totalPasiva=totalHutang+totalEkuitas;
       var selisih=totalAktiva-totalPasiva;
 
+      rowClickInfo=[];
+      function pushRow(r,sign,override){
+        var i=rowClickInfo.length;
+        rowClickInfo.push({r:r,sign:sign,isLaba:isLabaTahunBerjalan(r)});
+        return acctRow(r,sign,override,i);
+      }
       var html='<div class="panel"><div class="table-scroll"><table class="dtab" id="tblNeraca"><thead>'+
         '<tr><th colspan="2" style="text-align:center;font-size:15px;">LAPORAN NERACA<br>'+
         '<span style="font-weight:400;font-size:12px;color:var(--text-faint);">Per '+esc(fmtDate(to))+'</span></th></tr>'+
         '</thead><tbody>'+
         '<tr class="row-group"><td colspan="2">1-AKTIVA</td></tr>';
-      aktiva.forEach(function(r){ html+=acctRow(r,1); });
+      aktiva.forEach(function(r){ html+=pushRow(r,1); });
       html+='<tr><td><b>TOTAL AKTIVA</b></td><td class="num"><b>'+num0(totalAktiva)+'</b></td></tr>'+
         '<tr class="row-group"><td colspan="2">2-PASIVA</td></tr>';
-      kewajiban.forEach(function(r){ html+=acctRow(r,-1); });
+      kewajiban.forEach(function(r){ html+=pushRow(r,-1); });
       html+='<tr><td><b>TOTAL HUTANG</b></td><td class="num"><b>'+num0(totalHutang)+'</b></td></tr>';
-      ekuitas.forEach(function(r){ html+=acctRow(r,-1,isLabaTahunBerjalan(r)?labaTahunBerjalan:undefined); });
+      ekuitas.forEach(function(r){ html+=pushRow(r,-1,isLabaTahunBerjalan(r)?labaTahunBerjalan:undefined); });
       html+='<tr><td><b>TOTAL EKUITAS</b></td><td class="num"><b>'+num0(totalEkuitas)+'</b></td></tr>'+
         '<tr><td><b>TOTAL PASIVA</b></td><td class="num"><b>'+num0(totalPasiva)+'</b></td></tr>'+
         '<tr style="background:var(--'+(Math.abs(selisih)<1?'safe':'danger')+'-bg);"><td><b>NERACA BALANCE</b></td>'+
         '<td class="num"><b>'+num0(selisih)+'</b></td></tr>'+
         '</tbody></table></div></div>';
       document.getElementById('reportBody').innerHTML=html;
+
+      // Click-to-drilldown on every non-zero row: real accounts show the
+      // kas/bank/jurnal postings behind the balance (plus the account's
+      // own Saldo Awal, if any, as its own line — that part is a COA
+      // field, not a transaction, so it would otherwise be invisible
+      // here); the "Laba Tahun Berjalan" plug shows the balancing
+      // formula itself since it has no transactions of its own.
+      document.querySelectorAll('#reportBody [data-neraca-idx]').forEach(function(b){
+        b.onclick=function(){
+          var info=rowClickInfo[Number(b.getAttribute('data-neraca-idx'))];
+          if(info.isLaba){
+            showTxnDrilldown(info.r.akun, 'Angka penyeimbang Neraca — bukan hasil transaksi, tapi selisih Aktiva dikurangi Hutang dan Ekuitas lainnya (sama seperti sistem asli menghitungnya)', [
+              {tgl:to, ref:'', ket:'Total Aktiva', amount:totalAktiva},
+              {tgl:to, ref:'', ket:'Total Hutang', amount:-totalHutang},
+              {tgl:to, ref:'', ket:'Ekuitas lainnya (Modal, Prive, dst.)', amount:-totalEkuitasLain}
+            ]);
+            return;
+          }
+          var accName=akunNamaOnly(info.r.akun);
+          var coaRow=info.r.kode?DB.coa.find(function(c){ return c.kode===info.r.kode; }):null;
+          // Two COA leaves can share the same name (e.g. both a
+          // short-term and a long-term "Hutang Pihak Ke-3") — groupByHead
+          // attributes every posting to only the first one by kode, so a
+          // later duplicate's row here must show none of that name's
+          // transactions (just its own Saldo Awal below), or the total
+          // would double up with the other leaf's drilldown.
+          var isClaimingLeaf=true;
+          if(coaRow){
+            var siblings=DB.coa.filter(function(c){
+              return c.level===3 && String(c.nama||'').trim().toLowerCase()===accName.toLowerCase();
+            }).sort(function(a,b){ return compareKode(a.kode,b.kode); });
+            isClaimingLeaf=siblings.length===0 || siblings[0].kode===coaRow.kode;
+          }
+          var list=isClaimingLeaf?labaRugiAccountTxns(accName, null, to, null).map(function(e){
+            return {tgl:e.tgl, ref:e.ref, ket:e.ket, amount:info.sign*(e.debet-e.kredit)};
+          }):[];
+          if(coaRow && coaRow.saldoAwal){
+            // Matches groupByHead()'s own treatment: on every head (1, 2
+            // or 3) a positive Saldo Awal always moves the row's own
+            // displayed value (v) in the same +1 direction — Aktiva's v
+            // is debet-kredit and Saldo Awal adds to debet; Hutang/
+            // Ekuitas's v is kredit-debet and Saldo Awal adds to kredit
+            // — so no sign branching is needed here.
+            list.push({tgl:to, ref:'', ket:'Saldo Awal (Master COA)', amount:coaRow.saldoAwal});
+          }
+          list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+          showTxnDrilldown(info.r.akun, 'Rincian transaksi & jurnal yang membentuk saldo akun ini', list);
+        };
+      });
 
       // Real numbers for export — built alongside the HTML above from the
       // same figures, never scraped back out of rendered/formatted text
