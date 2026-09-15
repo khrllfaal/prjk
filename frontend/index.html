@@ -1615,6 +1615,42 @@ function bindCurrencyInput(id){
 }
 function fnumC(id){ var v=fv(id).replace(/\D/g,''); return v?parseInt(v,10):0; }
 
+/* Signed variant — only for fields where a negative value is
+   meaningful (currently: COA Saldo Awal, for a contra/corrective
+   opening balance). Every other amount field (transaction amounts,
+   jurnal debet/kredit, payments) stays positive-only via the plain
+   functions above — this pair is intentionally separate rather than
+   changing their behavior everywhere. */
+function formatThousandsSigned(v){
+  v=String(v||'');
+  var neg=v.trim().charAt(0)==='-';
+  var digits=formatThousands(v);
+  // Keep a lone "-" while the user is still typing the number after it
+  // (digits not typed yet) instead of discarding it the instant the
+  // field has no digits — otherwise "-" typed first is silently erased.
+  return neg?('-'+digits):digits;
+}
+function bindCurrencyInputSigned(id){
+  var el=document.getElementById(id);
+  if(!el) return;
+  el.value=formatThousandsSigned(el.value);
+  el.addEventListener('focus', function(){ el.select(); });
+  el.addEventListener('input', function(){
+    var pos=el.selectionStart, lenBefore=el.value.length;
+    el.value=formatThousandsSigned(el.value);
+    var lenAfter=el.value.length;
+    var newPos=Math.max(0, pos+(lenAfter-lenBefore));
+    el.setSelectionRange(newPos, newPos);
+  });
+}
+function fnumSignedC(id){
+  var v=fv(id);
+  var neg=v.trim().charAt(0)==='-';
+  var digits=v.replace(/\D/g,'');
+  var n=digits?parseInt(digits,10):0;
+  return neg?-n:n;
+}
+
 /* ---------------- Excel (.xlsx) export ----------------
    A real workbook via ExcelJS (vendored locally, vendor/exceljs.min.js,
    lazy-loaded on first export so it never slows down initial page
@@ -2985,9 +3021,9 @@ function registerPages(){
         '<div class="form-grid">'+
         '<div class="field"><label>Kode Akun *</label><input id="f_kode" value="'+esc(rec?rec.kode:'')+'" placeholder="mis. 6.2.40"></div>'+
         '<div class="field"><label>Nama Akun *</label><input id="f_nama" value="'+esc(rec?rec.nama:'')+'"></div>'+
-        '<div class="field full"><label>Saldo Awal (Rp)</label><input type="text" inputmode="numeric" id="f_saldoAwal" value="'+esc(rec&&rec.saldoAwal?rec.saldoAwal:'')+'" placeholder="0"></div>'+
+        '<div class="field full"><label>Saldo Awal (Rp)</label><input type="text" inputmode="numeric" id="f_saldoAwal" value="'+esc(rec&&rec.saldoAwal?rec.saldoAwal:'')+'" placeholder="0"><div style="font-size:11px;color:var(--text-faint);margin-top:4px;">Boleh diawali "-" untuk saldo pembuka kontra (mis. akun kewajiban jangka panjang yang menjadi pengurang).</div></div>'+
         '</div>',{onSave:function(){
-          var kode=fv('f_kode'), nama=fv('f_nama'), saldoAwal=fnumC('f_saldoAwal');
+          var kode=fv('f_kode'), nama=fv('f_nama'), saldoAwal=fnumSignedC('f_saldoAwal');
           if(!kode||!nama){ toast('Kode dan nama akun wajib diisi.','danger'); return; }
           if(!/^\d+(\.\d+)*$/.test(kode)){ toast('Format kode akun tidak valid (contoh: 6.2.40).','danger'); return; }
           var dup=DB.coa.find(function(x){ return x.kode===kode && (!rec||x.id!==rec.id); });
@@ -2998,7 +3034,7 @@ function registerPages(){
           invalidateCoaCache();
           saveDB(); syncUpsert('coa', savedObj); closeModal(); draw(); toast('Akun tersimpan.','success');
         }});
-      bindCurrencyInput('f_saldoAwal');
+      bindCurrencyInputSigned('f_saldoAwal');
     }
     function del(id){
       var rec=DB.coa.find(function(x){ return x.id===id; });
