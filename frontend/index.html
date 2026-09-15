@@ -787,6 +787,21 @@ function isInternalTransferAkun(nama){
   return akunNamaOnly(nama)==='Ayat Silang Kas Besar Kas-Bank';
 }
 
+// Bank Keluar posted to ANY "Ayat Silang..." account (Kas Besar<->Bank,
+// Antar Bank, ...) is always one leg of an internal transfer that pairs
+// 1:1 with a Masuk leg elsewhere (a Kas Masuk or Bank Masuk of the exact
+// same amount, same/nearby date) — verified across every such row
+// currently in the ledger, so unlike isInternalTransferAkun() above this
+// is intentionally broad across the whole "Ayat Silang" family for the
+// Bank Keluar side specifically. This must NOT be confused with "any
+// non-loan Bank Keluar" — a real cost (Prive, bonus, supplies, ...) paid
+// straight out of a bank account has no such pairing and belongs in
+// Uang Keluar like any other expense; only an actual internal-transfer
+// posting reduces Uang Masuk instead (see bankFlows below).
+function isBankTransferAkun(nama){
+  return akunNamaOnly(nama).indexOf('Ayat Silang')===0;
+}
+
 /* Master COA's Saldo Awal column is a full trial-balance opening figure —
    every Aktiva/Kewajiban/Ekuitas account (Piutang, Hutang, Biaya Dibayar
    Dimuka, ...) carries one there for the Neraca. The Dashboard's cash-
@@ -830,25 +845,31 @@ function computeCashPeriods(){
   //  - Bank Keluar whose akun lawan is loan principal/interest
   //    (isLoanServiceAkun) counts straight as Uang Keluar — real cash
   //    leaving for debt service.
-  //  - Every OTHER Bank Keluar reduces Uang Masuk instead of adding to
-  //    Uang Keluar: it's money that arrived in a bank account and got
-  //    spent again without ever becoming free/available cash, so only
-  //    what's left over (Bank Masuk minus that spend) counts as Masuk.
-  // The split only changes how the SAME net flow is labelled Masuk vs
-  // Keluar — Saldo Akhir is unaffected either way (see saldoAwal below,
-  // which folds all Bank Masuk/Keluar in unconditionally for exactly
-  // that reason).
+  //  - Bank Keluar posted to an "Ayat Silang..." account
+  //    (isBankTransferAkun) reduces Uang Masuk instead of adding to
+  //    Uang Keluar: it's an internal transfer whose Masuk-side leg
+  //    (Kas Masuk or Bank Masuk, same amount) already counts as Masuk
+  //    elsewhere, so only the net that's actually left over counts.
+  //  - Every OTHER Bank Keluar (a real cost — Prive, bonus, supplies,
+  //    any COA expense account) is a genuine cash outflow with no
+  //    paired Masuk anywhere, so it counts straight as Uang Keluar,
+  //    same as a Kas Keluar would.
+  // The Ayat Silang split only changes how the SAME net flow is
+  // labelled Masuk vs Keluar — Saldo Akhir is unaffected either way
+  // (see saldoAwal below, which folds all Bank Masuk/Keluar in
+  // unconditionally for exactly that reason).
   function bankFlows(from,to){
-    var masuk=0, keluarNonLoan=0, keluarLoan=0;
+    var masuk=0, keluarNonLoan=0, keluarLoan=0, keluarReal=0;
     DB.txns.forEach(function(t){
       if(t.tgl<from||t.tgl>to) return;
       if(t.jenis==='bank_masuk') masuk+=t.debet;
       else if(t.jenis==='bank_keluar'){
         if(isLoanServiceAkun(t.akunLawan)) keluarLoan+=t.kredit;
-        else keluarNonLoan+=t.kredit;
+        else if(isBankTransferAkun(t.akunLawan)) keluarNonLoan+=t.kredit;
+        else keluarReal+=t.kredit;
       }
     });
-    return {masuk:masuk, keluarNonLoan:keluarNonLoan, keluarLoan:keluarLoan};
+    return {masuk:masuk, keluarNonLoan:keluarNonLoan, keluarLoan:keluarLoan, keluarReal:keluarReal};
   }
   function sumRange(from,to){
     var masuk=0, keluar=0;
@@ -866,7 +887,7 @@ function computeCashPeriods(){
     });
     var bf=bankFlows(from,to);
     masuk += bf.masuk - bf.keluarNonLoan;
-    keluar += bf.keluarLoan;
+    keluar += bf.keluarLoan + bf.keluarReal;
     return {masuk:masuk, keluar:keluar};
   }
   // Fixed opening balance carried in Master COA's Saldo Awal, scoped to
@@ -927,7 +948,8 @@ function computeCashPeriods(){
         // every project's rows still add up to the same Uang Masuk/Keluar
         // shown on the KPI cards.
         if(isLoanServiceAkun(t.akunLawan)) bump(key,0,t.kredit);
-        else bump(key,-t.kredit,0);
+        else if(isBankTransferAkun(t.akunLawan)) bump(key,-t.kredit,0);
+        else bump(key,0,t.kredit);
       }
     });
     return order.map(function(k){ return map[k]; });
@@ -1213,8 +1235,8 @@ function masukTxns(from,to){
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Kas Keluar (pengurang, transfer internal Kas-Bank)', amount:-t.kredit, src:'Kas Keluar (pengurang)'});
     } else if(t.jenis==='bank_masuk'){
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Masuk', amount:t.debet, src:'Bank Masuk'});
-    } else if(t.jenis==='bank_keluar' && !isLoanServiceAkun(t.akunLawan)){
-      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Keluar (pengurang, bukan Hutang/Bunga)', amount:-t.kredit, src:'Bank Keluar (pengurang)'});
+    } else if(t.jenis==='bank_keluar' && isBankTransferAkun(t.akunLawan)){
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Keluar (pengurang, transfer internal)', amount:-t.kredit, src:'Bank Keluar (pengurang)'});
     }
   });
   return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
@@ -1227,6 +1249,8 @@ function keluarTxns(from,to){
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Kas Keluar', amount:t.kredit, src:'Kas Keluar'});
     } else if(t.jenis==='bank_keluar' && isLoanServiceAkun(t.akunLawan)){
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Keluar (Hutang/Bunga)', amount:t.kredit, src:'Bank Keluar (Hutang/Bunga)'});
+    } else if(t.jenis==='bank_keluar' && !isBankTransferAkun(t.akunLawan)){
+      list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Keluar', amount:t.kredit, src:'Bank Keluar'});
     }
   });
   return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
@@ -1282,7 +1306,8 @@ function saldoAwalBreakdown(before){
     else if(t.jenis==='bank_masuk') monthly[ym].masuk+=t.debet;
     else if(t.jenis==='bank_keluar'){
       if(isLoanServiceAkun(t.akunLawan)) monthly[ym].keluar+=t.kredit;
-      else monthly[ym].masuk-=t.kredit;
+      else if(isBankTransferAkun(t.akunLawan)) monthly[ym].masuk-=t.kredit;
+      else monthly[ym].keluar+=t.kredit;
     }
   });
   var rows=Object.keys(monthly).sort().map(function(ym){
@@ -4109,10 +4134,11 @@ function registerPages(){
     var monthly={}, alMasuk={}, alKeluar={}, projMasuk={}, projKeluar={};
     // Same Kas-vs-Bank split as computeCashPeriods()'s bankFlows(), so
     // this page's totals match the Dashboard's Posisi Kas exactly: Bank
-    // Masuk always adds to Masuk; Bank Keluar adds to Keluar only when
-    // it's loan principal/interest (isLoanServiceAkun), otherwise it
-    // reduces Masuk instead (money that arrived in a bank account and
-    // left again without ever becoming free/available cash).
+    // Masuk always adds to Masuk; Bank Keluar adds to Keluar for loan
+    // principal/interest (isLoanServiceAkun) and for any real cost
+    // (everything else); only an "Ayat Silang..." internal-transfer
+    // posting (isBankTransferAkun) reduces Masuk instead, since its
+    // Masuk-side leg is already counted elsewhere.
     function bump(bucket, ym, al, pj, v){
       if(bucket==='masuk') totalMasuk+=v; else totalKeluar+=v;
       if(!monthly[ym]) monthly[ym]={masuk:0,keluar:0};
@@ -4128,7 +4154,8 @@ function registerPages(){
         else bump('keluar',ym,al,pj,t.kredit);
       }
       else if(isLoanServiceAkun(t.akunLawan)) bump('keluar',ym,al,pj,t.kredit); // bank_keluar, loan/interest
-      else bump('masuk',ym,al,pj,-t.kredit); // bank_keluar, everything else
+      else if(isBankTransferAkun(t.akunLawan)) bump('masuk',ym,al,pj,-t.kredit); // bank_keluar, internal transfer (Ayat Silang)
+      else bump('keluar',ym,al,pj,t.kredit); // bank_keluar, real cost (Prive, bonus, supplies, ...)
     });
     var saldoAkhir=coaAwal+totalMasuk-totalKeluar;
 
