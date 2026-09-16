@@ -810,6 +810,18 @@ function isBankTransferAkun(nama){
   return akunNamaOnly(nama).indexOf('Ayat Silang')===0;
 }
 
+/* Kas Keluar refs confirmed by the owner to be an inter-project material
+   reallocation ("pindahan bahan" — material already paid for under one
+   project, re-billed to another), not real cash leaving the company —
+   unlike a normal "Biaya Bahan" posting, which is a genuine vendor
+   payment. Still counts toward that project's Biaya Bahan cost (Rincian
+   Progress) since the material really was used there; only excluded from
+   the Uang Keluar cash-flow KPI. Add a ref here only when the owner
+   confirms a specific transaction is this kind of non-cash transfer —
+   never pattern-match on the description text, which is free-form and
+   unreliable. */
+var NON_CASH_KAS_KELUAR_REFS={'CO-2609-0859':true};
+
 /* Master COA's Saldo Awal column is a full trial-balance opening figure —
    every Aktiva/Kewajiban/Ekuitas account (Piutang, Hutang, Biaya Dibayar
    Dimuka, ...) carries one there for the Neraca. The Dashboard's cash-
@@ -890,6 +902,7 @@ function computeCashPeriods(){
         // it reduces Masuk here instead of adding to Keluar — same
         // treatment as a non-loan Bank Keluar just below.
         if(isInternalTransferAkun(t.akunLawan)) masuk-=t.kredit;
+        else if(NON_CASH_KAS_KELUAR_REFS[t.ref]){/* confirmed non-cash — see definition */}
         else keluar+=t.kredit;
       }
     });
