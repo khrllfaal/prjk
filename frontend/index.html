@@ -1218,6 +1218,7 @@ function saldoAkhirTxns(from, to){
     if(t.jenis==='kas_masuk'){
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Kas Masuk', amount:t.debet, src:'Kas Masuk'});
     } else if(t.jenis==='kas_keluar'){
+      if(NON_CASH_KAS_KELUAR_REFS[t.ref]) return; // doesn't touch Kas — see definition
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Kas Keluar', amount:-t.kredit, src:'Kas Keluar'});
     } else if(t.jenis==='bank_masuk'){
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Masuk', amount:t.debet, src:'Bank Masuk'});
@@ -1266,7 +1267,7 @@ function keluarTxns(from,to){
   var list=[];
   DB.txns.forEach(function(t){
     if(t.tgl<from||t.tgl>to) return;
-    if(t.jenis==='kas_keluar' && !isInternalTransferAkun(t.akunLawan)){
+    if(t.jenis==='kas_keluar' && !isInternalTransferAkun(t.akunLawan) && !NON_CASH_KAS_KELUAR_REFS[t.ref]){
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Kas Keluar', amount:t.kredit, src:'Kas Keluar'});
     } else if(t.jenis==='bank_keluar' && isLoanServiceAkun(t.akunLawan)){
       list.push({tgl:t.tgl, ref:t.ref, ket:(t.ket||akunNamaOnly(t.akunLawan))+' — Bank Keluar (Hutang/Bunga)', amount:t.kredit, src:'Bank Keluar (Hutang/Bunga)'});
@@ -1322,6 +1323,7 @@ function saldoAwalBreakdown(before){
     if(t.jenis==='kas_masuk') monthly[ym].masuk+=t.debet;
     else if(t.jenis==='kas_keluar'){
       if(isInternalTransferAkun(t.akunLawan)) monthly[ym].masuk-=t.kredit;
+      else if(NON_CASH_KAS_KELUAR_REFS[t.ref]){/* confirmed non-cash — see definition */}
       else monthly[ym].keluar+=t.kredit;
     }
     else if(t.jenis==='bank_masuk') monthly[ym].masuk+=t.debet;
@@ -2113,7 +2115,17 @@ function allEntries(){
     var base={tgl:t.tgl, ref:t.ref, akunKas:t.akunKas, project:t.project,
       relasi:t.relasi, kategori:t.kategori, ket:t.ket, src:'kas', jenis:t.jenis};
     // leg 1 — the cash / bank account itself
-    out.push(Object.assign({}, base, {akun:kasAkunLabel(t.akunKas), debet:t.debet, kredit:t.kredit, leg:'kas'}));
+    // NON_CASH_KAS_KELUAR_REFS (e.g. an inter-project material reallocation
+    // confirmed by the owner, not a real vendor payment) never touches the
+    // Kas/Bank account's real balance — skip the kas leg entirely so
+    // Neraca's Kas Besar and every other Kas-based total stay correct.
+    // The lawan leg below still posts (the project's cost is real), just
+    // one-sided rather than paired against Kas — same treatment
+    // sumRange() already gives it for the Dashboard's Uang Keluar KPI.
+    var isNonCash=NON_CASH_KAS_KELUAR_REFS[t.ref];
+    if(!isNonCash){
+      out.push(Object.assign({}, base, {akun:kasAkunLabel(t.akunKas), debet:t.debet, kredit:t.kredit, leg:'kas'}));
+    }
     /* leg 2 — the counter account (sign inverted). A handful of source rows have an empty
        "Nama Akun" cell; they are posted to a suspense account instead of being dropped, so the
        ledger still balances and the unclassified amount stays visible in the reports. */
@@ -4366,6 +4378,7 @@ function registerPages(){
       if(t.jenis==='kas_masuk'||t.jenis==='bank_masuk') bump('masuk',ym,al,pj,t.debet);
       else if(t.jenis==='kas_keluar'){
         if(isInternalTransferAkun(t.akunLawan)) bump('masuk',ym,al,pj,-t.kredit); // Ayat Silang Kas Besar Kas-Bank: counterpart already counted as Bank Masuk
+        else if(NON_CASH_KAS_KELUAR_REFS[t.ref]){/* confirmed non-cash — see definition */}
         else bump('keluar',ym,al,pj,t.kredit);
       }
       else if(isLoanServiceAkun(t.akunLawan)) bump('keluar',ym,al,pj,t.kredit); // bank_keluar, loan/interest
