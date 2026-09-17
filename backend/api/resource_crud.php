@@ -13,8 +13,11 @@ require_once __DIR__ . '/helpers.php';
  * $idColumn: primary key column name, default 'id'.
  * $insertOnlyColumns: columns (e.g. created_by) written on first
  * insert but never overwritten by a later upsert-as-update.
+ * $fieldRules: optional per-column validate_field() rules (see
+ * helpers.php) — a column with no rule here is written exactly as
+ * before, unvalidated.
  */
-function handle_resource_crud(string $table, array $columns, string $idColumn = 'id', array $insertOnlyColumns = []): void {
+function handle_resource_crud(string $table, array $columns, string $idColumn = 'id', array $insertOnlyColumns = [], array $fieldRules = []): void {
     // CORS (and the OPTIONS preflight short-circuit) must run before any
     // auth check — a preflight request never carries credentials, so
     // require_login() would 401 it before the browser ever got to see
@@ -33,7 +36,7 @@ function handle_resource_crud(string $table, array $columns, string $idColumn = 
         $body = read_json_body();
         $data = [];
         foreach ($columns as $col) {
-            if (array_key_exists($col, $body)) $data[$col] = $body[$col];
+            if (array_key_exists($col, $body)) $data[$col] = validate_field($col, $body[$col], $fieldRules);
         }
         if (empty($data[$idColumn])) json_error('id wajib diisi', 422);
 

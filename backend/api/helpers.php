@@ -131,6 +131,55 @@ function require_login(): array {
     return $u;
 }
 
+/**
+ * Lightweight server-side validation for handle_resource_crud()'s POST
+ * body, keyed by column name. Runs BEFORE the value ever reaches SQL —
+ * every existing query already used prepared statements so this was
+ * never an injection risk, but nothing previously stopped a buggy or
+ * compromised client from sending a non-numeric `debet`, an
+ * out-of-range `jenis`, or a string longer than the column, silently
+ * corrupting a report instead of failing loudly. Rules are optional
+ * per column (no rule = no check, so undeclared columns still pass
+ * through unchanged) and deliberately don't force any field to be
+ * non-empty beyond what the schema itself already requires — an
+ * existing legitimate blank akun_lawan/project/relasi etc. must keep
+ * working exactly as before.
+ *
+ * Rule shape: ['type' => 'string'|'number'|'date', 'max' => int,
+ * 'enum' => [...], 'required' => bool]. Called once per field with the
+ * raw incoming value; returns the (possibly type-coerced) value to
+ * store, or calls json_error() and exits on a real violation.
+ */
+function validate_field(string $col, $value, array $rules): mixed {
+    if (!isset($rules[$col])) return $value;
+    $rule = $rules[$col];
+    if ($value === null || $value === '') {
+        if (!empty($rule['required']) && $value === null) json_error("$col wajib diisi", 422);
+        return $value;
+    }
+    switch ($rule['type'] ?? 'string') {
+        case 'number':
+            if (!is_numeric($value)) json_error("$col harus berupa angka", 422);
+            return $value + 0;
+        case 'date':
+            if (!is_string($value) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+                json_error("$col harus format tanggal YYYY-MM-DD", 422);
+            }
+            return $value;
+        case 'string':
+        default:
+            if (!is_string($value) && !is_numeric($value)) json_error("$col harus berupa teks", 422);
+            $value = (string)$value;
+            if (isset($rule['max']) && mb_strlen($value) > $rule['max']) {
+                json_error("$col terlalu panjang (maksimal {$rule['max']} karakter)", 422);
+            }
+            if (isset($rule['enum']) && !in_array($value, $rule['enum'], true)) {
+                json_error("$col tidak valid: $value", 422);
+            }
+            return $value;
+    }
+}
+
 function audit(string $action, string $entity, string $entityId, string $detail = ''): void {
     $u = current_user();
     $stmt = db()->prepare(

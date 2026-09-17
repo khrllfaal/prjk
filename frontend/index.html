@@ -1469,10 +1469,49 @@ function tryLoadCachedDB(){
 function loadDB(){
   return tryLoadCachedDB() || seedDB();
 }
+// Bumped on every saveDB() (the one place all mutation paths funnel
+// through, both local edits and server-refreshed data) so the memoized
+// report functions below know to recompute. Never reset/decremented —
+// just needs to change, not carry any other meaning.
+var _dbVersion = 0;
 function saveDB(){
+  _dbVersion++;
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }
   catch(e){ toast('Gagal menyimpan ke browser (storage penuh). Perubahan hanya berlaku di sesi ini.','danger'); }
 }
+// Wraps an expensive, pure (DB-in, value-out) report function so it only
+// recomputes when DB has actually changed since its last call with the
+// same arguments — allEntries()/computeCashPeriods()/
+// computeProjectProgressRows() each rescan the full transaction list, and
+// get called several times per page render, so this avoids redoing that
+// same scan over and over for a page that hasn't touched the database at
+// all. The whole per-function cache is thrown away on any saveDB() (safe
+// by construction, never returns stale data across a real change).
+// cloneFn defaults to identity (safe for a fresh object/array every
+// call anyway); pass one when the cached value is an array of row
+// objects some caller mutates in place (e.g. Buku Besar's r._saldo=run)
+// — a shallow per-row clone on every call keeps that mutation local to
+// the caller instead of leaking into the next unrelated read of the
+// same cached result.
+function memoizeOnDb(fn, cloneFn){
+  var cache={}, cachedVersion=-1;
+  return function(){
+    if(cachedVersion!==_dbVersion){ cache={}; cachedVersion=_dbVersion; }
+    var key=Array.prototype.join.call(arguments,'');
+    if(!(key in cache)) cache[key]=fn.apply(this,arguments);
+    return cloneFn ? cloneFn(cache[key]) : cache[key];
+  };
+}
+function cloneRowArray(arr){ return arr.map(function(o){ return Object.assign({}, o); }); }
+// computeProjectProgressRows/computeCashPeriods/allEntries are all
+// function DECLARATIONS (hoisted), so it's safe to wrap them here even
+// though their own definitions appear elsewhere in this file — by the
+// time any of this script runs, all three already exist.
+computeProjectProgressRows = memoizeOnDb(computeProjectProgressRows, cloneRowArray);
+computeCashPeriods = memoizeOnDb(computeCashPeriods, function(v){
+  return {list: cloneRowArray(v.list), defaultId: v.defaultId};
+});
+allEntries = memoizeOnDb(allEntries, cloneRowArray);
 function resetDB(){
   try{ localStorage.removeItem(STORE_KEY); }catch(e){}
   DB=seedDB(); saveDB();

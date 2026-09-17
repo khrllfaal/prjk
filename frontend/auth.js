@@ -69,10 +69,22 @@ async function bootAfterLogin(profile){
   if(cached){
     DB=cached;
     enterApp();
-    fetchAllData().then(function(fresh){
+    fetchAllData().then(async function(fresh){
+      // Retry any edit that failed to reach the server earlier (e.g. a
+      // previous InfinityFree hiccup) BEFORE this fresh copy replaces
+      // DB — otherwise a still-local-only edit would just get silently
+      // discarded the moment the server's older data lands. Whatever
+      // still can't be pushed (still offline, still rejected) gets
+      // re-applied on top of the fresh data instead, so it stays
+      // visible rather than vanishing.
+      var stillPending = await flushPendingSync();
+      if(stillPending.length) fresh = reapplyPendingToDb(fresh);
       DB=fresh; saveDB();
       var modalOpen=document.getElementById('modalBack').classList.contains('on');
       if(!modalOpen) go(CURRENT);
+      if(stillPending.length){
+        toast(stillPending.length+' perubahan masih belum tersinkron ke server — akan dicoba lagi otomatis.', 'danger');
+      }
     }).catch(function(e){
       console.error('background refresh failed, keeping cached data', e);
       toast('Tidak bisa memperbarui data dari server — menampilkan data terakhir yang tersimpan.', 'danger');
@@ -82,8 +94,13 @@ async function bootAfterLogin(profile){
 
   showBootLoading('Memuat data…');
   try{
-    DB = await fetchAllData();
+    var fresh = await fetchAllData();
+    var stillPending = await flushPendingSync();
+    DB = stillPending.length ? reapplyPendingToDb(fresh) : fresh;
     saveDB(); // keep a local cache so a flaky connection later still shows last-known data
+    if(stillPending.length){
+      toast(stillPending.length+' perubahan masih belum tersinkron ke server — akan dicoba lagi otomatis.', 'danger');
+    }
   }catch(e){
     console.error('fetchAllData failed, falling back to local cache', e);
     DB = loadDB();

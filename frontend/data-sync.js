@@ -98,6 +98,90 @@ async function fetchAllData(){
   };
 }
 
+/* ---- Pending-sync queue ----
+   A syncUpsert/syncDelete failure (server down, InfinityFree hiccup,
+   offline) used to just toast and stop — the edit stayed correct in
+   this tab's live DB and in localStorage, but nothing retried it, and
+   the NEXT login/reload's background fetchAllData() would silently
+   overwrite DB with the server's (still-old) copy, quietly discarding
+   that edit with no further warning. This queue closes that gap: every
+   failed write is recorded here (keyed by table+id, so only the latest
+   attempt for a given row survives), auth.js retries the whole queue
+   before ever letting a fresh server fetch replace DB, and anything
+   that still can't reach the server gets re-applied on top of that
+   fresh data instead of being dropped. */
+var PENDING_SYNC_KEY = 'prks_pending_sync_v1';
+var DB_ARRAY_FOR_TABLE = {customers:'customers', vendors:'vendors', projects:'projects',
+  coa:'coa', transactions:'txns', jurnal_umum:'jurnal'};
+
+function loadPendingSync(){
+  try{ return JSON.parse(localStorage.getItem(PENDING_SYNC_KEY))||[]; }catch(e){ return []; }
+}
+function savePendingSync(list){
+  try{ localStorage.setItem(PENDING_SYNC_KEY, JSON.stringify(list)); }catch(e){}
+}
+function queuePendingSync(entry){
+  var list = loadPendingSync().filter(function(p){
+    return !(p.table===entry.table && p.id===entry.id); // keep only the latest op per row
+  });
+  list.push(entry);
+  savePendingSync(list);
+}
+function pendingSyncCount(){ return loadPendingSync().length; }
+
+/* Retries every queued write against the server, in order. Entries that
+   succeed are dropped from the queue; entries that still fail stay in
+   it (nothing is ever silently lost — worst case it just keeps retrying
+   on the next boot). Returns the list of entries still pending after
+   the attempt, so the caller can re-apply them locally. */
+async function flushPendingSync(){
+  var list = loadPendingSync();
+  if(!list.length) return [];
+  var stillPending=[];
+  for(var i=0;i<list.length;i++){
+    var p=list[i];
+    try{
+      if(p.action==='upsert'){
+        var row = TABLE_MAP[p.table].to(p.obj);
+        await apiFetch(MYSQL_ENDPOINT[p.table], {method:'POST', body:JSON.stringify(row)});
+      }else if(p.action==='delete'){
+        await apiFetch(MYSQL_ENDPOINT[p.table]+'?id='+encodeURIComponent(p.id), {method:'DELETE'});
+      }else if(p.action==='hutangOverride'){
+        await apiFetch('/hutang_overrides.php', {method:'POST',
+          body:JSON.stringify({nota_id:p.id, paid:p.obj.paid, status:p.obj.status})});
+      }else if(p.action==='hutangOverrideDelete'){
+        await apiFetch('/hutang_overrides.php?id='+encodeURIComponent(p.id), {method:'DELETE'});
+      }
+    }catch(e){
+      stillPending.push(p);
+    }
+  }
+  savePendingSync(stillPending);
+  return stillPending;
+}
+
+/* Re-applies whatever is still stuck in the queue on top of a freshly
+   fetched DB, so a write the server still won't accept (rather than
+   just "not yet retried") stays visible locally instead of vanishing
+   the moment fresh server data replaces DB. */
+function reapplyPendingToDb(db){
+  loadPendingSync().forEach(function(p){
+    if(p.action==='hutangOverride'){ db.hutangOverrides[p.id]={paid:p.obj.paid, status:p.obj.status}; return; }
+    if(p.action==='hutangOverrideDelete'){ delete db.hutangOverrides[p.id]; return; }
+    var arrName = DB_ARRAY_FOR_TABLE[p.table];
+    if(!arrName || !db[arrName]) return;
+    var arr = db[arrName];
+    if(p.action==='upsert'){
+      var idx = arr.findIndex(function(x){ return x.id===p.obj.id; });
+      if(idx>=0) arr[idx]=p.obj; else arr.push(p.obj);
+    }else if(p.action==='delete'){
+      var idx2 = arr.findIndex(function(x){ return x.id===p.id; });
+      if(idx2>=0) arr.splice(idx2,1);
+    }
+  });
+  return db;
+}
+
 /* Called right alongside the existing saveDB() at every mutation site.
    Table name is one of: customers, vendors, projects, coa, transactions,
    jurnal_umum. */
@@ -109,7 +193,8 @@ async function syncUpsert(table, obj){
     await apiFetch(MYSQL_ENDPOINT[table], {method:'POST', body:JSON.stringify(row)});
   }catch(e){
     console.error('syncUpsert failed', table, e);
-    toast('Gagal menyimpan ke server: '+(e.message||e)+'. Perubahan tersimpan lokal saja.', 'danger');
+    queuePendingSync({table:table, id:obj.id, action:'upsert', obj:obj});
+    toast('Gagal menyimpan ke server: '+(e.message||e)+'. Perubahan tersimpan lokal, akan dicoba lagi otomatis.', 'danger');
   }
 }
 async function syncDelete(table, id){
@@ -118,7 +203,8 @@ async function syncDelete(table, id){
     await apiFetch(MYSQL_ENDPOINT[table]+'?id='+encodeURIComponent(id), {method:'DELETE'});
   }catch(e){
     console.error('syncDelete failed', table, e);
-    toast('Gagal menghapus di server: '+(e.message||e)+'. Perubahan tersimpan lokal saja.', 'danger');
+    queuePendingSync({table:table, id:id, action:'delete'});
+    toast('Gagal menghapus di server: '+(e.message||e)+'. Perubahan tersimpan lokal, akan dicoba lagi otomatis.', 'danger');
   }
 }
 
@@ -131,7 +217,8 @@ async function syncHutangOverride(notaId, paid, status){
       body:JSON.stringify({nota_id:notaId, paid:paid, status:status})});
   }catch(e){
     console.error('syncHutangOverride failed', e);
-    toast('Gagal menyimpan status hutang ke server: '+(e.message||e)+'. Perubahan tersimpan lokal saja.', 'danger');
+    queuePendingSync({table:'hutangOverride', id:notaId, action:'hutangOverride', obj:{paid:paid, status:status}});
+    toast('Gagal menyimpan status hutang ke server: '+(e.message||e)+'. Perubahan tersimpan lokal, akan dicoba lagi otomatis.', 'danger');
   }
 }
 async function syncHutangOverrideDelete(notaId){
@@ -140,5 +227,6 @@ async function syncHutangOverrideDelete(notaId){
     await apiFetch('/hutang_overrides.php?id='+encodeURIComponent(notaId), {method:'DELETE'});
   }catch(e){
     console.error('syncHutangOverrideDelete failed', e);
+    queuePendingSync({table:'hutangOverride', id:notaId, action:'hutangOverrideDelete'});
   }
 }

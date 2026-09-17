@@ -7,4 +7,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     read_json_body(array_merge(read_json_body(), ['updated_by' => $u['id']]));
 }
 
-handle_resource_crud('hutang_overrides', ['nota_id', 'paid', 'status', 'updated_by'], 'nota_id');
+handle_resource_crud('hutang_overrides', ['nota_id', 'paid', 'status', 'updated_by'], 'nota_id', [], [
+    'nota_id' => ['type' => 'string', 'max' => 40, 'required' => true],
+    'paid' => ['type' => 'number'],
+    'status' => ['type' => 'string', 'enum' => ['BELUM_BAYAR', 'SEBAGIAN', 'LUNAS']],
+]);
