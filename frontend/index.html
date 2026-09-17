@@ -839,6 +839,78 @@ function dashboardOpeningBalance(){
   }).reduce(function(a,c){ return a+(c.saldoAwal||0); },0);
 }
 
+function isKasMasuk(t){ return t.jenis==='kas_masuk'; }
+function isKasKeluar(t){ return t.jenis==='kas_keluar'; }
+// Bank Masuk/Keluar folds into Posisi Kas the same way the reference
+// Dashboard Cash Flow does — verified against it transaction-by-
+// transaction (see conversation), not just approximated:
+//  - Bank Keluar whose akun lawan is loan principal/interest
+//    (isLoanServiceAkun) counts straight as Uang Keluar — real cash
+//    leaving for debt service.
+//  - Bank Keluar posted to an "Ayat Silang..." account
+//    (isBankTransferAkun) reduces Uang Masuk instead of adding to
+//    Uang Keluar: it's an internal transfer whose Masuk-side leg
+//    (Kas Masuk or Bank Masuk, same amount) already counts as Masuk
+//    elsewhere, so only the net that's actually left over counts.
+//  - Every OTHER Bank Keluar (a real cost — Prive, bonus, supplies,
+//    any COA expense account) is a genuine cash outflow with no
+//    paired Masuk anywhere, so it counts straight as Uang Keluar,
+//    same as a Kas Keluar would.
+// The Ayat Silang split only changes how the SAME net flow is
+// labelled Masuk vs Keluar — Saldo Akhir is unaffected either way
+// (see saldoAwal below, which folds all Bank Masuk/Keluar in
+// unconditionally for exactly that reason).
+function bankFlows(from,to){
+  var masuk=0, keluarNonLoan=0, keluarLoan=0, keluarReal=0;
+  DB.txns.forEach(function(t){
+    if(t.tgl<from||t.tgl>to) return;
+    if(t.jenis==='bank_masuk') masuk+=t.debet;
+    else if(t.jenis==='bank_keluar'){
+      if(isLoanServiceAkun(t.akunLawan)) keluarLoan+=t.kredit;
+      else if(isBankTransferAkun(t.akunLawan)) keluarNonLoan+=t.kredit;
+      else keluarReal+=t.kredit;
+    }
+  });
+  return {masuk:masuk, keluarNonLoan:keluarNonLoan, keluarLoan:keluarLoan, keluarReal:keluarReal};
+}
+function sumRange(from,to){
+  var masuk=0, keluar=0;
+  DB.txns.forEach(function(t){
+    if(t.tgl<from||t.tgl>to) return;
+    if(isKasMasuk(t)) masuk+=t.debet;
+    else if(isKasKeluar(t)){
+      // Ayat Silang Kas Besar Kas-Bank: this leg's counterpart already
+      // counts as Uang Masuk via Bank Masuk (see bankFlows below), so
+      // it reduces Masuk here instead of adding to Keluar — same
+      // treatment as a non-loan Bank Keluar just below.
+      if(isInternalTransferAkun(t.akunLawan)) masuk-=t.kredit;
+      else if(NON_CASH_KAS_KELUAR_REFS[t.ref]){/* confirmed non-cash — see definition */}
+      else keluar+=t.kredit;
+    }
+  });
+  var bf=bankFlows(from,to);
+  masuk += bf.masuk - bf.keluarNonLoan;
+  keluar += bf.keluarLoan + bf.keluarReal;
+  return {masuk:masuk, keluar:keluar};
+}
+// Fixed opening balance carried in Master COA's Saldo Awal, scoped to
+// the 4 accounts dashboardOpeningBalance() covers — what was already
+// in hand before this ledger's tracked kas transactions began. Baked
+// into every period's running balance (not just "Semua") so "Minggu
+// Ini"/"1 Minggu Lalu"/a custom Cash Flow range all reconcile exactly
+// with "Semua" once their date range covers the same underlying
+// transaction history.
+function saldoAwal(before){
+  var s=dashboardOpeningBalance();
+  DB.txns.forEach(function(t){
+    if(t.tgl>=before) return;
+    if(isKasMasuk(t)) s+=t.debet;
+    else if(isKasKeluar(t) && !NON_CASH_KAS_KELUAR_REFS[t.ref]) s-=t.kredit;
+    else if(t.jenis==='bank_masuk') s+=t.debet;
+    else if(t.jenis==='bank_keluar') s-=t.kredit;
+  });
+  return s;
+}
 /* Weekly + all-time cash position for the Dashboard's "Posisi Kas — Per
    Periode" widget, computed live from DB.txns. Weeks run Friday-Thursday
    (how this company counts a week), anchored to today's real date.
@@ -856,78 +928,6 @@ function computeCashPeriods(){
     var d=new Date(iso+'T00:00:00');
     var dow=(d.getDay()+2)%7; // 0=Fri..6=Thu
     return addDays(iso,-dow);
-  }
-  function isKasMasuk(t){ return t.jenis==='kas_masuk'; }
-  function isKasKeluar(t){ return t.jenis==='kas_keluar'; }
-  // Bank Masuk/Keluar folds into Posisi Kas the same way the reference
-  // Dashboard Cash Flow does — verified against it transaction-by-
-  // transaction (see conversation), not just approximated:
-  //  - Bank Keluar whose akun lawan is loan principal/interest
-  //    (isLoanServiceAkun) counts straight as Uang Keluar — real cash
-  //    leaving for debt service.
-  //  - Bank Keluar posted to an "Ayat Silang..." account
-  //    (isBankTransferAkun) reduces Uang Masuk instead of adding to
-  //    Uang Keluar: it's an internal transfer whose Masuk-side leg
-  //    (Kas Masuk or Bank Masuk, same amount) already counts as Masuk
-  //    elsewhere, so only the net that's actually left over counts.
-  //  - Every OTHER Bank Keluar (a real cost — Prive, bonus, supplies,
-  //    any COA expense account) is a genuine cash outflow with no
-  //    paired Masuk anywhere, so it counts straight as Uang Keluar,
-  //    same as a Kas Keluar would.
-  // The Ayat Silang split only changes how the SAME net flow is
-  // labelled Masuk vs Keluar — Saldo Akhir is unaffected either way
-  // (see saldoAwal below, which folds all Bank Masuk/Keluar in
-  // unconditionally for exactly that reason).
-  function bankFlows(from,to){
-    var masuk=0, keluarNonLoan=0, keluarLoan=0, keluarReal=0;
-    DB.txns.forEach(function(t){
-      if(t.tgl<from||t.tgl>to) return;
-      if(t.jenis==='bank_masuk') masuk+=t.debet;
-      else if(t.jenis==='bank_keluar'){
-        if(isLoanServiceAkun(t.akunLawan)) keluarLoan+=t.kredit;
-        else if(isBankTransferAkun(t.akunLawan)) keluarNonLoan+=t.kredit;
-        else keluarReal+=t.kredit;
-      }
-    });
-    return {masuk:masuk, keluarNonLoan:keluarNonLoan, keluarLoan:keluarLoan, keluarReal:keluarReal};
-  }
-  function sumRange(from,to){
-    var masuk=0, keluar=0;
-    DB.txns.forEach(function(t){
-      if(t.tgl<from||t.tgl>to) return;
-      if(isKasMasuk(t)) masuk+=t.debet;
-      else if(isKasKeluar(t)){
-        // Ayat Silang Kas Besar Kas-Bank: this leg's counterpart already
-        // counts as Uang Masuk via Bank Masuk (see bankFlows below), so
-        // it reduces Masuk here instead of adding to Keluar — same
-        // treatment as a non-loan Bank Keluar just below.
-        if(isInternalTransferAkun(t.akunLawan)) masuk-=t.kredit;
-        else if(NON_CASH_KAS_KELUAR_REFS[t.ref]){/* confirmed non-cash — see definition */}
-        else keluar+=t.kredit;
-      }
-    });
-    var bf=bankFlows(from,to);
-    masuk += bf.masuk - bf.keluarNonLoan;
-    keluar += bf.keluarLoan + bf.keluarReal;
-    return {masuk:masuk, keluar:keluar};
-  }
-  // Fixed opening balance carried in Master COA's Saldo Awal, scoped to
-  // the 4 accounts dashboardOpeningBalance() covers — what was already
-  // in hand before this ledger's tracked kas transactions began. Baked
-  // into every period's running balance (not just "Semua") so "Minggu
-  // Ini"/"1 Minggu Lalu" reconcile exactly with "Semua" once their date
-  // range covers the same underlying transaction history.
-  var coaAwal=dashboardOpeningBalance();
-  function saldoAwal(before){
-    var s=coaAwal;
-    DB.txns.forEach(function(t){
-      if(t.tgl>=before) return;
-      if(isKasMasuk(t)) s+=t.debet;
-      else if(isKasKeluar(t) && !NON_CASH_KAS_KELUAR_REFS[t.ref]) s-=t.kredit;
-      else if(t.jenis==='bank_masuk') s+=t.debet;
-      else if(t.jenis==='bank_keluar') s-=t.kredit;
-    });
-    return s;
   }
   function komposisi(from,to){
     var map={}, order=[];
@@ -4241,17 +4241,25 @@ function registerPages(){
 
   /* ---------------- CASH FLOW ---------------- */
   PAGES.cashflow=function(c){
-    c.innerHTML = pageHead('Laporan Cash Flow','Rincian kas masuk dan kas keluar per akun lawan',
+    // Defaults to the current month (bulan berjalan) so "Saldo Sebelum
+    // Periode" / "Net Cash Flow" / "Saldo Akhir" below are meaningful out
+    // of the box — same running-balance engine as Dashboard's Posisi Kas
+    // (saldoAwal/sumRange), just on a picked date range instead of a
+    // fixed weekly bucket, since this menu is its own report, not tied
+    // to Dashboard's periods.
+    var defFrom=todayISO().slice(0,7)+'-01', defTo=todayISO();
+    c.innerHTML = pageHead('Laporan Cash Flow','Ringkasan arus kas periode berjalan, dirinci per akun lawan',
       '<button class="btn btn-success btn-sm" id="cfExcel">▤ Excel</button>'+
       '<button class="btn btn-danger btn-sm" id="cfPdf">▤ PDF</button>')+
       '<div class="filterbar">'+
-        '<div class="field"><label>Tanggal Awal</label><input type="date" id="fFrom"></div>'+
-        '<div class="field"><label>Tanggal Akhir</label><input type="date" id="fTo"></div>'+
+        '<div class="field"><label>Tanggal Awal</label><input type="date" id="fFrom" value="'+esc(defFrom)+'"></div>'+
+        '<div class="field"><label>Tanggal Akhir</label><input type="date" id="fTo" value="'+esc(defTo)+'"></div>'+
         '<div class="field grow"><label>Project</label>'+
           '<div id="fProject_ssel"></div><input type="hidden" id="fProject" value=""></div>'+
         '<button class="btn btn-steel" id="btnFilter">Terapkan Filter</button>'+
-        '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
+        '<button class="btn btn-ghost" id="btnReset">Reset ke Bulan Ini</button>'+
       '</div>'+
+      '<div class="kpi-grid" id="cfSummary" style="margin-bottom:14px;"></div>'+
       '<div id="cfBody"></div>';
 
     function groupByAkun(list, jenis){
@@ -4281,9 +4289,9 @@ function registerPages(){
         '</div></div>';
     }
 
-    var lastByJenis={}, lastFrom='', lastTo='', lastProj='';
+    var lastByJenis={}, lastFrom='', lastTo='', lastProj='', lastSummary=null;
     function refresh(){
-      var from=fv('fFrom'), to=fv('fTo'), proj=fv('fProject');
+      var from=fv('fFrom')||defFrom, to=fv('fTo')||defTo, proj=fv('fProject');
       lastFrom=from; lastTo=to; lastProj=proj;
       var list=DB.txns.filter(function(t){
         if(!inRange(t.tgl,from,to)) return false;
@@ -4297,6 +4305,20 @@ function registerPages(){
       function sum(rows){ return rows.reduce(function(a,b){ return a+b.amount; },0); }
       var kasNet=sum(lastByJenis.kas_masuk)-sum(lastByJenis.kas_keluar);
       var bankNet=sum(lastByJenis.bank_masuk)-sum(lastByJenis.bank_keluar);
+
+      // Ringkasan Periode — same saldoAwal()/sumRange() engine as
+      // Dashboard's Posisi Kas, so this menu's own numbers always
+      // reconcile with it. Always company-wide (ignores the Project
+      // filter above, which only scopes the per-akun-lawan sections
+      // below) since Saldo Kas/Bank isn't a per-project concept.
+      var rSum=sumRange(from,to), awal=saldoAwal(from), net=rSum.masuk-rSum.keluar, akhir=awal+net;
+      lastSummary={awal:awal, masuk:rSum.masuk, keluar:rSum.keluar, net:net, akhir:akhir};
+      document.getElementById('cfSummary').innerHTML=
+        kpiCard('Saldo Sebelum Periode', rp(awal), 'Sebelum '+fmtDate(from),'accent')+
+        kpiCard('Uang Masuk', rp(rSum.masuk), 'Kas + Bank periode ini','safe')+
+        kpiCard('Uang Keluar', rp(rSum.keluar), 'Kas + Bank periode ini','accent')+
+        kpiCard('Net Cash Flow', numSigned(net), net<0?'Defisit periode ini':'Surplus periode ini', net<0?'danger':'safe')+
+        kpiCard('Saldo Akhir', rp(akhir), fmtDate(from)+' s/d '+fmtDate(to), akhir<0?'danger':'safe');
 
       document.getElementById('cfBody').innerHTML=
         sectionHTML('KAS MASUK','cf-in',lastByJenis.kas_masuk,'Total Kas Masuk','kas_masuk')+
@@ -4327,10 +4349,20 @@ function registerPages(){
     document.getElementById('btnFilter').onclick=refresh;
     document.getElementById('btnReset').onclick=function(){
       clearFilterFields(['fFrom','fTo','fProject']);
+      document.getElementById('fFrom').value=defFrom;
+      document.getElementById('fTo').value=defTo;
       refresh();
     };
     function cashFlowRows(){
       var rows=[];
+      if(lastSummary){
+        rows.push(['RINGKASAN PERIODE ('+fmtDate(lastFrom)+' s/d '+fmtDate(lastTo)+')',null]);
+        rows.push(['Saldo Sebelum Periode', lastSummary.awal]);
+        rows.push(['Uang Masuk', lastSummary.masuk]);
+        rows.push(['Uang Keluar', lastSummary.keluar]);
+        rows.push(['Net Cash Flow', lastSummary.net]);
+        rows.push(['Saldo Akhir', lastSummary.akhir]);
+      }
       [['KAS MASUK','kas_masuk','Total Kas Masuk'],['KAS KELUAR','kas_keluar','Total Kas Keluar'],
        ['BANK MASUK','bank_masuk','Total Bank Masuk'],['BANK KELUAR','bank_keluar','Total Bank Keluar']]
       .forEach(function(sec){
