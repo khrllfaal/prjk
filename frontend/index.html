@@ -3405,19 +3405,36 @@ function registerPages(){
             '<div class="search-box"><span class="ic">⌕</span><input type="text" id="q" placeholder="Cari…"></div>'+
             '<span class="result-count" id="cnt"></span></div><div id="tbl"></div></div>';
 
+        // Klik nama ATAU total -> rincian transaksi yang membentuk baris
+        // itu (seluruh riwayat untuk relasi ini, tidak dibatasi filter
+        // tanggal di atas — lebih berguna untuk "kenapa angkanya segini"
+        // daripada cuma bagian mutasi periode berjalan).
+        function drilldownFor(key){
+          var list=ent.filter(function(e){ return (e.relasi||'(Tanpa Relasi)')===key; })
+            .map(function(e){ return {tgl:e.tgl, ref:e.ref, ket:(e.ket||'')+(e.project?' — '+e.project:''), amount:cfg.sign(e)}; })
+            .sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+          showTxnDrilldown(key, 'Rincian transaksi — '+cfg.title, list);
+        }
         tbl=DataTable('tbl',[
           {key:'_no',label:'No',sort:false,render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
-          {key:'nama',label:cfg.colName,render:function(r){ return '<b>'+esc(r.nama)+'</b>'; }},
+          {key:'nama',label:cfg.colName,render:function(r){
+            return '<button type="button" class="linklike" data-rel-drill="'+esc(r.nama)+'"><b>'+esc(r.nama)+'</b></button>'; }},
           {key:'awal',label:'Saldo Awal',num:true,render:function(r){ return numSigned(r.awal); },
            foot:function(l){ return '<b>'+numSigned(l.reduce(function(a,b){return a+b.awal;},0))+'</b>'; }},
           {key:'mutasi',label:'Mutasi',num:true,render:function(r){ return numSigned(r.mutasi); },
            foot:function(l){ return '<b>'+numSigned(l.reduce(function(a,b){return a+b.mutasi;},0))+'</b>'; }},
           {key:'total',label:'Total',num:true,render:function(r){
-            return '<b class="'+(r.total<0?'neg':'')+'">'+numSigned(r.total)+'</b>'; },
+            return '<button type="button" class="linklike" data-rel-drill="'+esc(r.nama)+'">'+
+              '<b class="'+(r.total<0?'neg':'')+'">'+numSigned(r.total)+'</b></button>'; },
            foot:function(l){ return '<b>'+numSigned(l.reduce(function(a,b){return a+b.total;},0))+'</b>'; }}
         ], rows, {defaultSort:'total',defaultDir:'desc',perPage:100,showFoot:true,countId:'cnt',
           searchFn:function(r){ return r.nama; },
-          emptyText:'Tidak ada saldo pada rentang ini.'});
+          emptyText:'Tidak ada saldo pada rentang ini.',
+          onRender:function(){
+            document.querySelectorAll('#tbl [data-rel-drill]').forEach(function(b){
+              b.onclick=function(){ drilldownFor(b.getAttribute('data-rel-drill')); };
+            });
+          }});
         bindSearch('q',tbl);
       }
       refresh();
