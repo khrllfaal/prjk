@@ -4241,59 +4241,131 @@ function registerPages(){
 
   /* ---------------- CASH FLOW ---------------- */
   PAGES.cashflow=function(c){
-    // Minimal by design: just the 3 headline figures (Saldo Sebelum
-    // Periode / Net Cash Flow / Saldo Akhir), same as the reference
-    // system's own Cash Flow menu — no per-akun-lawan breakdown (that
-    // detail already lives in Data Kas Masuk/Keluar/Bank Masuk/Keluar
-    // and Laporan Analisa Pengeluaran). Defaults to the current month.
-    // Uses the same saldoAwal()/sumRange() engine as Dashboard's Posisi
-    // Kas so the two menus always reconcile — this page just adds a
-    // free date-range picker instead of Dashboard's fixed weekly bucket.
-    var defFrom=todayISO().slice(0,7)+'-01', defTo=todayISO();
-    c.innerHTML = pageHead('Laporan Cash Flow','Saldo sebelum periode, arus kas bersih, dan saldo akhir kas + bank',
+    // Rincian kas/bank per akun lawan (seperti sistem asli), lalu 3 baris
+    // ringkasan di PALING BAWAH (bukan kartu KPI di atas) -- Saldo
+    // Sebelum Periode / Net Cash Flow / Saldo Akhir, dihitung pakai mesin
+    // yang sama dengan Posisi Kas Dashboard (saldoAwal/sumRange) supaya
+    // kedua menu selalu konsisten. Default ke bulan berjalan penuh
+    // (tanggal 1 s/d akhir bulan), sama seperti sistem asli.
+    var today=todayISO();
+    var defFrom=today.slice(0,7)+'-01';
+    var lastDayOfMonth=new Date(Number(today.slice(0,4)), Number(today.slice(5,7)), 0).getDate();
+    var defTo=today.slice(0,7)+'-'+String(lastDayOfMonth).padStart(2,'0');
+
+    c.innerHTML = pageHead('Laporan Cash Flow','Rincian kas masuk dan kas keluar per akun lawan',
       '<button class="btn btn-success btn-sm" id="cfExcel">▤ Excel</button>'+
       '<button class="btn btn-danger btn-sm" id="cfPdf">▤ PDF</button>')+
       '<div class="filterbar">'+
         '<div class="field"><label>Tanggal Awal</label><input type="date" id="fFrom" value="'+esc(defFrom)+'"></div>'+
         '<div class="field"><label>Tanggal Akhir</label><input type="date" id="fTo" value="'+esc(defTo)+'"></div>'+
+        '<div class="field grow"><label>Project</label>'+
+          '<div id="fProject_ssel"></div><input type="hidden" id="fProject" value=""></div>'+
         '<button class="btn btn-steel" id="btnFilter">Terapkan Filter</button>'+
-        '<button class="btn btn-ghost" id="btnReset">Reset ke Bulan Ini</button>'+
+        '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
       '</div>'+
-      '<div class="kpi-grid" id="cfSummary"></div>';
+      '<div id="cfBody"></div>';
 
-    var lastFrom='', lastTo='', lastSummary=null;
+    function groupByAkun(list, jenis){
+      var isIn=/masuk$/.test(jenis);
+      var map={}, order=[];
+      list.forEach(function(t){
+        if(t.jenis!==jenis) return;
+        if(jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]) return;
+        var label=akunNamaOnly(t.akunLawan);
+        if(!map[label]){ map[label]={label:label, akunLawan:t.akunLawan, amount:0}; order.push(label); }
+        map[label].amount += isIn?t.debet:t.kredit;
+      });
+      return order.map(function(k){ return map[k]; }).sort(function(a,b){ return b.amount-a.amount; });
+    }
+
+    function sectionHTML(title, barClass, rows, totalLabel, kind){
+      var total=rows.reduce(function(a,b){ return a+b.amount; },0);
+      return '<div class="cf-section">'+
+        '<div class="cf-bar '+barClass+'">'+esc(title)+'</div>'+
+        '<div class="cf-table">'+
+        (rows.length?rows.map(function(r,i){
+          return '<div class="cf-row'+(i%2?' alt':'')+'">'+
+            '<button type="button" class="linklike" data-cf-akun="'+esc(r.akunLawan)+'" data-cf-kind="'+kind+'">'+esc(r.label)+'</button>'+
+            '<span class="cf-amt">'+num0(r.amount)+'</span></div>';
+        }).join(''):'<div class="cf-row"><span class="faint-italic">Tidak ada transaksi pada periode ini.</span></div>')+
+        '<div class="cf-row cf-total"><b>'+esc(totalLabel)+'</b><b>'+num0(total)+'</b></div>'+
+        '</div></div>';
+    }
+
+    var lastFrom='', lastTo='', lastProj='', lastByJenis={}, lastSummary=null;
     function refresh(){
-      var from=fv('fFrom')||defFrom, to=fv('fTo')||defTo;
-      lastFrom=from; lastTo=to;
+      var from=fv('fFrom')||defFrom, to=fv('fTo')||defTo, proj=fv('fProject');
+      lastFrom=from; lastTo=to; lastProj=proj;
+      var list=DB.txns.filter(function(t){
+        if(!inRange(t.tgl,from,to)) return false;
+        if(proj && t.project!==proj) return false;
+        return true;
+      });
+      lastByJenis={
+        kas_masuk: groupByAkun(list,'kas_masuk'), kas_keluar: groupByAkun(list,'kas_keluar'),
+        bank_masuk: groupByAkun(list,'bank_masuk'), bank_keluar: groupByAkun(list,'bank_keluar'),
+      };
+
+      // Ringkasan periode -- selalu company-wide (tidak ikut filter
+      // Project, yang cuma menyaring rincian per akun lawan di atas)
+      // pakai mesin sama seperti Posisi Kas Dashboard.
       var rSum=sumRange(from,to), awal=saldoAwal(from), net=rSum.masuk-rSum.keluar, akhir=awal+net;
       lastSummary={awal:awal, net:net, akhir:akhir};
-      document.getElementById('cfSummary').innerHTML=
-        kpiCard('Saldo Sebelum Periode', rp(awal), 'Sebelum '+fmtDate(from),'accent')+
-        kpiCard('Net Cash Flow', numSigned(net), net<0?'Defisit periode ini':'Surplus periode ini', net<0?'danger':'safe')+
-        kpiCard('Saldo Akhir', rp(akhir), fmtDate(from)+' s/d '+fmtDate(to), akhir<0?'danger':'safe');
+
+      document.getElementById('cfBody').innerHTML=
+        sectionHTML('KAS MASUK','cf-in',lastByJenis.kas_masuk,'Total Kas Masuk','kas_masuk')+
+        sectionHTML('KAS KELUAR','cf-out',lastByJenis.kas_keluar,'Total Kas Keluar','kas_keluar')+
+        sectionHTML('BANK MASUK','cf-in',lastByJenis.bank_masuk,'Total Bank Masuk','bank_masuk')+
+        sectionHTML('BANK KELUAR','cf-out',lastByJenis.bank_keluar,'Total Bank Keluar','bank_keluar')+
+        '<div class="cf-net"><b>NET CASH FLOW</b>'+
+          '<b class="'+(net<0?'neg':'pos')+'">'+numSigned(net)+'</b></div>'+
+        '<div class="cf-net"><b>Saldo Sebelum Periode</b><b>'+num0(awal)+'</b></div>'+
+        '<div class="cf-net"><b>Saldo Akhir</b>'+
+          '<b class="'+(akhir<0?'neg':'pos')+'">'+num0(akhir)+'</b></div>';
+
+      document.querySelectorAll('#cfBody [data-cf-akun]').forEach(function(b){
+        b.onclick=function(){
+          var akun=b.getAttribute('data-cf-akun'), jenis=b.getAttribute('data-cf-kind');
+          var isIn=/masuk$/.test(jenis);
+          var sub=list.filter(function(t){ return t.akunLawan===akun && t.jenis===jenis && !(jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]); })
+            .map(function(t){ return {tgl:t.tgl, ref:t.ref, ket:t.ket+(t.project?' — '+t.project:''), amount:isIn?t.debet:t.kredit}; })
+            .sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+          showTxnDrilldown(akunNamaOnly(akun), 'Rincian transaksi'+(proj?' — Project: '+proj:''), sub);
+        };
+      });
     }
+    searchableSelect('fProject_ssel','fProject',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
+      placeholder:'Cari / semua project…'});
     refresh();
     document.getElementById('btnFilter').onclick=refresh;
     document.getElementById('btnReset').onclick=function(){
+      clearFilterFields(['fFrom','fTo','fProject']);
       document.getElementById('fFrom').value=defFrom;
       document.getElementById('fTo').value=defTo;
       refresh();
     };
+    function cashFlowRows(){
+      var rows=[];
+      [['KAS MASUK','kas_masuk','Total Kas Masuk'],['KAS KELUAR','kas_keluar','Total Kas Keluar'],
+       ['BANK MASUK','bank_masuk','Total Bank Masuk'],['BANK KELUAR','bank_keluar','Total Bank Keluar']]
+      .forEach(function(sec){
+        var list=lastByJenis[sec[1]]||[];
+        rows.push([sec[0],null]);
+        list.forEach(function(r){ rows.push([r.label, r.amount]); });
+        rows.push([sec[2], list.reduce(function(a,b){ return a+b.amount; },0)]);
+      });
+      if(lastSummary){
+        rows.push(['NET CASH FLOW', lastSummary.net]);
+        rows.push(['Saldo Sebelum Periode', lastSummary.awal]);
+        rows.push(['Saldo Akhir', lastSummary.akhir]);
+      }
+      return rows;
+    }
     document.getElementById('cfExcel').onclick=function(){
-      exportExcel('Cash_Flow', ['Keterangan','Jumlah'], [
-        ['Periode', lastFrom+' s/d '+lastTo],
-        ['Saldo Sebelum Periode', lastSummary.awal],
-        ['Net Cash Flow', lastSummary.net],
-        ['Saldo Akhir', lastSummary.akhir]
-      ]);
+      exportExcel('Cash_Flow', ['Keterangan','Jumlah'], cashFlowRows());
     };
     document.getElementById('cfPdf').onclick=function(){
-      exportPdf('Cash_Flow', ['Keterangan','Jumlah'], [
-        ['Periode', lastFrom+' s/d '+lastTo],
-        ['Saldo Sebelum Periode', lastSummary.awal],
-        ['Net Cash Flow', lastSummary.net],
-        ['Saldo Akhir', lastSummary.akhir]
-      ], {title:'Laporan Cash Flow'});
+      exportPdf('Cash_Flow', ['Keterangan','Jumlah'], cashFlowRows(), {title:'Laporan Cash Flow'});
     };
   };
 
