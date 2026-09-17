@@ -3376,7 +3376,7 @@ function registerPages(){
           {key:'total',label:'Total',num:true,render:function(r){
             return '<b class="'+(r.total<0?'neg':'')+'">'+numSigned(r.total)+'</b>'; },
            foot:function(l){ return '<b>'+numSigned(l.reduce(function(a,b){return a+b.total;},0))+'</b>'; }}
-        ], rows, {defaultSort:'total',defaultDir:'desc',perPage:20,showFoot:true,countId:'cnt',
+        ], rows, {defaultSort:'total',defaultDir:'desc',perPage:100,showFoot:true,countId:'cnt',
           searchFn:function(r){ return r.nama; },
           emptyText:'Tidak ada saldo pada rentang ini.'});
         bindSearch('q',tbl);
