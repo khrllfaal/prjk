@@ -3680,44 +3680,20 @@ function registerPages(){
     sign:function(e){ return e.debet-e.kredit; }
   });
 
-  PAGES.lap_prive=function(c){
-    reportShell(c,'Laporan Prive','Pengambilan pribadi pemilik — akun 3.1.6 Prive');
-    var tbl;
-    function refresh(){
-      var from=fv('fFrom'), to=fv('fTo');
-      var rows=allEntries().filter(function(e){
-        return /prive/i.test(e.akun||'')||/prive/i.test(e.project||'');
-      }).filter(function(e){ return inRange(e.tgl,from,to); })
-        .sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
-      var total=rows.reduce(function(a,b){ return a+(b.kredit-b.debet); },0);
-
-      document.getElementById('reportBody').innerHTML=
-        '<div class="kpi-grid" style="margin-bottom:14px;">'+
-          kpiCard('Total Prive', rp(Math.abs(total)), rows.length+' transaksi','accent')+
-        '</div>'+
-        '<div class="panel"><div class="toolbar">'+
-          '<div class="search-box"><span class="ic">⌕</span><input type="text" id="q" placeholder="Cari keterangan…"></div>'+
-          '<span class="result-count" id="cnt"></span></div><div id="tbl"></div></div>';
-
-      tbl=DataTable('tbl',[
-        {key:'_no',label:'No',sort:false,render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
-        {key:'tgl',label:'Tanggal',render:function(r){ return fmtDate(r.tgl); }},
-        {key:'ref',label:'Ref',render:function(r){ return '<span class="mono" style="font-size:11.5px;">'+esc(r.ref)+'</span>'; }},
-        {key:'akun',label:'Akun',cls:'wrap',render:function(r){ return esc(r.akun||'–'); }},
-        {key:'relasi',label:'Relasi',render:function(r){ return r.relasi?esc(r.relasi):'<span class="faint-italic">–</span>'; }},
-        {key:'ket',label:'Keterangan',cls:'wrap',render:function(r){ return esc(r.ket||'–'); }},
-        {key:'nilai',label:'Nilai',num:true,sortVal:function(r){ return r.kredit-r.debet; },
-         render:function(r){ return num0(r.kredit-r.debet); },
-         foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){ return a+(b.kredit-b.debet); },0))+'</b>'; }}
-      ], rows, {defaultSort:'tgl',defaultDir:'desc',perPage:20,showFoot:true,countId:'cnt',
-        searchFn:function(r){ return [r.ket,r.relasi,r.akun].join(' '); },
-        emptyText:'Tidak ada transaksi prive pada rentang ini.'});
-      bindSearch('q',tbl);
-    }
-    refresh(); bindReportFilter(refresh);
-    bindExport('exp','Laporan_Prive',['Tanggal','Ref','Akun','Relasi','Keterangan','Nilai'],
-      function(){ return tbl.getFiltered().map(function(r){ return [r.tgl,r.ref,r.akun,r.relasi,r.ket,r.kredit-r.debet]; }); });
-  };
+  // Grouped per pemilik (Saldo Awal/Mutasi/Total), same shape and same
+  // relasiReport() engine as Laporan Hutang/Piutang — matches how the
+  // reference system's own "Data Prive" report is laid out. A prive
+  // draw debits the Prive equity-contra account, so — unlike Hutang/
+  // Piutang's e.kredit-e.debet — the sign here is e.debet-e.kredit,
+  // which is what makes a real draw show up as a positive amount per
+  // owner instead of negative.
+  PAGES.lap_prive=relasiReport({
+    title:'Laporan Prive', sub:'Pengambilan pribadi pemilik — akun 3.1.6 Prive',
+    filterLabel:'Vendor / Pemilik', colName:'Nama Vendor', kpiLabel:'Total Prive', unit:'pemilik', unitCap:'Pemilik',
+    list:function(){ return DB.vendors; },
+    match:function(e){ return akunLabel(e.akun)==='Prive'; },
+    sign:function(e){ return e.debet-e.kredit; }
+  });
 
   /* ---------------- MUTASI KAS / BANK ---------------- */
   PAGES.mutasi=function(c){
