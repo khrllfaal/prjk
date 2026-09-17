@@ -923,7 +923,7 @@ function computeCashPeriods(){
     DB.txns.forEach(function(t){
       if(t.tgl>=before) return;
       if(isKasMasuk(t)) s+=t.debet;
-      else if(isKasKeluar(t)) s-=t.kredit;
+      else if(isKasKeluar(t) && !NON_CASH_KAS_KELUAR_REFS[t.ref]) s-=t.kredit;
       else if(t.jenis==='bank_masuk') s+=t.debet;
       else if(t.jenis==='bank_keluar') s-=t.kredit;
     });
@@ -961,6 +961,7 @@ function computeCashPeriods(){
       else if(isKasKeluar(t)){
         // Mirrors sumRange()'s Ayat Silang Kas Besar Kas-Bank split.
         if(isInternalTransferAkun(t.akunLawan)) bump(key,-t.kredit,0);
+        else if(NON_CASH_KAS_KELUAR_REFS[t.ref]){/* confirmed non-cash — see definition */}
         else bump(key,0,t.kredit);
       }
       else if(t.jenis==='bank_masuk') bump(key,t.debet,0);
@@ -1317,7 +1318,9 @@ function saldoAwalBreakdown(before){
     if(t.tgl>=before) return;
     if(!/^(kas|bank)_(masuk|keluar)$/.test(t.jenis)) return;
     var val=/masuk$/.test(t.jenis)?t.debet:t.kredit;
-    byJenis[t.jenis]+=val; countJenis[t.jenis]++;
+    if(!(t.jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref])){
+      byJenis[t.jenis]+=val; countJenis[t.jenis]++;
+    }
     var ym=t.tgl.slice(0,7);
     if(!monthly[ym]) monthly[ym]={masuk:0,keluar:0};
     if(t.jenis==='kas_masuk') monthly[ym].masuk+=t.debet;
@@ -2462,7 +2465,7 @@ function financePage(jenis, title, sub){
       {key:'relasi', label:'Relasi', render:function(r){ return r.relasi?esc(r.relasi):'<span class="faint-italic">–</span>'; }},
       {key:'amount', label:'Amount', num:true, sortVal:function(r){ return isIn?r.debet:r.kredit; },
        render:function(r){ return '<b class="'+(isIn?'pos':'')+'">'+num0(isIn?r.debet:r.kredit)+'</b>'; },
-       foot:function(list){ return '<b>'+num0(list.reduce(function(a,b){ return a+(isIn?b.debet:b.kredit); },0))+'</b>'; }},
+       foot:function(list){ return '<b>'+num0(list.reduce(function(a,b){ return a+(isIn?b.debet:(NON_CASH_KAS_KELUAR_REFS[b.ref]?0:b.kredit)); },0))+'</b>'; }},
       {key:'ket', label:'Description', cls:'wrap', render:function(r){ return esc(r.ket||'–'); }},
       {key:'_act', label:'Action', sort:false, render:function(r){
         return '<div class="btn-row"><button class="btn btn-warn btn-sm" data-edit="'+r.id+'">Edit</button>'+
@@ -2484,7 +2487,7 @@ function financePage(jenis, title, sub){
 
     function refresh(){
       var rows=currentRows();
-      var total=rows.reduce(function(a,b){ return a+(isIn?b.debet:b.kredit); },0);
+      var total=rows.reduce(function(a,b){ return a+(isIn?b.debet:(NON_CASH_KAS_KELUAR_REFS[b.ref]?0:b.kredit)); },0);
       var projSet={}; rows.forEach(function(r){ if(r.project) projSet[r.project]=1; });
       document.getElementById('kpi').innerHTML=[
         kpiCard('Jumlah Transaksi', num0(rows.length), 'Sesuai filter aktif', 'accent'),
@@ -3685,6 +3688,7 @@ function registerPages(){
       var from=fv('fFrom'), to=fv('fTo');
       var map={};
       DB.txns.forEach(function(t){
+        if(NON_CASH_KAS_KELUAR_REFS[t.ref]) return;
         if(!map[t.akunKas]) map[t.akunKas]={akun:t.akunKas,awal:0,masuk:0,keluar:0};
         if(from && t.tgl<from) map[t.akunKas].awal+=t.debet-t.kredit;
         else if(inRange(t.tgl,from,to)){ map[t.akunKas].masuk+=t.debet; map[t.akunKas].keluar+=t.kredit; }
@@ -4255,6 +4259,7 @@ function registerPages(){
       var map={}, order=[];
       list.forEach(function(t){
         if(t.jenis!==jenis) return;
+        if(jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]) return;
         var label=akunNamaOnly(t.akunLawan);
         if(!map[label]){ map[label]={label:label, akunLawan:t.akunLawan, amount:0}; order.push(label); }
         map[label].amount += isIn?t.debet:t.kredit;
@@ -4309,7 +4314,7 @@ function registerPages(){
         b.onclick=function(){
           var akun=b.getAttribute('data-cf-akun'), jenis=b.getAttribute('data-cf-kind');
           var isIn=/masuk$/.test(jenis);
-          var sub=list.filter(function(t){ return t.akunLawan===akun && t.jenis===jenis; })
+          var sub=list.filter(function(t){ return t.akunLawan===akun && t.jenis===jenis && !(jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]); })
             .map(function(t){ return {tgl:t.tgl, ref:t.ref, ket:t.ket+(t.project?' — '+t.project:''), amount:isIn?t.debet:t.kredit}; })
             .sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
           showTxnDrilldown(akunNamaOnly(akun), 'Rincian transaksi'+(proj?' — Project: '+proj:''), sub);
