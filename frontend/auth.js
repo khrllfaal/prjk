@@ -68,7 +68,17 @@ async function refreshDbFromServer(opts){
   DB = fresh; saveDB();
   if(opts.rerender !== false){
     var modalOpen=document.getElementById('modalBack').classList.contains('on');
-    if(!modalOpen) go(CURRENT);
+    if(!modalOpen){
+      // go() always rebuilds the page from scratch and jumps scroll to
+      // the top — fine for the one-time cache-first boot refresh, but a
+      // 30s background poll doing that mid-read (e.g. scrolled halfway
+      // down a long report) would be exactly the kind of interruption
+      // this is supposed to avoid. Re-render in place, then put the
+      // scroll position back where the user actually was.
+      var scrollY = window.scrollY;
+      go(CURRENT);
+      window.scrollTo(0, scrollY);
+    }
   }
   if(stillPending.length){
     toast(stillPending.length+' perubahan masih belum tersinkron ke server — akan dicoba lagi otomatis.', 'danger');
