@@ -29,21 +29,23 @@ CREATE TABLE IF NOT EXISTS users (
 -- 2. master data
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS customers (
-  id      VARCHAR(40) PRIMARY KEY,
-  kode    VARCHAR(40) NOT NULL,
-  nama    VARCHAR(255) NOT NULL,
-  alamat  VARCHAR(500) NOT NULL DEFAULT '',
-  telp    VARCHAR(60) NOT NULL DEFAULT '',
-  email   VARCHAR(190) NOT NULL DEFAULT ''
+  id          VARCHAR(40) PRIMARY KEY,
+  kode        VARCHAR(40) NOT NULL,
+  nama        VARCHAR(255) NOT NULL,
+  alamat      VARCHAR(500) NOT NULL DEFAULT '',
+  telp        VARCHAR(60) NOT NULL DEFAULT '',
+  email       VARCHAR(190) NOT NULL DEFAULT '',
+  updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS vendors (
-  id      VARCHAR(40) PRIMARY KEY,
-  kode    VARCHAR(40) NOT NULL,
-  nama    VARCHAR(255) NOT NULL,
-  alamat  VARCHAR(500) NOT NULL DEFAULT '',
-  telp    VARCHAR(60) NOT NULL DEFAULT '',
-  email   VARCHAR(190) NOT NULL DEFAULT ''
+  id          VARCHAR(40) PRIMARY KEY,
+  kode        VARCHAR(40) NOT NULL,
+  nama        VARCHAR(255) NOT NULL,
+  alamat      VARCHAR(500) NOT NULL DEFAULT '',
+  telp        VARCHAR(60) NOT NULL DEFAULT '',
+  email       VARCHAR(190) NOT NULL DEFAULT '',
+  updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -66,7 +68,8 @@ CREATE TABLE IF NOT EXISTS coa (
   nama        VARCHAR(255) NOT NULL,
   level       TINYINT NOT NULL,
   tipe        VARCHAR(20) NOT NULL,
-  saldo_awal  DECIMAL(18,2) NOT NULL DEFAULT 0
+  saldo_awal  DECIMAL(18,2) NOT NULL DEFAULT 0,
+  updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -115,6 +118,7 @@ CREATE TABLE IF NOT EXISTS jurnal_umum (
   kredit      DECIMAL(18,2) NOT NULL DEFAULT 0,
   created_by  VARCHAR(40) NULL,
   created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

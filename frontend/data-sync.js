@@ -80,6 +80,15 @@ var MYSQL_ENDPOINT = {
   coa: '/coa.php', transactions: '/transactions.php', jurnal_umum: '/jurnal_umum.php',
 };
 
+/* Cheap poll target — see pollForRemoteChanges() in auth.js. A tiny
+   aggregate query per table server-side, nothing like fetchAllData()'s
+   full row dump, so calling this every ~30s is fine even on a modest
+   host. */
+async function fetchSyncStatus(){
+  var res = await apiFetch('/sync_status.php');
+  return res.signature;
+}
+
 /* Fetch everything into the shape seedDB()/loadDB() already produce,
    so the rest of the app (buildNav/registerPages/all PAGES.*) needs
    zero changes. */

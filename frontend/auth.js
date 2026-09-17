@@ -47,6 +47,33 @@ function enterApp(){
   hideLogin();
   var start=(location.hash||'').replace('#/','');
   go(PAGES[start]?start:'dashboard');
+  startRemotePolling();
+}
+
+/* Pulls the latest data from the server and folds it into the live DB —
+   shared by the cache-first boot's background refresh and by the
+   periodic multi-user poll below. Always retries any locally-queued
+   write first (see flushPendingSync() in data-sync.js) so a fresh
+   server copy never silently erases an edit that just hadn't reached
+   the server yet; whatever still can't be pushed gets re-applied on
+   top of the fresh data instead of disappearing.
+   opts.rerender (default true): re-render the current page afterwards,
+   skipped while a Tambah/Edit modal is open so a live poll never yanks
+   a form out from under someone mid-edit. */
+async function refreshDbFromServer(opts){
+  opts = opts || {};
+  var fresh = await fetchAllData();
+  var stillPending = await flushPendingSync();
+  if(stillPending.length) fresh = reapplyPendingToDb(fresh);
+  DB = fresh; saveDB();
+  if(opts.rerender !== false){
+    var modalOpen=document.getElementById('modalBack').classList.contains('on');
+    if(!modalOpen) go(CURRENT);
+  }
+  if(stillPending.length){
+    toast(stillPending.length+' perubahan masih belum tersinkron ke server — akan dicoba lagi otomatis.', 'danger');
+  }
+  return stillPending;
 }
 
 /* profile: {id, email, nama, role} — same shape regardless of backend. */
@@ -58,34 +85,16 @@ async function bootAfterLogin(profile){
 
   // Cache-first boot: if this browser already has a real previous sync,
   // show it immediately instead of blocking on the network — the app
-  // feels instant even on a slow connection. fetchAllData() still runs
-  // right after, silently replacing DB once it resolves and re-rendering
-  // whatever page is open, so every report picks up the fresh data right
-  // away instead of quietly showing stale numbers until the user
-  // happens to navigate away and back. The one case this must NOT do is
-  // yank a form out from under someone mid-edit — an open modal (any
-  // Tambah/Edit dialog across the app) is the only thing skipped.
+  // feels instant even on a slow connection. refreshDbFromServer() still
+  // runs right after, silently replacing DB once it resolves and
+  // re-rendering whatever page is open, so every report picks up the
+  // fresh data right away instead of quietly showing stale numbers
+  // until the user happens to navigate away and back.
   var cached=tryLoadCachedDB();
   if(cached){
     DB=cached;
     enterApp();
-    fetchAllData().then(async function(fresh){
-      // Retry any edit that failed to reach the server earlier (e.g. a
-      // previous InfinityFree hiccup) BEFORE this fresh copy replaces
-      // DB — otherwise a still-local-only edit would just get silently
-      // discarded the moment the server's older data lands. Whatever
-      // still can't be pushed (still offline, still rejected) gets
-      // re-applied on top of the fresh data instead, so it stays
-      // visible rather than vanishing.
-      var stillPending = await flushPendingSync();
-      if(stillPending.length) fresh = reapplyPendingToDb(fresh);
-      DB=fresh; saveDB();
-      var modalOpen=document.getElementById('modalBack').classList.contains('on');
-      if(!modalOpen) go(CURRENT);
-      if(stillPending.length){
-        toast(stillPending.length+' perubahan masih belum tersinkron ke server — akan dicoba lagi otomatis.', 'danger');
-      }
-    }).catch(function(e){
+    refreshDbFromServer().catch(function(e){
       console.error('background refresh failed, keeping cached data', e);
       toast('Tidak bisa memperbarui data dari server — menampilkan data terakhir yang tersimpan.', 'danger');
     });
@@ -108,6 +117,43 @@ async function bootAfterLogin(profile){
   }
 
   enterApp();
+}
+
+/* ---------------- Multi-user live-ish refresh ----------------
+   A cheap poll (see fetchSyncStatus() in data-sync.js — one small
+   aggregate query per table, nothing like the full fetchAllData() dump)
+   every 30s while the tab is visible. A changed signature means
+   somebody (this browser or another device/tab) saved something since
+   the last check, so the whole report the user is looking at could now
+   be stale — pull fresh data and silently re-render. Paused while the
+   tab is in the background (no point spending requests on a report
+   nobody's looking at) and while a Tambah/Edit modal is open (never
+   pull a form out from under someone mid-edit); both resume checking
+   again once that condition clears, on the next tick. */
+var REMOTE_POLL_INTERVAL_MS = 30000;
+var _remotePollTimer = null;
+var _lastSyncSignature = null;
+
+function stopRemotePolling(){
+  if(_remotePollTimer){ clearInterval(_remotePollTimer); _remotePollTimer=null; }
+  _lastSyncSignature = null;
+}
+function startRemotePolling(){
+  if(!isBackendConfigured() || _remotePollTimer) return;
+  _remotePollTimer = setInterval(async function(){
+    if(document.hidden) return; // tab in background — check again next tick
+    var modalOpen=document.getElementById('modalBack').classList.contains('on');
+    if(modalOpen) return; // don't yank a form mid-edit — check again next tick
+    try{
+      var sig = await fetchSyncStatus();
+      if(_lastSyncSignature===null){ _lastSyncSignature=sig; return; } // first check this session: just baseline it
+      if(sig===_lastSyncSignature) return; // nothing changed since last check
+      _lastSyncSignature = sig;
+      await refreshDbFromServer();
+    }catch(e){
+      console.error('remote poll failed (will retry next tick)', e);
+    }
+  }, REMOTE_POLL_INTERVAL_MS);
 }
 
 function initAuthGate(){
@@ -138,6 +184,7 @@ function initAuthGateMysql(){
   });
 
   document.getElementById('btnLogout').onclick=async function(){
+    stopRemotePolling();
     try{ await apiFetch('/auth_logout.php', {method:'POST'}); }catch(e){}
     CURRENT_PROFILE=null;
     location.hash='';
