@@ -819,8 +819,11 @@ function isBankTransferAkun(nama){
    the Uang Keluar cash-flow KPI. Add a ref here only when the owner
    confirms a specific transaction is this kind of non-cash transfer —
    never pattern-match on the description text, which is free-form and
-   unreliable. */
-var NON_CASH_KAS_KELUAR_REFS={'CO-2609-0859':true};
+   unreliable.
+   CO-2609-0859 was here (confirmed non-cash) but the owner reversed that
+   call after comparing against sistem asli — it does reduce cash there,
+   so it's back to a normal Kas Keluar with no exclusion. */
+var NON_CASH_KAS_KELUAR_REFS={};
 
 /* Master COA's Saldo Awal column is a full trial-balance opening figure —
    every Aktiva/Kewajiban/Ekuitas account (Piutang, Hutang, Biaya Dibayar
