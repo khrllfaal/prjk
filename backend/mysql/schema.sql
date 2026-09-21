@@ -154,3 +154,119 @@ CREATE TABLE IF NOT EXISTS audit_log (
 -- existed (MariaDB 10.0.2+ / MySQL 8.0.29+ — Hostinger's stack qualifies).
 ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45) NULL AFTER detail;
 ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS user_agent VARCHAR(255) NULL AFTER ip_address;
+
+-- =====================================================================
+-- 7. MATERIAL / STOCK MODULE — field-admin material in/out, per-project
+-- stock levels with reorder alerts, and RAP (budgeted material vs actual
+-- usage) deviation tracking. Mirrors the workflow of the MPMS mockup
+-- (admin lapangan input via HP), now on a real shared database instead
+-- of Google Sheets so dozens of concurrent projects/users stay fast.
+-- =====================================================================
+
+-- 'lapangan' = field/branch admin: can only see & write receipts/usage
+-- for the project(s) assigned to them in user_projects below. Existing
+-- admin/owner rows are untouched by this ALTER.
+ALTER TABLE users MODIFY COLUMN role ENUM('admin','owner','lapangan') NOT NULL;
+
+CREATE TABLE IF NOT EXISTS user_projects (
+  user_id     VARCHAR(40) NOT NULL,
+  project_id  VARCHAR(40) NOT NULL,
+  PRIMARY KEY (user_id, project_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Master bahan (material catalogue) — shared across all projects.
+CREATE TABLE IF NOT EXISTS materials (
+  id                  VARCHAR(40) PRIMARY KEY,
+  kode                VARCHAR(40) NOT NULL,
+  nama                VARCHAR(255) NOT NULL,
+  satuan              VARCHAR(40) NOT NULL DEFAULT '',
+  kategori            VARCHAR(120) NOT NULL DEFAULT '',
+  stok_minimum        DECIMAL(18,3) NOT NULL DEFAULT 0, -- reorder point (minimarket-style)
+  updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Master pekerjaan (BOQ work items) per project — the unit that RAP
+-- material coefficients and progress % are tied to.
+CREATE TABLE IF NOT EXISTS pekerjaan (
+  id              VARCHAR(40) PRIMARY KEY,
+  project_id      VARCHAR(40) NOT NULL,
+  nama            VARCHAR(255) NOT NULL,
+  satuan          VARCHAR(40) NOT NULL DEFAULT '',
+  volume_kontrak  DECIMAL(18,3) NOT NULL DEFAULT 0,
+  updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_pekerjaan_project (project_id),
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- RAP config: how much material is *ideally* needed per unit volume of
+-- a pekerjaan (koefisien). target_material_ideal for a given progress
+-- % = koefisien * aktual_volume (see progress_pekerjaan below).
+CREATE TABLE IF NOT EXISTS rap_material (
+  id            VARCHAR(40) PRIMARY KEY,
+  pekerjaan_id  VARCHAR(40) NOT NULL,
+  material_id   VARCHAR(40) NOT NULL,
+  koefisien     DECIMAL(18,6) NOT NULL DEFAULT 0,
+  updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_rap_pekerjaan_material (pekerjaan_id, material_id),
+  FOREIGN KEY (pekerjaan_id) REFERENCES pekerjaan(id) ON DELETE CASCADE,
+  FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Latest cumulative % progress per pekerjaan, reported from the field.
+CREATE TABLE IF NOT EXISTS progress_pekerjaan (
+  id             VARCHAR(40) PRIMARY KEY,
+  pekerjaan_id   VARCHAR(40) NOT NULL,
+  tgl            DATE NOT NULL,
+  volume_aktual  DECIMAL(18,3) NOT NULL DEFAULT 0, -- cumulative to-date, not incremental
+  ket            TEXT NULL,
+  created_by     VARCHAR(40) NULL,
+  created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_progress_pekerjaan (pekerjaan_id, tgl),
+  FOREIGN KEY (pekerjaan_id) REFERENCES pekerjaan(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Bahan Masuk (material receipts / stock IN), input by field admins.
+CREATE TABLE IF NOT EXISTS material_receipts (
+  id             VARCHAR(40) PRIMARY KEY,
+  project_id     VARCHAR(40) NOT NULL,
+  material_id    VARCHAR(40) NOT NULL,
+  tgl            DATE NOT NULL,
+  qty            DECIMAL(18,3) NOT NULL DEFAULT 0,
+  harga_satuan   DECIMAL(18,2) NOT NULL DEFAULT 0,
+  vendor_id      VARCHAR(40) NULL,
+  no_referensi   VARCHAR(80) NOT NULL DEFAULT '', -- no. surat jalan / nota
+  ket            TEXT NULL,
+  created_by     VARCHAR(40) NULL,
+  created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_receipts_project_material (project_id, material_id),
+  INDEX idx_receipts_tgl (tgl),
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE CASCADE,
+  FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Pemakaian (material usage / stock OUT), input by field admins.
+-- pekerjaan_id is optional (usage isn't always tied to one BOQ item)
+-- but is required for RAP deviation analysis to work for that row.
+CREATE TABLE IF NOT EXISTS material_usage (
+  id             VARCHAR(40) PRIMARY KEY,
+  project_id     VARCHAR(40) NOT NULL,
+  pekerjaan_id   VARCHAR(40) NULL,
+  material_id    VARCHAR(40) NOT NULL,
+  tgl            DATE NOT NULL,
+  qty            DECIMAL(18,3) NOT NULL DEFAULT 0,
+  ket            TEXT NULL,
+  created_by     VARCHAR(40) NULL,
+  created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_usage_project_material (project_id, material_id),
+  INDEX idx_usage_pekerjaan (pekerjaan_id),
+  INDEX idx_usage_tgl (tgl),
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (pekerjaan_id) REFERENCES pekerjaan(id) ON DELETE SET NULL,
+  FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE CASCADE,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

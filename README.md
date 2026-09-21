@@ -18,7 +18,9 @@ untuk detail tahap deploy ke Hostinger saja lihat
 
 ```
 frontend/    — aplikasi web (HTML/CSS/JS polos, tanpa build step)
-  index.html          halaman utama (semua menu/laporan)
+  index.html          halaman utama (semua menu/laporan) — admin pusat & owner
+  lapangan.html       aplikasi ringan untuk HP — admin lapangan input Bahan
+                       Masuk & Pemakaian per proyek, lihat stok & riwayat
   auth.js             layar login & sesi multi-device
   data-sync.js        jembatan DB lokal <-> backend PHP/MySQL
   backend-config.js   API_BASE_URL (kosong = mode lokal/offline)
@@ -58,3 +60,27 @@ Fondasi backend (PHP + MySQL), login, CRUD penuh di semua menu,
 Dashboard, Cash Flow, Trial Hutang, importer Excel, backup otomatis, dan
 hardening keamanan sudah selesai dan teruji end-to-end. Lihat
 docs/DEPLOY_HOSTINGER.md untuk langkah go-live.
+
+## Role & modul Material/Stok
+
+Tiga role, ditegakkan di backend (bukan cuma disembunyikan di UI):
+
+- **Admin Lapangan** (`lapangan`) — hanya boleh input Bahan Masuk &
+  Pemakaian, dibatasi ke proyek yang ditugaskan (tabel `user_projects`).
+  Tidak bisa melihat data keuangan sama sekali. Login lewat
+  `frontend/lapangan.html` (dialihkan otomatis dari `index.html`).
+- **Admin Pusat** (`admin`) — akses penuh (lihat, tambah, ubah, hapus)
+  di semua menu, termasuk mengelola user lewat menu "Kelola User
+  Lapangan".
+- **Owner** (`owner`) — bisa melihat semua menu, tapi setiap endpoint
+  tolak permintaan tulis (POST/DELETE) dari role ini dengan HTTP 403;
+  tombol Tambah/Edit/Hapus juga disembunyikan di UI untuk role ini.
+
+Modul Material/Stok (Master Bahan, Master Pekerjaan, Konfigurasi RAP,
+Bahan Masuk, Pemakaian) menambah tabel baru di `backend/mysql/schema.sql`
+— jalankan ulang file itu di database yang sudah ada, aman diulang
+(`CREATE TABLE IF NOT EXISTS` + `ALTER TABLE ... MODIFY COLUMN`).
+Dashboard menambahkan dua laporan lintas-proyek di menu "Material &
+Stok": **Monitor Stok** (status Aman/Perlu Dikirim/Habis per proyek,
+seperti stok minimarket) dan **Analisis RAP Bahan** (pemakaian aktual
+vs target ideal per pekerjaan, mendeteksi pemborosan).

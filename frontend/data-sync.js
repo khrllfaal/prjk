@@ -67,6 +67,41 @@ function jurnalToDb(obj){
     ket:obj.ket||'', debet:obj.debet||0, kredit:obj.kredit||0};
 }
 
+function materialFromDb(r){
+  return {id:r.id, kode:r.kode, nama:r.nama, satuan:r.satuan||'', kategori:r.kategori||'', stokMinimum:Number(r.stok_minimum)||0};
+}
+function materialToDb(obj){
+  return {id:obj.id, kode:obj.kode, nama:obj.nama, satuan:obj.satuan||'', kategori:obj.kategori||'', stok_minimum:obj.stokMinimum||0};
+}
+function pekerjaanFromDb(r){
+  return {id:r.id, projectId:r.project_id, nama:r.nama, satuan:r.satuan||'', volumeKontrak:Number(r.volume_kontrak)||0};
+}
+function pekerjaanToDb(obj){
+  return {id:obj.id, project_id:obj.projectId, nama:obj.nama, satuan:obj.satuan||'', volume_kontrak:obj.volumeKontrak||0};
+}
+function rapMaterialFromDb(r){
+  return {id:r.id, pekerjaanId:r.pekerjaan_id, materialId:r.material_id, koefisien:Number(r.koefisien)||0};
+}
+function rapMaterialToDb(obj){
+  return {id:obj.id, pekerjaan_id:obj.pekerjaanId, material_id:obj.materialId, koefisien:obj.koefisien||0};
+}
+function materialReceiptFromDb(r){
+  return {id:r.id, projectId:r.project_id, materialId:r.material_id, tgl:r.tgl, qty:Number(r.qty)||0,
+    hargaSatuan:Number(r.harga_satuan)||0, vendorId:r.vendor_id||'', noReferensi:r.no_referensi||'', ket:r.ket||''};
+}
+function materialReceiptToDb(obj){
+  return {id:obj.id, project_id:obj.projectId, material_id:obj.materialId, tgl:obj.tgl, qty:obj.qty||0,
+    harga_satuan:obj.hargaSatuan||0, vendor_id:obj.vendorId||null, no_referensi:obj.noReferensi||'', ket:obj.ket||''};
+}
+function materialUsageFromDb(r){
+  return {id:r.id, projectId:r.project_id, pekerjaanId:r.pekerjaan_id||'', materialId:r.material_id, tgl:r.tgl,
+    qty:Number(r.qty)||0, ket:r.ket||''};
+}
+function materialUsageToDb(obj){
+  return {id:obj.id, project_id:obj.projectId, pekerjaan_id:obj.pekerjaanId||null, material_id:obj.materialId,
+    tgl:obj.tgl, qty:obj.qty||0, ket:obj.ket||''};
+}
+
 var TABLE_MAP = {
   customers: {from:relasiFromDb, to:relasiToDb},
   vendors:   {from:relasiFromDb, to:relasiToDb},
@@ -74,10 +109,17 @@ var TABLE_MAP = {
   coa:       {from:coaFromDb, to:coaToDb},
   transactions: {from:txnFromDb, to:txnToDb},
   jurnal_umum:  {from:jurnalFromDb, to:jurnalToDb},
+  materials: {from:materialFromDb, to:materialToDb},
+  pekerjaan: {from:pekerjaanFromDb, to:pekerjaanToDb},
+  rapMaterial: {from:rapMaterialFromDb, to:rapMaterialToDb},
+  materialReceipts: {from:materialReceiptFromDb, to:materialReceiptToDb},
+  materialUsage: {from:materialUsageFromDb, to:materialUsageToDb},
 };
 var MYSQL_ENDPOINT = {
   customers: '/customers.php', vendors: '/vendors.php', projects: '/projects.php',
   coa: '/coa.php', transactions: '/transactions.php', jurnal_umum: '/jurnal_umum.php',
+  materials: '/materials.php', pekerjaan: '/pekerjaan.php', rapMaterial: '/rap_material.php',
+  materialReceipts: '/material_receipts.php', materialUsage: '/material_usage.php',
 };
 
 /* Fetch everything into the shape seedDB()/loadDB() already produce,
@@ -88,6 +130,8 @@ async function fetchAllData(){
     apiFetch('/customers.php'), apiFetch('/vendors.php'), apiFetch('/projects.php'),
     apiFetch('/coa.php'), apiFetch('/transactions.php'), apiFetch('/jurnal_umum.php'),
     apiFetch('/hutang_overrides.php'),
+    apiFetch('/materials.php'), apiFetch('/pekerjaan.php'), apiFetch('/rap_material.php'),
+    apiFetch('/material_receipts.php'), apiFetch('/material_usage.php'),
   ]);
   var hutangOverrides={};
   m[6].forEach(function(o){ hutangOverrides[o.nota_id]={paid:Number(o.paid), status:o.status}; });
@@ -95,6 +139,9 @@ async function fetchAllData(){
     customers: m[0].map(relasiFromDb), vendors: m[1].map(relasiFromDb), projects: m[2].map(projectFromDb),
     coa: m[3].map(coaFromDb), txns: m[4].map(txnFromDb), jurnal: m[5].map(jurnalFromDb),
     hutangOverrides: hutangOverrides,
+    materials: m[7].map(materialFromDb), pekerjaan: m[8].map(pekerjaanFromDb),
+    rapMaterial: m[9].map(rapMaterialFromDb), materialReceipts: m[10].map(materialReceiptFromDb),
+    materialUsage: m[11].map(materialUsageFromDb),
   };
 }
 

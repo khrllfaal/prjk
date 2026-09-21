@@ -30,8 +30,17 @@ function hideLogin(){
 
 /* profile: {id, email, nama, role} — same shape regardless of backend. */
 async function bootAfterLogin(profile){
+  if(profile.role==='lapangan'){
+    // Field admins get a dedicated mobile-first app (material in/out
+    // only) — the desktop dashboard's data calls are role-blocked for
+    // them anyway, so send them straight there instead of showing a
+    // half-broken accounting UI.
+    location.href = 'lapangan.html';
+    return;
+  }
   CURRENT_PROFILE = profile;
-  document.getElementById('tbUserName').textContent = profile.nama+' ('+(profile.role==='admin'?'Admin':'Owner')+')';
+  var roleLabel = {admin:'Admin', owner:'Owner'}[profile.role] || profile.role;
+  document.getElementById('tbUserName').textContent = profile.nama+' ('+roleLabel+')';
   document.getElementById('tbAvatar').textContent = (profile.nama||'?').slice(0,2).toUpperCase();
   document.getElementById('btnLogout').style.display = '';
 

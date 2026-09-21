@@ -13,15 +13,29 @@ require_once __DIR__ . '/helpers.php';
  * $idColumn: primary key column name, default 'id'.
  * $insertOnlyColumns: columns (e.g. created_by) written on first
  * insert but never overwritten by a later upsert-as-update.
+ * $writeRoles: if non-null, only these roles may POST/DELETE (GET still
+ * only requires being logged in, unless $readRoles narrows it too).
+ * Existing callers that omit it keep today's behaviour — any logged-in
+ * role can write.
+ * $readRoles: if non-null, only these roles may GET. Used to keep
+ * 'lapangan' (field admin) accounts — no business reason to see
+ * company-wide financial data — out of the accounting tables entirely,
+ * not just blocked from writing to them.
  */
-function handle_resource_crud(string $table, array $columns, string $idColumn = 'id', array $insertOnlyColumns = []): void {
+function handle_resource_crud(string $table, array $columns, string $idColumn = 'id', array $insertOnlyColumns = [], ?array $writeRoles = null, ?array $readRoles = null): void {
     // CORS (and the OPTIONS preflight short-circuit) must run before any
     // auth check — a preflight request never carries credentials, so
     // require_login() would 401 it before the browser ever got to see
     // the CORS headers, and silently block the real request that follows.
     send_cors_headers();
-    require_login();
     $method = $_SERVER['REQUEST_METHOD'];
+    if ($method !== 'GET') {
+        // 'owner' is read-only everywhere in this app, no matter what
+        // $writeRoles says — it's never meant to be a writer role.
+        require_role($writeRoles !== null ? array_diff($writeRoles, ['owner']) : ['admin']);
+    } else {
+        $readRoles !== null ? require_role($readRoles) : require_login();
+    }
 
     if ($method === 'GET') {
         $rows = db()->query("SELECT * FROM `$table` ORDER BY `$idColumn`")->fetchAll();

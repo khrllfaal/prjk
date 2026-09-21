@@ -39,4 +39,6 @@ start_session();
 session_regenerate_id(true);
 $_SESSION['user'] = ['id' => $user['id'], 'email' => $user['email'], 'nama' => $user['nama'], 'role' => $user['role']];
 
-json_response(['user' => $_SESSION['user']]);
+$out = $_SESSION['user'];
+if ($user['role'] === 'lapangan') $out['projectIds'] = user_project_ids($_SESSION['user']);
+json_response(['user' => $out]);

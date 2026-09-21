@@ -107,6 +107,31 @@ function require_login(): array {
     return $u;
 }
 
+/** Like require_login(), but 403s unless the user's role is in $roles. */
+function require_role(array $roles): array {
+    $u = require_login();
+    if (!in_array($u['role'], $roles, true)) json_error('Anda tidak punya akses untuk aksi ini.', 403);
+    return $u;
+}
+
+/** Project IDs a 'lapangan' user is allowed to touch. admin/owner get
+ *  null, meaning "no restriction" — callers must check for that. */
+function user_project_ids(array $user): ?array {
+    if ($user['role'] !== 'lapangan') return null;
+    $stmt = db()->prepare('SELECT project_id FROM user_projects WHERE user_id = ?');
+    $stmt->execute([$user['id']]);
+    return array_column($stmt->fetchAll(), 'project_id');
+}
+
+/** 403s if $user (a 'lapangan' user) isn't assigned to $projectId.
+ *  No-op for admin/owner. */
+function require_project_access(array $user, string $projectId): void {
+    $scope = user_project_ids($user);
+    if ($scope !== null && !in_array($projectId, $scope, true)) {
+        json_error('Anda tidak punya akses ke proyek ini.', 403);
+    }
+}
+
 function audit(string $action, string $entity, string $entityId, string $detail = ''): void {
     $u = current_user();
     $stmt = db()->prepare(

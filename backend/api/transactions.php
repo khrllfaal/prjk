@@ -12,4 +12,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 handle_resource_crud('transactions', [
     'id', 'jenis', 'tgl', 'ref', 'akun_kas', 'akun_lawan', 'project', 'relasi',
     'customer_id', 'vendor_id', 'ket', 'debet', 'kredit', 'created_by',
-], 'id', ['created_by']);
+], 'id', ['created_by'], null, ['admin', 'owner']);

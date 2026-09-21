@@ -9,4 +9,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 handle_resource_crud('jurnal_umum', [
     'id', 'tgl', 'ref', 'akun', 'project', 'relasi', 'kategori', 'no_faktur', 'status', 'ket', 'debet', 'kredit', 'created_by',
-], 'id', ['created_by']);
+], 'id', ['created_by'], null, ['admin', 'owner']);
