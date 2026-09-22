@@ -698,7 +698,14 @@ function isCostAkun(akunLawan){
 // Umum postings ever count toward a Biaya line; see groupByHead() and
 // computeProjectProgressRows().
 function isBiayaAkun(nama){
-  return akunNamaOnly(nama).indexOf('Biaya ')===0;
+  if(akunNamaOnly(nama).indexOf('Biaya ')!==0) return false;
+  // "1.1.24-Biaya Dibayar Dimuka" is a Neraca asset despite the name
+  // starting with "Biaya " — the no-netting rule above is only about
+  // Laba Rugi cost/expense accounts (heads 5-8); a Neraca account
+  // (heads 1-3) never qualifies, so a Kas Masuk/Bank Masuk refund
+  // against it (e.g. a returned prepayment) reduces it normally.
+  var h=akunHead(nama);
+  return h!=='1' && h!=='2' && h!=='3';
 }
 /* Jurnal Umum refs the owner wants temporarily left OUT of every report
    (Laba Rugi, Neraca, Dashboard, Trial Hutang) without changing their
