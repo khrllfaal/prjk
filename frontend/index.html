@@ -2528,13 +2528,16 @@ function financePage(jenis, title, sub){
     // every Bank account, NOT "Ayat Silang Antar Bank"). Do not widen
     // this without a fresh screenshot showing a specific account is
     // missing — Akun Bank (Bank Masuk/Keluar) below is unrelated and
-    // already matches every "Bank " account correctly.
+    // already matches every "Bank " account correctly. Order matters —
+    // Kas Besar/Kas Kecil first, then the rest — same order as the
+    // screenshot, so this list is a fixed sequence, not something
+    // re-derived by filtering DB.coa (which sorts by kode instead).
     var KAS_AKUN_KAS_NAMES=['Kas Besar','Kas Kecil','Ayat Silang Kas Besar Kas-Kecil',
       'Ayat Silang Kas Besar Kas-Bank','Bank BCA Prakasa','Bank BJB RC Prakasa',
       'Bank BRI Prakasa','Bank BNI Prakasa','Kas Cadangan THR'];
     var kasAkun=isBank
       ? DB.coa.filter(function(a){ return String(a.nama||'').indexOf('Bank ')===0; }).map(function(a){ return a.nama; })
-      : DB.coa.filter(function(a){ return KAS_AKUN_KAS_NAMES.indexOf(a.nama)>-1; }).map(function(a){ return a.nama; });
+      : KAS_AKUN_KAS_NAMES.filter(function(nm){ return DB.coa.some(function(a){ return a.nama===nm; }); });
     if(!kasAkun.length) kasAkun=isBank?['Bank BCA','Bank BJB','Bank BRI','Bank BNI','Bank MANDIRI']:['Kas Besar','Kas Kecil'];
 
     c.innerHTML = pageHead(title, sub,
