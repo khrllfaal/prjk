@@ -2642,10 +2642,6 @@ function financePage(jenis, title, sub){
           '<div id="f_akunKas_ssel"></div><input type="hidden" id="f_akunKas" value="'+esc(v('akunKas',''))+'"></div>'+
         '<div class="field"><label>Akun Lawan *</label>'+
           '<div id="f_akunLawan_ssel"></div><input type="hidden" id="f_akunLawan" value="'+esc(v('akunLawan',''))+'"></div>'+
-        '<div class="field full" id="f_ayatSilangHint" style="display:none;">'+
-          '<div style="background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn);border-radius:8px;padding:10px 12px;font-size:13px;">'+
-          '⚠ Ini transfer internal ("Ayat Silang") — jangan lupa isi juga 1 transaksi lagi di sisi satunya '+
-          '(tanggal &amp; jumlah sama, akun lawan yang sama juga), supaya Dashboard tidak salah hitung.</div></div>'+
         '<div class="field"><label>Project</label>'+
           '<div id="f_project_ssel"></div><input type="hidden" id="f_project" value="'+esc(v('project',''))+'"></div>'+
         '<div class="field"><label>'+relasiLabel+'</label>'+
@@ -2681,18 +2677,6 @@ function financePage(jenis, title, sub){
         placeholder:'Cari akun '+(isBank?'bank':'kas')+'…'});
       searchableSelect('f_akunLawan_ssel','f_akunLawan',{options:lawanOpts.map(function(a){ return {value:a,label:a}; }),
         placeholder:'Cari kode / nama akun…'});
-      // Ayat Silang is always one leg of a 2-transaction internal
-      // transfer (see isInternalTransferAkun()/isBankTransferAkun()) —
-      // the app can't create the other leg automatically (it doesn't
-      // know which account it's going to/from), so remind the user
-      // right when they pick it, not after the Dashboard quietly goes
-      // wrong from a missing counterpart.
-      var ayatSilangHint=document.getElementById('f_ayatSilangHint');
-      function syncAyatSilangHint(){
-        ayatSilangHint.style.display=akunNamaOnly(fv('f_akunLawan')).indexOf('Ayat Silang')===0?'':'none';
-      }
-      document.getElementById('f_akunLawan').addEventListener('change', syncAyatSilangHint);
-      syncAyatSilangHint();
       searchableSelect('f_project_ssel','f_project',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
         placeholder:'Cari project…'});
       searchableSelect('f_relasi_ssel','f_relasi',{options:relasiList.map(function(r){ return {value:r.nama,label:r.nama}; }),
