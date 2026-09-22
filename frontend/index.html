@@ -2521,8 +2521,20 @@ function financePage(jenis, title, sub){
     var isIn=/masuk$/.test(jenis);
     var isBank=/^bank/.test(jenis);
 
+    // Was a kode-range regex (1.1.3-1.1.7 / 1.1.1-1.1.2) written back when
+    // Master COA still used single-digit codes — Master COA has used
+    // zero-padded 2-digit codes (1.1.03, 1.1.36, ...) for a long time, so
+    // that regex has matched nothing since then and this form has been
+    // silently running on the 5-name fallback below no matter how many
+    // real bank accounts exist. Match by name instead (same "starts
+    // with" idiom as isBiayaAkun()/isBankTransferAkun() elsewhere in this
+    // file) so a newly added account (any kode) shows up automatically —
+    // "Bank " catches every Bank BCA/BJB/BRI/BNI/Mandiri/giro variant,
+    // never "Ayat Silang..."/"Hutang Bank...", which aren't a real
+    // kas/bank account to post the transaction's own side against.
     var kasAkun=DB.coa.filter(function(a){
-      return isBank ? /^1\.1\.[3-7]$/.test(a.kode) : /^1\.1\.[12]$/.test(a.kode);
+      return isBank ? String(a.nama||'').indexOf('Bank ')===0
+                    : (a.nama==='Kas Besar' || a.nama==='Kas Kecil');
     }).map(function(a){ return a.nama; });
     if(!kasAkun.length) kasAkun=isBank?['Bank BCA','Bank BJB','Bank BRI','Bank BNI','Bank MANDIRI']:['Kas Besar','Kas Kecil'];
 
@@ -3698,7 +3710,9 @@ function registerPages(){
     function openBayarHutangModal(notaId){
       var row=allRows.find(function(r){ return r.id===notaId; });
       if(!row) return;
-      var kasAkun=DB.coa.filter(function(a){ return /^1\.1\.[12]$/.test(a.kode); }).map(function(a){ return a.nama; });
+      // Same kode-range-regex bug as financePage() above (fixed there
+      // with the same reasoning) — match by name, not a stale kode range.
+      var kasAkun=DB.coa.filter(function(a){ return a.nama==='Kas Besar' || a.nama==='Kas Kecil'; }).map(function(a){ return a.nama; });
       if(!kasAkun.length) kasAkun=['Kas Besar','Kas Kecil'];
 
       var html='<div class="field full"><label>Nota</label><div style="padding:8px 0;font-size:13px;">'+
