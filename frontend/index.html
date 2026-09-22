@@ -4046,6 +4046,7 @@ function registerPages(){
         }
       });
       var claimed={};
+      var lrCumDb=0, lrCumCr=0; // every Laba Rugi account's real (un-zeroed) pre-period total
 
       var coaSorted=DB.coa.slice().sort(function(a,b){ return compareKode(a.kode,b.kode); });
       var rows=[]; lastRows=[];
@@ -4073,7 +4074,11 @@ function registerPages(){
         // asli's own report always starts them at Rp0 each month (closed
         // out, not carried forward), unlike Neraca's permanent accounts
         // (heads 1-3) which DO carry every prior posting plus Master
-        // COA's own saldoAwal (same rule groupByHead()/Neraca uses).
+        // COA's own saldoAwal (same rule groupByHead()/Neraca uses). Their
+        // real pre-period activity isn't discarded though — every prior
+        // month's closing feeds Laba Tahun Berjalan (see below), so it's
+        // tallied here before being zeroed out for display.
+        if(isLabaRugi){ lrCumDb+=b.preDb; lrCumCr+=b.preCr; }
         var preDb=isLabaRugi?0:b.preDb, preCr=isLabaRugi?0:b.preCr;
         var saldoOvr=TRIAL_SALDO_AWAL_OVERRIDE[cAcc.kode];
         if(!isLabaRugi && saldoOvr){
@@ -4095,28 +4100,22 @@ function registerPages(){
           .forEach(function(k){ totals[k]+=row[k]; });
       });
 
-      // Laba Tahun Berjalan is never posted to directly — sistem asli's
-      // Neraca (see PAGES.neraca) derives it as the balancing figure
-      // (Aktiva − Hutang − every other Ekuitas account), and its Trial
-      // Balance carries that same derived figure as this account's
-      // Saldo Setelah Adj/Neraca value. Recompute it here the identical
-      // way, from this report's own Saldo Setelah Adj columns, so the
-      // two statements never disagree.
+      // Laba Tahun Berjalan is never posted to directly — every Laba Rugi
+      // account (heads 4-8) closes out to Rp0 each month on this report
+      // (see isLabaRugi above), and what closes out has to land somewhere:
+      // it's this account's Saldo Awal. So its Saldo Awal is exactly the
+      // net (Kredit − Debet) of every Laba Rugi account's real pre-period
+      // activity, tallied as lrCumDb/lrCumCr above — confirmed to the
+      // rupiah against sistem asli's own Trial Balance export. Neraca's
+      // own Laba Tahun Berjalan (PAGES.neraca) is a different figure: this
+      // account's Saldo Awal here PLUS the current month's own Laba Rugi
+      // net, since Neraca includes the month that hasn't closed yet.
       var lababRow=lastRows.filter(function(r){ return akunNamaOnly(r.nama)==='Laba Tahun Berjalan'; })[0];
       if(lababRow){
-        var sumNet=function(headDigit, excl){
-          return lastRows.reduce(function(a,r){
-            if(String(r.kode).split('.')[0]!==headDigit || r===excl) return a;
-            return a+(r.afterDb-r.afterCr);
-          },0);
-        };
-        var totalAktivaNet=sumNet('1',null);
-        var totalHutangNet=-sumNet('2',null);
-        var totalEkuitasLainNet=-sumNet('3',lababRow);
-        var laba=totalAktivaNet-totalHutangNet-totalEkuitasLainNet;
+        var laba=lrCumCr-lrCumDb;
         ['preDb','preCr','mutDb','mutCr','adjDb','adjCr','afterDb','afterCr','lrDb','lrCr','nrDb','nrCr']
           .forEach(function(k){ totals[k]-=lababRow[k]; });
-        lababRow.preDb=laba>0?laba:0; lababRow.preCr=laba<0?-laba:0;
+        lababRow.preDb=laba<0?-laba:0; lababRow.preCr=laba>0?laba:0;
         lababRow.mutDb=0; lababRow.mutCr=0; lababRow.adjDb=0; lababRow.adjCr=0;
         lababRow.afterDb=lababRow.preDb; lababRow.afterCr=lababRow.preCr;
         lababRow.lrDb=0; lababRow.lrCr=0;
