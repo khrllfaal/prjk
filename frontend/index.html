@@ -706,11 +706,15 @@ function isBiayaAkun(nama){
    Umum, this only hides it from aggregate totals while its treatment is
    still being decided. Different from Draft on purpose: a Draft looks
    unfinished in the Jurnal Umum list, this doesn't.
-   JU26090084 ("baud bajaringan 12000pcs, ramsate 350pcs, kanal c 250btg,
-   reng lipat 225btg") — sistem asli's own reports don't count it (not in
-   Dustira's Biaya Bahan, not in Hutang Dagang), owner asked to leave it
-   out of the totals for now while confirming with sistem asli directly. */
-var EXCLUDED_JURNAL_REFS={'JU26090084':true};
+   JU26090084 used to sit here: sistem asli's own reports don't count it
+   in Dustira's Biaya Bahan or in Hutang Dagang, which looked like it
+   needed manual exclusion — turned out sistem asli itself dated this
+   entry 2029-08-28 (a typo), so it naturally falls outside any
+   as-of-today Neraca/Laba Rugi range while still showing in date-
+   unbounded reports (Jurnal Umum, Laporan Hutang) exactly like sistem
+   asli. Fixed by correcting the stored tgl to match, not by excluding
+   the ref — see accv_UPDATE_round13_delivery.sql. */
+var EXCLUDED_JURNAL_REFS={};
 // A voucher saved as Draft is still being reviewed/completed — like an
 // unposted journal entry in Accurate, it must not affect any report
 // (Laba Rugi, Neraca, Dashboard, Trial Hutang) until marked Posted. Rows
