@@ -2535,10 +2535,20 @@ function financePage(jenis, title, sub){
     var KAS_AKUN_KAS_NAMES=['Kas Besar','Kas Kecil','Ayat Silang Kas Besar Kas-Kecil',
       'Ayat Silang Kas Besar Kas-Bank','Bank BCA Prakasa','Bank BJB RC Prakasa',
       'Bank BRI Prakasa','Bank BNI Prakasa','Kas Cadangan THR'];
-    var kasAkun=isBank
-      ? DB.coa.filter(function(a){ return String(a.nama||'').indexOf('Bank ')===0; }).map(function(a){ return a.nama; })
-      : KAS_AKUN_KAS_NAMES.filter(function(nm){ return DB.coa.some(function(a){ return a.nama===nm; }); });
+    var kasAkunCoa=isBank
+      ? DB.coa.filter(function(a){ return String(a.nama||'').indexOf('Bank ')===0; })
+      : KAS_AKUN_KAS_NAMES.map(function(nm){ return DB.coa.find(function(a){ return a.nama===nm; }); })
+          .filter(Boolean);
+    var kasAkun=kasAkunCoa.map(function(a){ return a.nama; });
     if(!kasAkun.length) kasAkun=isBank?['Bank BCA','Bank BJB','Bank BRI','Bank BNI','Bank MANDIRI']:['Kas Besar','Kas Kecil'];
+    // Dropdown LABEL shows "kode-nama" like Akun Lawan does, but the
+    // stored VALUE stays the bare name — akunKas has always been a bare
+    // name (kasAkunLabel() below derives the coded label from it for
+    // Neraca; DASHBOARD_OPENING_AKUN, sumRange(), bankFlows(), and every
+    // SQL delivered against this data all compare it as a bare string),
+    // so only the label changes here, not what actually gets saved.
+    var kasAkunOpts=kasAkunCoa.map(function(a){ return {value:a.nama, label:a.kode+'-'+a.nama}; });
+    if(!kasAkunOpts.length) kasAkunOpts=kasAkun.map(function(a){ return {value:a,label:a}; });
 
     c.innerHTML = pageHead(title, sub,
       '<button class="btn btn-primary" id="btnAdd">+ Tambah Data</button>'+exportBtns('exp')) +
@@ -2663,7 +2673,7 @@ function financePage(jenis, title, sub){
         saveDB(); syncUpsert('transactions', obj); closeModal(); refresh();
         toast(id?'Transaksi diperbarui.':'Transaksi ditambahkan.','success');
       }});
-      searchableSelect('f_akunKas_ssel','f_akunKas',{options:kasAkun.map(function(a){ return {value:a,label:a}; }),
+      searchableSelect('f_akunKas_ssel','f_akunKas',{options:kasAkunOpts,
         placeholder:'Cari akun '+(isBank?'bank':'kas')+'…'});
       searchableSelect('f_akunLawan_ssel','f_akunLawan',{options:lawanOpts.map(function(a){ return {value:a,label:a}; }),
         placeholder:'Cari kode / nama akun…'});
