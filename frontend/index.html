@@ -3987,12 +3987,16 @@ function registerPages(){
       var showZero=document.getElementById('fShowZero').checked;
 
       // One pass over every posting, bucketed by account name into
-      // pre-period / this-month-Mutasi / this-month-Jurnal-Penyesuaian —
-      // same isBiayaAkun() refund exclusion groupByHead() uses, so this
-      // report's Neraca/Laba Rugi columns agree with those statements.
+      // pre-period / this-month-Mutasi / this-month-Jurnal-Penyesuaian.
+      // Unlike groupByHead() (Neraca/Laba Rugi), this report keeps every
+      // posting including a Kas/Bank Masuk refund against a Biaya akun
+      // (isBiayaAkun()) — sistem asli's own Trial Balance shows such a
+      // refund as real Mutasi Kredit on that expense account, and this
+      // report's own final Db-minus-Cr netting (afterDb/afterCr below)
+      // already folds it in correctly, so excluding it here would only
+      // make the Mutasi columns miss real activity.
       var byName={};
       allEntries().forEach(function(e){
-        if(e.leg==='lawan' && /masuk$/.test(e.jenis) && isBiayaAkun(e.akun)) return;
         var key=akunNamaOnly(e.akun).toLowerCase();
         if(!byName[key]) byName[key]={preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0};
         var b=byName[key];
