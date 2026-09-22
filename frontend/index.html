@@ -3981,11 +3981,7 @@ function registerPages(){
   var TRIAL_SALDO_AWAL_OVERRIDE={
     '2.1.1':{db:0,cr:42080520},   // Hutang Dagang
     '2.1.3':{db:0,cr:0},          // Hutang Pihak Ke-3 (jk pendek)
-    '2.2.1':{db:0,cr:425539546},  // Hutang Pihak Ke-3 (jk panjang)
-    '3.1.1':{db:0,cr:0}           // Modal Disetor-A -- Saldo Awal Kredit di sini
-                                   // datang murni dari transaksi riil (lihat
-                                   // ADJ-2026-0001 exclusion di atas), COA
-                                   // saldoAwal (dipakai Neraca) tidak dipakai
+    '2.2.1':{db:0,cr:425539546}   // Hutang Pihak Ke-3 (jk panjang)
   };
   PAGES.trial=function(c){
     var years=Array.from(new Set(DB.txns.map(function(t){ return t.tgl.slice(0,4); })
@@ -4027,14 +4023,6 @@ function registerPages(){
       // make the Mutasi columns miss real activity.
       var byName={};
       allEntries().forEach(function(e){
-        // ADJ-2026-0001 is a synthetic entry (Kas Kecil's Rp10jt opening
-        // balance, never a real sistem asli posting) — its Kas Kecil leg
-        // stays (Kas Kecil's own Saldo Awal already matches sistem asli
-        // exactly with it included), but its Modal Disetor-A contra leg
-        // must be excluded here: sistem asli's own Trial Balance shows
-        // Modal Disetor-A's Saldo Awal Kredit as exactly the real Kartu
-        // total (Rp712.650.000), which only holds with this leg dropped.
-        if(e.ref==='ADJ-2026-0001' && e.leg==='lawan') return;
         var key=akunNamaOnly(e.akun).toLowerCase();
         if(key==='hutang pihak ke-3' && TRIAL_HPK3_LONGTERM_REFS[e.ref]) key='hutang pihak ke-3 (jk panjang)';
         if(!byName[key]) byName[key]={preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0};
