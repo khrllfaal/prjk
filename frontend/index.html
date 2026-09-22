@@ -847,14 +847,21 @@ var NON_CASH_KAS_KELUAR_REFS={};
 /* Master COA's Saldo Awal column is a full trial-balance opening figure —
    every Aktiva/Kewajiban/Ekuitas account (Piutang, Hutang, Biaya Dibayar
    Dimuka, ...) carries one there for the Neraca. The Dashboard's cash-
-   position "Saldo Awal" is a much narrower thing: only these 4 bank
-   accounts pre-date this ledger's tracked kas/bank transaction history —
-   Kas Besar and every other bank account already has its full history
-   recorded as transactions from zero. Summing every COA line here would
-   pull in Piutang/Hutang/prepaid-expense opening balances that belong on
-   the Neraca, not the cash flow — confirmed by the owner, who named these
-   4 accounts specifically. */
-var DASHBOARD_OPENING_AKUN=['Bank BNI PT','Bank BNI Prakasa','Bank BJB PT','Bank BJB CV Purbayanti'];
+   position "Saldo Awal" is a much narrower thing: only these accounts
+   pre-date this ledger's tracked kas/bank transaction history — every
+   other bank/kas account already has its full history recorded as
+   transactions from zero. Summing every COA line here would pull in
+   Piutang/Hutang/prepaid-expense opening balances that belong on the
+   Neraca, not the cash flow — confirmed by the owner, who named the 4
+   bank accounts specifically. Kas Kecil joined them for one reason only:
+   an owner capital contribution of Rp10.000.000 (confirmed against
+   sistem asli's Neraca) predates this ledger the same way the 4 banks'
+   balances do — sistem asli's own Dashboard Cash Flow doesn't count it
+   as Uang Masuk, so it belongs here as a starting balance, not as a Kas
+   Masuk transaction (which would inflate that KPI by the same amount
+   while leaving Saldo Akhir needing an equal-and-opposite correction
+   elsewhere — this is the one place that avoids that). */
+var DASHBOARD_OPENING_AKUN=['Bank BNI PT','Bank BNI Prakasa','Bank BJB PT','Bank BJB CV Purbayanti','Kas Kecil'];
 function dashboardOpeningBalance(){
   return (DB.coa||[]).filter(function(c){
     return DASHBOARD_OPENING_AKUN.indexOf(String(c.nama||'').trim())>-1;
