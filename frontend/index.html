@@ -3957,6 +3957,23 @@ function registerPages(){
      keeps these separate from Mutasi), Saldo Setelah Adj (the three
      added together), then that net balance placed under Laba Rugi
      (heads 5-8) or Neraca (heads 1-3), whichever the account is. */
+  // Trial Balance's own Saldo Awal for a few Neraca (head 1-3) accounts
+  // does not match sistem asli's own Neraca coa.saldoAwal field — the two
+  // statements draw on different underlying bases in sistem asli's real
+  // system (confirmed against its own exports for Hutang Dagang, Hutang
+  // Pihak Ke-3 jk pendek/panjang). This override applies ONLY to this
+  // report's Saldo Awal Db/Cr, keyed by kode, and never touches
+  // cAcc.saldoAwal itself, so Neraca/Buku Besar/groupByHead() are
+  // completely unaffected.
+  var TRIAL_SALDO_AWAL_OVERRIDE={
+    '2.1.1':{db:0,cr:42080520},   // Hutang Dagang
+    '2.1.3':{db:0,cr:0},          // Hutang Pihak Ke-3 (jk pendek)
+    '2.2.1':{db:0,cr:425539546},  // Hutang Pihak Ke-3 (jk panjang)
+    '3.1.1':{db:0,cr:0}           // Modal Disetor-A -- Saldo Awal Kredit di sini
+                                   // datang murni dari transaksi riil (lihat
+                                   // ADJ-2026-0001 exclusion di atas), COA
+                                   // saldoAwal (dipakai Neraca) tidak dipakai
+  };
   PAGES.trial=function(c){
     var years=Array.from(new Set(DB.txns.map(function(t){ return t.tgl.slice(0,4); })
       .concat(DB.jurnal.map(function(j){ return j.tgl.slice(0,4); })))).filter(Boolean).sort();
@@ -3997,6 +4014,14 @@ function registerPages(){
       // make the Mutasi columns miss real activity.
       var byName={};
       allEntries().forEach(function(e){
+        // ADJ-2026-0001 is a synthetic entry (Kas Kecil's Rp10jt opening
+        // balance, never a real sistem asli posting) — its Kas Kecil leg
+        // stays (Kas Kecil's own Saldo Awal already matches sistem asli
+        // exactly with it included), but its Modal Disetor-A contra leg
+        // must be excluded here: sistem asli's own Trial Balance shows
+        // Modal Disetor-A's Saldo Awal Kredit as exactly the real Kartu
+        // total (Rp712.650.000), which only holds with this leg dropped.
+        if(e.ref==='ADJ-2026-0001' && e.leg==='lawan') return;
         var key=akunNamaOnly(e.akun).toLowerCase();
         if(!byName[key]) byName[key]={preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0};
         var b=byName[key];
@@ -4027,7 +4052,10 @@ function registerPages(){
         // (heads 1-3) which DO carry every prior posting plus Master
         // COA's own saldoAwal (same rule groupByHead()/Neraca uses).
         var preDb=isLabaRugi?0:b.preDb, preCr=isLabaRugi?0:b.preCr;
-        if(!isLabaRugi && cAcc.saldoAwal){
+        var saldoOvr=TRIAL_SALDO_AWAL_OVERRIDE[cAcc.kode];
+        if(!isLabaRugi && saldoOvr){
+          preDb+=saldoOvr.db; preCr+=saldoOvr.cr;
+        } else if(!isLabaRugi && cAcc.saldoAwal){
           if(head==='1') preDb+=cAcc.saldoAwal; else preCr+=cAcc.saldoAwal;
         }
         var afterDb=preDb+b.mutDb+b.adjDb, afterCr=preCr+b.mutCr+b.adjCr;
