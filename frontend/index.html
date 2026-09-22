@@ -3977,6 +3977,22 @@ function registerPages(){
      keeps these separate from Mutasi), Saldo Setelah Adj (the three
      added together), then that net balance placed under Laba Rugi
      (heads 5-8) or Neraca (heads 1-3), whichever the account is. */
+  // Trial Balance's own Saldo Awal for these three accounts does not
+  // match sistem asli's own Neraca/Buku Besar coa.saldoAwal (confirmed:
+  // moving these into a real coa.saldoAwal field, tried in an earlier
+  // round, threw Neraca off — the owner confirmed Neraca must keep
+  // showing Hutang Dagang Rp372.133.086 and 2.2.1 -Rp165.146.763, which
+  // only holds with coa.saldoAwal at 0 for both). So this report alone
+  // adds these on top of its own raw Saldo Awal, exactly like before
+  // that round, without ever touching cAcc.saldoAwal itself.
+  var TRIAL_SALDO_AWAL_OVERRIDE={
+    '2.1.1':{db:0,cr:42080520},   // Hutang Dagang
+    '2.2.1':{db:0,cr:425539546},  // Hutang Pihak Ke-3 (jk panjang)
+    '3.1.1':{db:0,cr:0}           // Modal Disetor-A -- cancels coa.saldoAwal
+                                   // (Rp440.283.008, needed for Neraca) so
+                                   // this report's own Saldo Awal Kredit
+                                   // stays the real Kartu total alone
+  };
   PAGES.trial=function(c){
     var years=Array.from(new Set(DB.txns.map(function(t){ return t.tgl.slice(0,4); })
       .concat(DB.jurnal.map(function(j){ return j.tgl.slice(0,4); })))).filter(Boolean).sort();
@@ -4062,7 +4078,10 @@ function registerPages(){
         // tallied here before being zeroed out for display.
         if(isLabaRugi){ lrCumDb+=b.preDb; lrCumCr+=b.preCr; }
         var preDb=isLabaRugi?0:b.preDb, preCr=isLabaRugi?0:b.preCr;
-        if(!isLabaRugi && cAcc.saldoAwal){
+        var saldoOvr=TRIAL_SALDO_AWAL_OVERRIDE[cAcc.kode];
+        if(!isLabaRugi && saldoOvr){
+          preDb+=saldoOvr.db; preCr+=saldoOvr.cr;
+        } else if(!isLabaRugi && cAcc.saldoAwal){
           if(head==='1') preDb+=cAcc.saldoAwal; else preCr+=cAcc.saldoAwal;
         }
         var afterDb=preDb+b.mutDb+b.adjDb, afterCr=preCr+b.mutCr+b.adjCr;
