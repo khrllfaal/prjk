@@ -4015,18 +4015,19 @@ function registerPages(){
         var key=String(cAcc.nama||'').trim().toLowerCase();
         var b=(!claimed[key] && byName[key]) ? byName[key] : {preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0};
         claimed[key]=true;
-        var preDb=b.preDb, preCr=b.preCr;
-        // Master COA's own saldoAwal belongs to the very start of the
-        // ledger, so it always lands in Saldo Awal here, same debet-
-        // for-aktiva / kredit-for-liability-equity rule groupByHead()
-        // (Neraca) uses — keeps this report and Neraca agreeing.
         var head=String(cAcc.kode).split('.')[0];
-        if(cAcc.saldoAwal){
-          if(head==='1') preDb+=cAcc.saldoAwal; else if(/^[23]$/.test(head)) preCr+=cAcc.saldoAwal;
+        var isLabaRugi=/^[45678]$/.test(head);
+        // Laba Rugi accounts (heads 4-8) are nominal/temporary — sistem
+        // asli's own report always starts them at Rp0 each month (closed
+        // out, not carried forward), unlike Neraca's permanent accounts
+        // (heads 1-3) which DO carry every prior posting plus Master
+        // COA's own saldoAwal (same rule groupByHead()/Neraca uses).
+        var preDb=isLabaRugi?0:b.preDb, preCr=isLabaRugi?0:b.preCr;
+        if(!isLabaRugi && cAcc.saldoAwal){
+          if(head==='1') preDb+=cAcc.saldoAwal; else preCr+=cAcc.saldoAwal;
         }
         var afterDb=preDb+b.mutDb+b.adjDb, afterCr=preCr+b.mutCr+b.adjCr;
         var net=afterDb-afterCr;
-        var isLabaRugi=/^[5678]$/.test(head);
         var lrDb=isLabaRugi&&net>0?net:0, lrCr=isLabaRugi&&net<0?-net:0;
         var nrDb=!isLabaRugi&&net>0?net:0, nrCr=!isLabaRugi&&net<0?-net:0;
         var hasActivity=preDb||preCr||b.mutDb||b.mutCr||b.adjDb||b.adjCr;
