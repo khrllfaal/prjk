@@ -869,6 +869,25 @@ var NON_CASH_KAS_KELUAR_REFS={};
    discipline: never pattern-match on account name or description. */
 var NON_OPERATING_KAS_MASUK_REFS={'ADJ-2026-0001':true};
 
+/* Two different COA leaves can share the exact same name — both
+   "2.1.3-Hutang Pihak Ke-3" (jk pendek) and "2.2.1-Hutang Pihak Ke-3"
+   (jk panjang) exist, and a posted entry only ever names the account,
+   never which specific leaf. Sistem asli's own Buku Besar for BOTH
+   leaves (Dari 01/01/2026) gave the exact split, ref by ref: these 12
+   — the KUR Yusri / KUR Fahri installments, plus the CC-Beat motor
+   cicilan — belong to the long-term leaf; every other posting to this
+   name stays short-term. Every report that needs to tell the two
+   apart (Neraca, Buku Besar, Trial Balance, and their drilldowns)
+   reads this one set, so they can never disagree with each other. */
+var HPK3_LONGTERM_REFS={
+  'CO-2609-0266':true,'CO-2609-0263':true,'CO-2609-0258':true,'CO-2606-0003':true,
+  'CO-2606-0228':true,'CO-2606-0549':true,'CO-2606-0780':true,'CO-2607-0169':true,
+  'CO-2607-0464':true,'CO-2607-0944':true,'CO-2608-0742':true,'CO-2609-1040':true
+};
+function isHpk3LongTermEntry(e){
+  return akunNamaOnly(e.akun).toLowerCase()==='hutang pihak ke-3' && !!HPK3_LONGTERM_REFS[e.ref];
+}
+
 /* Master COA's Saldo Awal column is a full trial-balance opening figure —
    every Aktiva/Kewajiban/Ekuitas account (Piutang, Hutang, Biaya Dibayar
    Dimuka, ...) carries one there for the Neraca. The Dashboard's cash-
@@ -3857,43 +3876,44 @@ function registerPages(){
 
   /* ---------------- BUKU BESAR ---------------- */
   PAGES.buku_besar=function(c){
-    var akunList=[];
-    var seen={};
-    allEntries().forEach(function(e){
-      var a=akunLabel(e.akun);
-      if(!seen[a]){ seen[a]=1; akunList.push(a); }
-    });
-    // sort by account code numerically; unlabelled entries go last
-    akunList.sort(function(a,b){
-      var ka=akunKode(a), kb=akunKode(b);
-      if(!ka && !kb) return a<b?-1:1;
-      if(!ka) return 1;
-      if(!kb) return -1;
-      var pa=ka.split('.').map(Number), pb=kb.split('.').map(Number);
-      for(var i=0;i<Math.max(pa.length,pb.length);i++){
-        var x=pa[i]||0, y=pb[i]||0;
-        if(x!==y) return x-y;
-      }
-      return 0;
-    });
+    // The account picker lists every Master COA leaf directly (kode +
+    // nama), not just names seen on a posted entry — sistem asli's own
+    // dropdown does the same, and it's the only way two COA leaves that
+    // share one name (both "Hutang Pihak Ke-3", short/long-term) show up
+    // as two separate choices instead of colliding into one.
+    var akunList=DB.coa.filter(function(cc){ return cc.level===3; })
+      .slice().sort(function(a,b){ return compareKode(a.kode,b.kode); });
 
     reportShell(c,'Buku Besar','Rincian mutasi dan saldo berjalan per akun',
       '<div class="field grow"><label>Pilih Akun</label><select id="fAkun">'+
-      akunList.map(function(a,i){ return '<option'+(i===0?' selected':'')+'>'+esc(a)+'</option>'; }).join('')+'</select></div>'+
+      akunList.map(function(a,i){ return '<option value="'+esc(a.kode)+'"'+(i===0?' selected':'')+'>'+esc(a.kode)+' - '+esc(a.nama)+'</option>'; }).join('')+'</select></div>'+
       '<div class="field grow"><label>Project</label>'+
       '<div id="fProject_ssel"></div><input type="hidden" id="fProject" value=""></div>');
 
     var tbl;
     function refresh(){
-      var from=fv('fFrom'), to=fv('fTo'), akun=fv('fAkun'), proj=fv('fProject');
-      var all=allEntries().filter(function(e){ return akunLabel(e.akun)===akun && (!proj || e.project===proj); });
+      var from=fv('fFrom'), to=fv('fTo'), akunKodeSel=fv('fAkun'), proj=fv('fProject');
+      var akunCoa=DB.coa.find(function(cc){ return cc.kode===akunKodeSel; });
+      var akun=akunCoa?akunCoa.nama:'';
+      // Hutang Pihak Ke-3's two leaves are told apart by ref, not just
+      // name — see HPK3_LONGTERM_REFS; every other account ignores this.
+      var hpk3Kode=(akun.trim().toLowerCase()==='hutang pihak ke-3' && (akunKodeSel==='2.1.3'||akunKodeSel==='2.2.1'))?akunKodeSel:null;
+      var all=allEntries().filter(function(e){
+        if(akunLabel(e.akun)!==akun) return false;
+        if(proj && e.project!==proj) return false;
+        if(hpk3Kode){
+          var isLong=isHpk3LongTermEntry(e);
+          if(hpk3Kode==='2.2.1' && !isLong) return false;
+          if(hpk3Kode==='2.1.3' && isLong) return false;
+        }
+        return true;
+      });
       // Saldo Awal here means the same thing Neraca's groupByHead() means
       // by it: whatever this account already carried before this ledger's
       // tracked transactions began, from Master COA — always included
-      // (not just when a from-date narrows the view), same duplicate-name
-      // tie-break (lowest kode wins) groupByHead() uses.
-      var akunCoa=DB.coa.filter(function(c){ return c.nama===akun; })
-        .sort(function(a,b){ return compareKode(a.kode,b.kode); })[0];
+      // (not just when a from-date narrows the view), read straight off
+      // the selected leaf's own COA row (no duplicate-name ambiguity,
+      // since the picker above already resolves to one exact kode).
       // Master COA's saldoAwal is a plain magnitude (debet side for an
       // asset, kredit side for a liability/equity) — same rule
       // groupByHead() uses — so it needs the same sign flip to land in
@@ -3957,32 +3977,6 @@ function registerPages(){
      keeps these separate from Mutasi), Saldo Setelah Adj (the three
      added together), then that net balance placed under Laba Rugi
      (heads 5-8) or Neraca (heads 1-3), whichever the account is. */
-  // Trial Balance's own Saldo Awal for a few Neraca (head 1-3) accounts
-  // does not match sistem asli's own Neraca coa.saldoAwal field — the two
-  // statements draw on different underlying bases in sistem asli's real
-  // system (confirmed against its own exports for Hutang Dagang, Hutang
-  // Pihak Ke-3 jk pendek/panjang). This override applies ONLY to this
-  // report's Saldo Awal Db/Cr, keyed by kode, and never touches
-  // cAcc.saldoAwal itself, so Neraca/Buku Besar/groupByHead() are
-  // completely unaffected.
-  // Sistem asli's own Kartu Hutang Pihak Ke-3 shows these 12 refs (the
-  // KUR Yusri / KUR Fahri installments, plus the CC-Beat motor cicilan)
-  // reclassified to the long-term leaf (2.2.1) — found by matching their
-  // combined pre-period and September totals exactly to sistem asli's
-  // own Trial Balance figures for 2.2.1 (a unique combination, verified
-  // against every other Hutang Pihak Ke-3 posting summing to nothing
-  // else). Every other posting to this bare-name account stays under
-  // 2.1.3 (jk pendek), same as before.
-  var TRIAL_HPK3_LONGTERM_REFS={
-    'CO-2609-0266':true,'CO-2609-0263':true,'CO-2609-0258':true,'CO-2606-0003':true,
-    'CO-2606-0228':true,'CO-2606-0549':true,'CO-2606-0780':true,'CO-2607-0169':true,
-    'CO-2607-0464':true,'CO-2607-0944':true,'CO-2608-0742':true,'CO-2609-1040':true
-  };
-  var TRIAL_SALDO_AWAL_OVERRIDE={
-    '2.1.1':{db:0,cr:42080520},   // Hutang Dagang
-    '2.1.3':{db:0,cr:0},          // Hutang Pihak Ke-3 (jk pendek)
-    '2.2.1':{db:0,cr:425539546}   // Hutang Pihak Ke-3 (jk panjang)
-  };
   PAGES.trial=function(c){
     var years=Array.from(new Set(DB.txns.map(function(t){ return t.tgl.slice(0,4); })
       .concat(DB.jurnal.map(function(j){ return j.tgl.slice(0,4); })))).filter(Boolean).sort();
@@ -4024,7 +4018,7 @@ function registerPages(){
       var byName={};
       allEntries().forEach(function(e){
         var key=akunNamaOnly(e.akun).toLowerCase();
-        if(key==='hutang pihak ke-3' && TRIAL_HPK3_LONGTERM_REFS[e.ref]) key='hutang pihak ke-3 (jk panjang)';
+        if(isHpk3LongTermEntry(e)) key='hutang pihak ke-3 (jk panjang)';
         if(!byName[key]) byName[key]={preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0};
         var b=byName[key];
         if(e.tgl<periodStart){ b.preDb+=e.debet; b.preCr+=e.kredit; }
@@ -4068,10 +4062,7 @@ function registerPages(){
         // tallied here before being zeroed out for display.
         if(isLabaRugi){ lrCumDb+=b.preDb; lrCumCr+=b.preCr; }
         var preDb=isLabaRugi?0:b.preDb, preCr=isLabaRugi?0:b.preCr;
-        var saldoOvr=TRIAL_SALDO_AWAL_OVERRIDE[cAcc.kode];
-        if(!isLabaRugi && saldoOvr){
-          preDb+=saldoOvr.db; preCr+=saldoOvr.cr;
-        } else if(!isLabaRugi && cAcc.saldoAwal){
+        if(!isLabaRugi && cAcc.saldoAwal){
           if(head==='1') preDb+=cAcc.saldoAwal; else preCr+=cAcc.saldoAwal;
         }
         var afterDb=preDb+b.mutDb+b.adjDb, afterCr=preCr+b.mutCr+b.adjCr;
@@ -4185,6 +4176,7 @@ function registerPages(){
      total. */
   function groupByHead(from,to,heads,project){
     var sumsByName={};
+    var hpk3LongTerm={debet:0,kredit:0}; // routed bucket for 2.2.1 -- see HPK3_LONGTERM_REFS
     allEntries().forEach(function(e){
       if(!inRange(e.tgl,from,to)) return;
       if(project && e.project!==project) return;
@@ -4193,6 +4185,10 @@ function registerPages(){
       if(e.leg==='lawan' && /masuk$/.test(e.jenis) && isBiayaAkun(e.akun)) return;
       var h=akunHead(e.akun);
       if(heads.indexOf(h)===-1) return;
+      if(isHpk3LongTermEntry(e)){
+        hpk3LongTerm.debet+=e.debet; hpk3LongTerm.kredit+=e.kredit;
+        return;
+      }
       var key=akunNamaOnly(e.akun).toLowerCase();
       if(!sumsByName[key]) sumsByName[key]={nama:akunNamaOnly(e.akun),debet:0,kredit:0};
       sumsByName[key].debet+=e.debet; sumsByName[key].kredit+=e.kredit;
@@ -4201,18 +4197,26 @@ function registerPages(){
     // Two different COA leaves can share the exact same name (e.g. both
     // "2.1.3-Hutang Pihak Ke-3" and "2.2.1-Hutang Pihak Ke-3" exist —
     // short-term vs long-term). A posted entry only ever names the
-    // account, never which of the two, so there is no way to split the
-    // amount between them — assign it to the first leaf by kode only,
-    // and leave any later duplicate at zero, so the balance is counted
-    // exactly once instead of once per duplicate.
+    // account, never which of the two, so normally there is no way to
+    // split the amount between them — assign it to the first leaf by
+    // kode only, and leave any later duplicate at zero, so the balance
+    // is counted exactly once instead of once per duplicate. Hutang
+    // Pihak Ke-3 is the one pair with a real ref-level split (see
+    // hpk3LongTerm above); every other duplicate-named pair still falls
+    // back to this claimed-by-first-kode rule.
     var claimed={};
     var rows=DB.coa.filter(function(c){
       return c.level===3 && heads.indexOf(String(c.kode).split('.')[0])>-1;
     }).sort(function(a,b){ return compareKode(a.kode,b.kode); }).map(function(c){
       var key=String(c.nama||'').trim().toLowerCase();
       matched[key]=true;
-      var s=(!claimed[key] && sumsByName[key])?sumsByName[key]:{debet:0,kredit:0};
-      claimed[key]=true;
+      var s;
+      if(c.kode==='2.2.1' && key==='hutang pihak ke-3'){
+        s=hpk3LongTerm;
+      } else {
+        s=(!claimed[key] && sumsByName[key])?sumsByName[key]:{debet:0,kredit:0};
+        claimed[key]=true;
+      }
       var head=String(c.kode).split('.')[0];
       var debet=s.debet, kredit=s.kredit;
       // Master COA's Saldo Awal only ever means "the balance this account
@@ -4238,13 +4242,21 @@ function registerPages(){
 
   /* Every kas/bank + jurnal posting behind one Laba Rugi account line
      (matched by name, coded or plain — same rule as groupByHead()),
-     feeding the click-to-drilldown on each row. */
-  function labaRugiAccountTxns(accName, from, to, project){
+     feeding the click-to-drilldown on each row. Pass kode for Hutang
+     Pihak Ke-3 (2.1.3/2.2.1) to get just that leaf's own postings —
+     see HPK3_LONGTERM_REFS; every other account ignores kode. */
+  function labaRugiAccountTxns(accName, from, to, project, kode){
     var list=[];
+    var hpk3Kode=(String(accName||'').trim().toLowerCase()==='hutang pihak ke-3' && (kode==='2.1.3'||kode==='2.2.1'))?kode:null;
     allEntries().forEach(function(e){
       if(!inRange(e.tgl,from,to)) return;
       if(project && e.project!==project) return;
       if(akunNamaOnly(e.akun)!==accName) return;
+      if(hpk3Kode){
+        var isLong=isHpk3LongTermEntry(e);
+        if(hpk3Kode==='2.2.1' && !isLong) return;
+        if(hpk3Kode==='2.1.3' && isLong) return;
+      }
       list.push({tgl:e.tgl, ref:e.ref, ket:(e.ket||'')+(e.project?' — '+e.project:''), debet:e.debet, kredit:e.kredit, src:e.src});
     });
     return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
@@ -4497,20 +4509,22 @@ function registerPages(){
           }
           var accName=akunNamaOnly(info.r.akun);
           var coaRow=info.r.kode?DB.coa.find(function(c){ return c.kode===info.r.kode; }):null;
-          // Two COA leaves can share the same name (e.g. both a
-          // short-term and a long-term "Hutang Pihak Ke-3") — groupByHead
-          // attributes every posting to only the first one by kode, so a
-          // later duplicate's row here must show none of that name's
-          // transactions (just its own Saldo Awal below), or the total
-          // would double up with the other leaf's drilldown.
+          var isHpk3Pair=coaRow && accName.toLowerCase()==='hutang pihak ke-3' && (coaRow.kode==='2.1.3'||coaRow.kode==='2.2.1');
+          // Two COA leaves can otherwise share the same name — groupByHead
+          // attributes every such posting to only the first leaf by kode
+          // (see HPK3_LONGTERM_REFS for the one pair, Hutang Pihak Ke-3,
+          // with a real ref-level split instead), so a later duplicate's
+          // row here must show none of that name's transactions (just its
+          // own Saldo Awal below), or the total would double up with the
+          // other leaf's drilldown.
           var isClaimingLeaf=true;
-          if(coaRow){
+          if(coaRow && !isHpk3Pair){
             var siblings=DB.coa.filter(function(c){
               return c.level===3 && String(c.nama||'').trim().toLowerCase()===accName.toLowerCase();
             }).sort(function(a,b){ return compareKode(a.kode,b.kode); });
             isClaimingLeaf=siblings.length===0 || siblings[0].kode===coaRow.kode;
           }
-          var list=isClaimingLeaf?labaRugiAccountTxns(accName, null, to, null).map(function(e){
+          var list=(isHpk3Pair||isClaimingLeaf)?labaRugiAccountTxns(accName, null, to, null, coaRow?coaRow.kode:null).map(function(e){
             return {tgl:e.tgl, ref:e.ref, ket:e.ket, amount:info.sign*(e.debet-e.kredit)};
           }):[];
           if(coaRow && coaRow.saldoAwal){
