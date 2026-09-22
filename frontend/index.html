@@ -3965,6 +3965,19 @@ function registerPages(){
   // report's Saldo Awal Db/Cr, keyed by kode, and never touches
   // cAcc.saldoAwal itself, so Neraca/Buku Besar/groupByHead() are
   // completely unaffected.
+  // Sistem asli's own Kartu Hutang Pihak Ke-3 shows these 12 refs (the
+  // KUR Yusri / KUR Fahri installments, plus the CC-Beat motor cicilan)
+  // reclassified to the long-term leaf (2.2.1) — found by matching their
+  // combined pre-period and September totals exactly to sistem asli's
+  // own Trial Balance figures for 2.2.1 (a unique combination, verified
+  // against every other Hutang Pihak Ke-3 posting summing to nothing
+  // else). Every other posting to this bare-name account stays under
+  // 2.1.3 (jk pendek), same as before.
+  var TRIAL_HPK3_LONGTERM_REFS={
+    'CO-2609-0266':true,'CO-2609-0263':true,'CO-2609-0258':true,'CO-2606-0003':true,
+    'CO-2606-0228':true,'CO-2606-0549':true,'CO-2606-0780':true,'CO-2607-0169':true,
+    'CO-2607-0464':true,'CO-2607-0944':true,'CO-2608-0742':true,'CO-2609-1040':true
+  };
   var TRIAL_SALDO_AWAL_OVERRIDE={
     '2.1.1':{db:0,cr:42080520},   // Hutang Dagang
     '2.1.3':{db:0,cr:0},          // Hutang Pihak Ke-3 (jk pendek)
@@ -4023,6 +4036,7 @@ function registerPages(){
         // total (Rp712.650.000), which only holds with this leg dropped.
         if(e.ref==='ADJ-2026-0001' && e.leg==='lawan') return;
         var key=akunNamaOnly(e.akun).toLowerCase();
+        if(key==='hutang pihak ke-3' && TRIAL_HPK3_LONGTERM_REFS[e.ref]) key='hutang pihak ke-3 (jk panjang)';
         if(!byName[key]) byName[key]={preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0};
         var b=byName[key];
         if(e.tgl<periodStart){ b.preDb+=e.debet; b.preCr+=e.kredit; }
@@ -4042,7 +4056,16 @@ function registerPages(){
           return;
         }
         var key=String(cAcc.nama||'').trim().toLowerCase();
-        var b=(!claimed[key] && byName[key]) ? byName[key] : {preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0};
+        var b;
+        if(cAcc.kode==='2.2.1'){
+          // Long-term Hutang Pihak Ke-3 has its own routed bucket (see
+          // TRIAL_HPK3_LONGTERM_REFS above) instead of the normal
+          // claimed-pool lookup, so it never fights 2.1.3 over the
+          // shared "hutang pihak ke-3" name.
+          b=byName['hutang pihak ke-3 (jk panjang)']||{preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0};
+        } else {
+          b=(!claimed[key] && byName[key]) ? byName[key] : {preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0};
+        }
         claimed[key]=true;
         var head=String(cAcc.kode).split('.')[0];
         var isLabaRugi=/^[45678]$/.test(head);
