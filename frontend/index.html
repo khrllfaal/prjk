@@ -700,13 +700,24 @@ function isCostAkun(akunLawan){
 function isBiayaAkun(nama){
   return akunNamaOnly(nama).indexOf('Biaya ')===0;
 }
+/* Jurnal Umum refs the owner wants temporarily left OUT of every report
+   (Laba Rugi, Neraca, Dashboard, Trial Hutang) without changing their
+   status — the entry stays exactly as posted/visible as it is in Jurnal
+   Umum, this only hides it from aggregate totals while its treatment is
+   still being decided. Different from Draft on purpose: a Draft looks
+   unfinished in the Jurnal Umum list, this doesn't.
+   JU26090084 ("baud bajaringan 12000pcs, ramsate 350pcs, kanal c 250btg,
+   reng lipat 225btg") — sistem asli's own reports don't count it (not in
+   Dustira's Biaya Bahan, not in Hutang Dagang), owner asked to leave it
+   out of the totals for now while confirming with sistem asli directly. */
+var EXCLUDED_JURNAL_REFS={'JU26090084':true};
 // A voucher saved as Draft is still being reviewed/completed — like an
 // unposted journal entry in Accurate, it must not affect any report
 // (Laba Rugi, Neraca, Dashboard, Trial Hutang) until marked Posted. Rows
 // with no status at all (legacy data from before this field existed)
 // count as posted, so nothing already in the books silently disappears.
 function postedJurnal(){
-  return DB.jurnal.filter(function(j){ return j.status!=='draft'; });
+  return DB.jurnal.filter(function(j){ return j.status!=='draft' && !EXCLUDED_JURNAL_REFS[j.ref]; });
 }
 function computeProjectProgressRows(from, to){
   return DB.projects.map(function(p, i){
