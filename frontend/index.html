@@ -787,12 +787,20 @@ function isLoanServiceAkun(nama){
 // its Bank Masuk counterpart (same amount, other side of the same
 // transfer) already lands in bankFlows()/bump() as Uang Masuk, so
 // counting this leg as Uang Keluar too double-counts the same rupiah in
-// both KPI cards at once. Narrow on purpose (only this one COA account,
-// not every "Ayat Silang..." name) — confirmed against the reference
-// system for this specific transfer pattern; do not widen without
-// checking the others the same way first.
+// both KPI cards at once.
+// "Ayat Silang Kas Besar Kas-Kecil" is the same pattern one level down
+// (Kas Besar -> Kas Kecil instead of Kas Besar -> Bank): its Kas Masuk
+// counterpart (same amount, into Kas Kecil) is added to Masuk unconditionally
+// above, so this leg has to cancel it out here the same way, or a purely
+// internal cash move inflates both Uang Masuk and Uang Keluar at once.
+// Confirmed against the reference system's Dashboard Cash Flow: with only
+// these two names recognized, both Uang Masuk and Uang Keluar match it
+// exactly (to the rupiah) for CO-2606-0792/CI-2609-0044. Keep it to named
+// COA accounts only, not every "Ayat Silang..." name — do not widen
+// without checking the others the same way first.
 function isInternalTransferAkun(nama){
-  return akunNamaOnly(nama)==='Ayat Silang Kas Besar Kas-Bank';
+  var n=akunNamaOnly(nama);
+  return n==='Ayat Silang Kas Besar Kas-Bank' || n==='Ayat Silang Kas Besar Kas-Kecil';
 }
 
 // Bank Keluar posted to ANY "Ayat Silang..." account (Kas Besar<->Bank,
