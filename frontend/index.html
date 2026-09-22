@@ -3880,7 +3880,21 @@ function registerPages(){
     function refresh(){
       var from=fv('fFrom'), to=fv('fTo'), akun=fv('fAkun'), proj=fv('fProject');
       var all=allEntries().filter(function(e){ return akunLabel(e.akun)===akun && (!proj || e.project===proj); });
+      // Saldo Awal here means the same thing Neraca's groupByHead() means
+      // by it: whatever this account already carried before this ledger's
+      // tracked transactions began, from Master COA — always included
+      // (not just when a from-date narrows the view), same duplicate-name
+      // tie-break (lowest kode wins) groupByHead() uses.
+      var akunCoa=DB.coa.filter(function(c){ return c.nama===akun; })
+        .sort(function(a,b){ return compareKode(a.kode,b.kode); })[0];
+      // Master COA's saldoAwal is a plain magnitude (debet side for an
+      // asset, kredit side for a liability/equity) — same rule
+      // groupByHead() uses — so it needs the same sign flip to land in
+      // this debet-minus-kredit running balance.
       var awal=0;
+      if(akunCoa && akunCoa.saldoAwal){
+        awal=(String(akunCoa.kode).split('.')[0]==='1') ? akunCoa.saldoAwal : -akunCoa.saldoAwal;
+      }
       all.forEach(function(e){ if(from && e.tgl<from) awal+=e.debet-e.kredit; });
       var rows=all.filter(function(e){ return inRange(e.tgl,from,to); })
         .sort(function(a,b){ return a.tgl>b.tgl?1:-1; });
