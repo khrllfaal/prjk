@@ -199,7 +199,28 @@ async function syncUpsert(table, obj){
   try{
     var mapper = TABLE_MAP[table];
     var row = mapper.to(obj);
-    await apiFetch(MYSQL_ENDPOINT[table], {method:'POST', body:JSON.stringify(row)});
+    var result = await apiFetch(MYSQL_ENDPOINT[table], {method:'POST', body:JSON.stringify(row)});
+    // The server can renumber `ref` on save (two users adding a Kas/Bank
+    // transaction within the same ~30s sync window computing the same
+    // "next" Ref No from their own stale copy — see reserve_unique_ref()
+    // in helpers.php). obj is the SAME object already sitting in
+    // DB.txns/DB.jurnal (pushed by reference before this call), so
+    // updating it here fixes what's on screen too, not just what's in
+    // the DB — otherwise the user would keep seeing the ref they typed
+    // in, which the server silently didn't actually use.
+    if(table==='transactions' && result && result.ref && result.ref!==obj.ref){
+      var oldRef=obj.ref;
+      obj.ref=result.ref;
+      saveDB();
+      toast('Ref No disesuaikan otomatis ke '+result.ref+' (bentrok dengan input dari user lain di waktu yang sama; sebelumnya '+oldRef+').', 'danger');
+      // The form that created this row is already closed by the time this
+      // resolves (syncUpsert is fired without await), so it's always safe
+      // to re-render in place — same pattern as refreshDbFromServer().
+      if(typeof CURRENT!=='undefined' && typeof go==='function'){
+        var modalOpen=document.getElementById('modalBack') && document.getElementById('modalBack').classList.contains('on');
+        if(!modalOpen){ var scrollY=window.scrollY; go(CURRENT); window.scrollTo(0,scrollY); }
+      }
+    }
   }catch(e){
     console.error('syncUpsert failed', table, e);
     queuePendingSync({table:table, id:obj.id, action:'upsert', obj:obj});

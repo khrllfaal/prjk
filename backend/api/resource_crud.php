@@ -51,7 +51,12 @@ function handle_resource_crud(string $table, array $columns, string $idColumn = 
         $stmt->execute(array_values($data));
 
         audit('update', $table, (string)$data[$idColumn]);
-        json_response(['ok' => true, 'id' => $data[$idColumn]]);
+        // Echo back every column that was actually written, not just the
+        // id — reserve_unique_ref() (transactions.php) can silently
+        // change `ref` from what the client sent, and the caller needs
+        // that back to keep its own in-memory copy of the record correct
+        // (see syncUpsert() in data-sync.js).
+        json_response(array_merge(['ok' => true], $data));
         return;
     }
 

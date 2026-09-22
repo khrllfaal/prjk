@@ -180,6 +180,45 @@ function validate_field(string $col, $value, array $rules): mixed {
     }
 }
 
+/**
+ * The frontend computes a new transaction's Ref No (CO-2609-1119 style)
+ * from its own in-memory copy of the transactions list — see
+ * nextRefFor() in index.html. Two users adding a transaction within the
+ * ~30s window before either save reflects back to the other's browser
+ * can compute the exact same Ref No. Since `ref` is now a UNIQUE column
+ * (schema.sql), the second insert would otherwise fail outright; this
+ * bumps it to the next free sequence number for the same prefix instead,
+ * so the save still succeeds — the caller must send the (possibly
+ * different) `ref` this returns back to the client so its own copy of
+ * the record stays correct (see the `ref` field in handle_resource_crud()'s
+ * POST response, and syncUpsert() in data-sync.js).
+ * Only touches `$ref` when it both matches the <PREFIX>-<YYMM>-<NNNN>
+ * scheme AND is already used by a DIFFERENT row (an edit re-saving its
+ * own unchanged ref, or a ref outside that scheme, passes through
+ * untouched) — mirrors nextRefFor()'s own "max existing sequence + 1
+ * for this prefix" logic exactly, so a renumbered ref still sorts in
+ * with the rest of that prefix's history.
+ */
+function reserve_unique_ref(string $table, string $ref, string $excludeId): string {
+    if (!preg_match('/^([A-Z]+)-(\d{4})-(\d+)$/', $ref, $m)) return $ref;
+    [$full, $prefix, $month, ] = $m;
+    $pdo = db();
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM `$table` WHERE ref = ? AND id <> ?");
+    $stmt->execute([$ref, $excludeId]);
+    if ((int)$stmt->fetchColumn() === 0) return $ref; // no conflict
+
+    $stmt2 = $pdo->prepare("SELECT ref FROM `$table` WHERE ref LIKE ?");
+    $stmt2->execute([$prefix . '-%']);
+    $maxSeq = 0;
+    foreach ($stmt2->fetchAll(PDO::FETCH_COLUMN) as $existingRef) {
+        $lastDash = strrpos($existingRef, '-');
+        if ($lastDash === false) continue;
+        $seq = (int)substr($existingRef, $lastDash + 1);
+        if ($seq > $maxSeq) $maxSeq = $seq;
+    }
+    return $prefix . '-' . $month . '-' . str_pad((string)($maxSeq + 1), 4, '0', STR_PAD_LEFT);
+}
+
 function audit(string $action, string $entity, string $entityId, string $detail = ''): void {
     $u = current_user();
     $stmt = db()->prepare(

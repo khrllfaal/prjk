@@ -94,11 +94,20 @@ CREATE TABLE IF NOT EXISTS transactions (
   updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_txn_jenis_tgl (jenis, tgl),
   INDEX idx_txn_project (project),
-  INDEX idx_txn_ref_prefix (ref),
+  UNIQUE INDEX idx_txn_ref_prefix (ref),
   FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
   FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Was a plain index; made UNIQUE so two users can never save two
+-- different transactions under the same Ref No even if the app-level
+-- check in api/transactions.php somehow misses a race — see
+-- reserve_unique_ref() there for how a colliding Ref No is resolved
+-- automatically before this constraint would ever be hit. Two separate
+-- statements (not one combined ALTER) so each stays safe to re-run on
+-- its own regardless of which MySQL/MariaDB version is running.
+ALTER TABLE transactions DROP INDEX IF EXISTS idx_txn_ref_prefix;
+ALTER TABLE transactions ADD UNIQUE INDEX IF NOT EXISTS idx_txn_ref_prefix (ref);
 
 -- ---------------------------------------------------------------------
 -- 4. jurnal umum

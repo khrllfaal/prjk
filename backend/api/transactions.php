@@ -3,10 +3,17 @@ declare(strict_types=1);
 require_once __DIR__ . '/resource_crud.php';
 
 // created_by must come from the session, never from the client —
-// inject it before the generic handler reads the body.
+// inject it before the generic handler reads the body. Also resolve a
+// Ref No collision from two users saving within the same sync window
+// before it can ever hit the ref UNIQUE constraint — see
+// reserve_unique_ref() in helpers.php.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $u = require_login();
-    read_json_body(array_merge(read_json_body(), ['created_by' => $u['id']]));
+    $body = read_json_body();
+    if (!empty($body['ref']) && !empty($body['id'])) {
+        $body['ref'] = reserve_unique_ref('transactions', $body['ref'], $body['id']);
+    }
+    read_json_body(array_merge($body, ['created_by' => $u['id']]));
 }
 
 handle_resource_crud('transactions', [
