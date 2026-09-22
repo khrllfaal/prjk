@@ -2521,16 +2521,20 @@ function financePage(jenis, title, sub){
     var isIn=/masuk$/.test(jenis);
     var isBank=/^bank/.test(jenis);
 
-    // Was a kode-range regex (1.1.3-1.1.7 / 1.1.1-1.1.2) written back when
-    // Master COA still used single-digit codes, then a "Bank "/"Kas "
-    // name-prefix filter — both turned out too narrow: sistem asli's own
-    // Akun Kas picker for this same form mixes in Ayat Silang Kas-Kecil/
-    // Kas-Bank and Kas Cadangan THR alongside every Bank account, not
-    // just a clean Kas-vs-Bank split (confirmed against its own
-    // screenshot). Unrestricted now — every Master COA account, exactly
-    // like the Akun Lawan field just below already does — so this can
-    // never again silently hide an account sistem asli allows picking.
-    var kasAkun=DB.coa.filter(function(a){ return a.level>=3; }).map(function(a){ return a.nama; });
+    // Akun Kas (Kas Masuk/Keluar) is this exact hand-picked set, matching
+    // sistem asli's own Cash In/Out Akun Kas picker screenshot precisely
+    // (Kas Besar/Kecil, the 2 Ayat Silang legs that land in a Kas
+    // account, 4 specific Bank accounts, and Kas Cadangan THR — NOT
+    // every Bank account, NOT "Ayat Silang Antar Bank"). Do not widen
+    // this without a fresh screenshot showing a specific account is
+    // missing — Akun Bank (Bank Masuk/Keluar) below is unrelated and
+    // already matches every "Bank " account correctly.
+    var KAS_AKUN_KAS_NAMES=['Kas Besar','Kas Kecil','Ayat Silang Kas Besar Kas-Kecil',
+      'Ayat Silang Kas Besar Kas-Bank','Bank BCA Prakasa','Bank BJB RC Prakasa',
+      'Bank BRI Prakasa','Bank BNI Prakasa','Kas Cadangan THR'];
+    var kasAkun=isBank
+      ? DB.coa.filter(function(a){ return String(a.nama||'').indexOf('Bank ')===0; }).map(function(a){ return a.nama; })
+      : DB.coa.filter(function(a){ return KAS_AKUN_KAS_NAMES.indexOf(a.nama)>-1; }).map(function(a){ return a.nama; });
     if(!kasAkun.length) kasAkun=isBank?['Bank BCA','Bank BJB','Bank BRI','Bank BNI','Bank MANDIRI']:['Kas Besar','Kas Kecil'];
 
     c.innerHTML = pageHead(title, sub,
@@ -3705,9 +3709,12 @@ function registerPages(){
     function openBayarHutangModal(notaId){
       var row=allRows.find(function(r){ return r.id===notaId; });
       if(!row) return;
-      // Same stale kode-range-regex bug as financePage() above, fixed
-      // the same way: unrestricted, every Master COA account.
-      var kasAkun=DB.coa.filter(function(a){ return a.level>=3; }).map(function(a){ return a.nama; });
+      // Same stale kode-range-regex bug as financePage() above (fixed
+      // there with the same reasoning) — match by name, not a stale
+      // kode range. Left narrow (Kas Besar/Kecil only) — out of scope
+      // for the Akun Kas widening financePage() got, no evidence yet
+      // this modal needs the wider set too.
+      var kasAkun=DB.coa.filter(function(a){ return a.nama==='Kas Besar' || a.nama==='Kas Kecil'; }).map(function(a){ return a.nama; });
       if(!kasAkun.length) kasAkun=['Kas Besar','Kas Kecil'];
 
       var html='<div class="field full"><label>Nota</label><div style="padding:8px 0;font-size:13px;">'+
