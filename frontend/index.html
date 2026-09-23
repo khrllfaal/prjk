@@ -1064,8 +1064,14 @@ function computeCashPeriods(){
   function kumulatifUpTo(endIso){
     var yr=endIso.slice(0,4), from=yr+'-01-01';
     var r=sumRange(from,endIso);
+    // Saldo Kas Berjalan is a running balance, not just this year's net
+    // flow — it must start from the same Master COA opening position
+    // saldoAwal()/weekPeriod() use, or it understates Saldo Akhir by
+    // exactly dashboardOpeningBalance() (the cash already on hand before
+    // 2026's tracked transactions began).
+    var awal=dashboardOpeningBalance();
     return {label:'Kumulatif '+yr+' s/d '+fmtDate(endIso), masuk:r.masuk, keluar:r.keluar,
-      saldo:r.masukTrue-r.keluar, komposisi:komposisi(from,endIso)};
+      saldo:awal+r.masukTrue-r.keluar, komposisi:komposisi(from,endIso)};
   }
   function weekPeriod(id, weekStart, tag, banding){
     var weekEnd=addDays(weekStart,6);
