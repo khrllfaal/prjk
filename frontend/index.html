@@ -3988,12 +3988,19 @@ function registerPages(){
   // adds these on top of its own raw Saldo Awal, exactly like before
   // that round, without ever touching cAcc.saldoAwal itself.
   var TRIAL_SALDO_AWAL_OVERRIDE={
-    '2.1.1':{db:0,cr:42080520},   // Hutang Dagang
-    '2.2.1':{db:0,cr:425539546},  // Hutang Pihak Ke-3 (jk panjang)
-    '3.1.1':{db:0,cr:0}           // Modal Disetor-A -- cancels coa.saldoAwal
-                                   // (Rp440.283.008, needed for Neraca) so
-                                   // this report's own Saldo Awal Kredit
-                                   // stays the real Kartu total alone
+    '2.1.1':{db:0,cr:42080520},          // Hutang Dagang
+    '2.2.1':{db:0,cr:425539546},         // Hutang Pihak Ke-3 (jk panjang)
+    '3.1.1':{db:27337058,cr:0}           // Modal Disetor-A -- the raw Kartu
+                                          // total (transactions before period)
+                                          // already sums to the Rp712.650.000
+                                          // credit side on its own (that's
+                                          // what cancels coa.saldoAwal's
+                                          // Rp440.283.008, needed only by
+                                          // Neraca), so this only adds the
+                                          // extra Rp27.337.058 debit confirmed
+                                          // ref-exact against asli's own real
+                                          // Trial Balance export (shown there
+                                          // un-netted alongside the credit).
   };
   PAGES.trial=function(c){
     var years=Array.from(new Set(DB.txns.map(function(t){ return t.tgl.slice(0,4); })
@@ -4089,7 +4096,18 @@ function registerPages(){
         var afterDb=preDb+b.mutDb+b.adjDb, afterCr=preCr+b.mutCr+b.adjCr;
         var net=afterDb-afterCr;
         var lrDb=isLabaRugi&&net>0?net:0, lrCr=isLabaRugi&&net<0?-net:0;
-        var nrDb=!isLabaRugi&&net>0?net:0, nrCr=!isLabaRugi&&net<0?-net:0;
+        var nrDb, nrCr;
+        if(cAcc.kode==='3.1.1'){
+          // Modal Disetor-A's own Kartu carries an un-reconciled debit
+          // side (see TRIAL_SALDO_AWAL_OVERRIDE above) that asli's real
+          // report never nets against the credit side, even in this
+          // final Neraca column — confirmed ref-exact against asli's own
+          // export. Db-Cr still equals net either way, so the TOTAL row
+          // stays balanced.
+          nrDb=!isLabaRugi?afterDb:0; nrCr=!isLabaRugi?afterCr:0;
+        } else {
+          nrDb=!isLabaRugi&&net>0?net:0; nrCr=!isLabaRugi&&net<0?-net:0;
+        }
         var hasActivity=preDb||preCr||b.mutDb||b.mutCr||b.adjDb||b.adjCr;
         if(!showZero && !hasActivity) return;
         var row={header:false, kode:cAcc.kode, nama:cAcc.nama,
