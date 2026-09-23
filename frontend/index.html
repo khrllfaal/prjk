@@ -4171,14 +4171,24 @@ function registerPages(){
           '<td class="num">'+cell(r.nrDb)+'</td><td class="num">'+cell(r.nrCr)+'</td></tr>';
       });
       var afterDiff=Math.abs(totals.afterDb-totals.afterCr);
-      var lrnrDiff=Math.abs((totals.lrDb+totals.nrDb)-(totals.lrCr+totals.nrCr));
+      // SELISIH (sistem asli): NOT the combined double-entry check (that's
+      // afterDiff above, and it's always 0 by construction) -- it's the
+      // Laba Rugi columns' own Db-vs-Cr gap shown next to the Neraca
+      // columns' own Db-vs-Cr gap, each put on whichever side is larger
+      // (Db-Cr or Cr-Db, whichever is positive). The two gaps are always
+      // equal in magnitude -- that shared number is this period's net
+      // laba/rugi, which only ever nets to zero once Laba Tahun Berjalan's
+      // own row folds the Laba Rugi side into the Neraca side.
+      var lrGap=totals.lrCr-totals.lrDb, nrGap=totals.nrDb-totals.nrCr;
+      var lrSelDb=lrGap>0?0:-lrGap, lrSelCr=lrGap>0?lrGap:0;
+      var nrSelDb=nrGap>0?nrGap:0, nrSelCr=nrGap>0?0:-nrGap;
       html+='<tr style="font-weight:700;background:var(--panel-alt);"><td colspan="2">TOTAL</td>'+
         ['preDb','preCr','mutDb','mutCr','adjDb','adjCr','afterDb','afterCr','lrDb','lrCr','nrDb','nrCr']
           .map(function(k){ return '<td class="num">'+num0(totals[k])+'</td>'; }).join('')+
         '</tr>'+
-        '<tr style="font-weight:700;"><td colspan="8"></td>'+
-        '<td colspan="2" class="num" style="text-align:center;">SELISIH: '+num0(afterDiff)+'</td>'+
-        '<td colspan="4" class="num" style="text-align:center;">SELISIH: '+num0(lrnrDiff)+'</td></tr>'+
+        '<tr style="font-weight:700;"><td colspan="8"></td><td colspan="2"></td>'+
+        '<td class="num">'+num0(lrSelDb)+'</td><td class="num">'+num0(lrSelCr)+'</td>'+
+        '<td class="num">'+num0(nrSelDb)+'</td><td class="num">'+num0(nrSelCr)+'</td></tr>'+
         '</tbody></table></div></div>';
       document.getElementById('reportBody').innerHTML=
         (afterDiff<1?'':alertHTML('warn','⚠','Trial balance belum seimbang',
