@@ -3833,7 +3833,8 @@ function registerPages(){
     filterLabel:'Vendor / Pemilik', colName:'Nama Vendor', kpiLabel:'Total Prive', unit:'pemilik', unitCap:'Pemilik',
     list:function(){ return DB.vendors; },
     match:function(e){ return akunLabel(e.akun)==='Prive'; },
-    sign:function(e){ return e.debet-e.kredit; }
+    sign:function(e){ return e.debet-e.kredit; },
+    hideUnlinked:true
   });
 
   /* ---------------- MUTASI KAS / BANK ---------------- */
