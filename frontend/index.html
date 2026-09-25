@@ -1298,12 +1298,21 @@ function hutangStatusInfo(status){
 
 /* Generic read-only drill-down: click an amount/label anywhere in the
    app -> see the list of transactions behind it (Cash Flow, Laba Rugi,
-   Dashboard progress, Trial Hutang, etc). list items: {tgl,ref,ket,amount}. */
+   Dashboard progress, Trial Hutang, etc). list items: {tgl,ref,ket,amount}.
+   Optional per-item "group" (e.g. the plain akun name) makes a summary
+   card with a matching "group" clickable as a quick filter on the table
+   below — click again (or a different card) to change/clear it. Callers
+   that don't set .group on either side keep the old, non-clickable cards. */
 function showTxnDrilldown(title, subtitle, list, summary){
   var total=list.reduce(function(a,b){ return a+(b.amount||0); },0);
   var hasStatus=list.some(function(r){ return r.status; });
   var summaryHtml=(summary&&summary.length)?'<div class="kpi-grid" style="margin-bottom:12px;">'+
-    summary.map(function(s){ return kpiCard(s.label, num0(s.value), s.sub||'', s.variant||'accent'); }).join('')+'</div>':'';
+    summary.map(function(s,i){
+      var card=kpiCard(s.label, num0(s.value), s.sub||'', s.variant||'accent');
+      if(!s.group) return card;
+      return '<div data-drill-filter-card data-drill-filter-group="'+esc(String(s.group).toLowerCase())+'" '+
+        'style="cursor:pointer;" title="Klik untuk tampilkan hanya transaksi akun ini">'+card+'</div>';
+    }).join('')+'</div>':'';
   var body=summaryHtml+
     (subtitle?'<div class="panel-desc" style="margin-bottom:10px;">'+esc(subtitle)+'</div>':'')+
     (list.length?'<input type="text" id="drillSearch" placeholder="Cari tanggal, ref, atau keterangan..." '+
@@ -1313,7 +1322,8 @@ function showTxnDrilldown(title, subtitle, list, summary){
     '</tr></thead><tbody>'+
     (list.length?list.map(function(r){
       var key=esc((fmtDate(r.tgl)+' '+(r.ref||'')+' '+(r.ket||'')+' '+(r.status||'')).toLowerCase());
-      return '<tr data-drill-row data-drill-key="'+key+'" data-drill-amt="'+(r.amount||0)+'">'+
+      var group=esc(String(r.group||'').toLowerCase());
+      return '<tr data-drill-row data-drill-key="'+key+'" data-drill-group="'+group+'" data-drill-amt="'+(r.amount||0)+'">'+
         '<td>'+fmtDate(r.tgl)+'</td><td class="mono" style="font-size:11.5px;">'+esc(r.ref||'–')+'</td>'+
         '<td class="wrap">'+esc(r.ket||'–')+'</td>'+
         (hasStatus?'<td class="status-'+(r.cls||(r.status==='Hutang'||r.status==='Piutang/Akrual'?'warn':'safe'))+'">'+esc(r.status||'–')+'</td>':'')+
@@ -1322,7 +1332,40 @@ function showTxnDrilldown(title, subtitle, list, summary){
     '</tbody><tfoot><tr><td colspan="'+(hasStatus?4:3)+'"><b>Total</b></td><td style="text-align:right;" id="drillTotal"><b>'+num0(total)+'</b></td></tr></tfoot>'+
     '</table></div>';
   openModal(title, body, {wide:true, saveLabel:null});
-  if(list.length) wireDrilldownSearch('drillSearch','drillTable','drillTotal');
+  if(list.length){
+    wireDrilldownSearch('drillSearch','drillTable','drillTotal');
+    wireDrilldownGroupCards('drillTable','drillTotal');
+  }
+}
+
+/* Click a summary card that carries data-drill-filter-group -> show only
+   the rows with a matching data-drill-group, and highlight that card.
+   Click the same card again (or it's the only one active) to clear the
+   filter back to every row. Independent of the free-text search box
+   above -- either one alone fully drives the table's visible rows. */
+function wireDrilldownGroupCards(tableId, totalId){
+  var cards=document.querySelectorAll('[data-drill-filter-card]');
+  if(!cards.length) return;
+  function apply(activeGroup){
+    var sum=0;
+    document.querySelectorAll('#'+tableId+' tbody tr[data-drill-row]').forEach(function(tr){
+      var match=!activeGroup || tr.getAttribute('data-drill-group')===activeGroup;
+      tr.style.display=match?'':'none';
+      if(match) sum+=Number(tr.getAttribute('data-drill-amt'))||0;
+    });
+    var totalEl=document.getElementById(totalId);
+    if(totalEl) totalEl.innerHTML='<b>'+num0(sum)+'</b>';
+    cards.forEach(function(c){
+      c.style.outline=(activeGroup && c.getAttribute('data-drill-filter-group')===activeGroup)?'2px solid var(--steel)':'';
+    });
+  }
+  cards.forEach(function(c){
+    c.onclick=function(){
+      var g=c.getAttribute('data-drill-filter-group');
+      var alreadyActive=c.style.outline!=='';
+      apply(alreadyActive?'':g);
+    };
+  });
 }
 
 /* Shared simple search box for every read-only drill-down modal (Cash
@@ -4900,15 +4943,19 @@ function registerPages(){
             return jenisArr.indexOf(t.jenis)!==-1 && akunKategori(t.akunLawan)===kat &&
               !(t.jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]);
           }).map(function(t){
-            return {tgl:t.tgl, ref:t.ref, ket:akunNamaOnly(t.akunLawan)+' — '+t.ket+(t.project?' — '+t.project:''), amount:isIn?t.debet:t.kredit};
+            return {tgl:t.tgl, ref:t.ref, ket:akunNamaOnly(t.akunLawan)+' — '+t.ket+(t.project?' — '+t.project:''),
+              amount:isIn?t.debet:t.kredit, group:akunNamaOnly(t.akunLawan)};
           }).sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
           // Distribusi per akun di dalam kategori ini -- card kecil di atas
           // rincian transaksi, terurut dari yang terbesar, supaya owner
           // langsung lihat akun mana yang paling dominan di kategori ini.
+          // Klik satu card -> daftar transaksi di bawah otomatis tersaring
+          // ke akun itu saja (data-drill-filter-group di showTxnDrilldown).
           var akunSummary=grp.akunOrder.map(function(ak){ return grp.byAkun[ak]; })
             .sort(function(a,b){ return b.amount-a.amount; })
             .map(function(a){
-              return {label:a.label, value:a.amount, sub:(grp.amount?pct(a.amount/grp.amount)+' dari kategori':'')};
+              return {label:a.label, value:a.amount, group:a.label,
+                sub:(grp.amount?pct(a.amount/grp.amount)+' dari kategori':'')};
             });
           showTxnDrilldown(kat, 'Rincian transaksi'+(proj?' — Project: '+proj:''), sub, akunSummary);
         };
