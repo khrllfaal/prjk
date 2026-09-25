@@ -4908,7 +4908,7 @@ function registerPages(){
           var akunSummary=grp.akunOrder.map(function(ak){ return grp.byAkun[ak]; })
             .sort(function(a,b){ return b.amount-a.amount; })
             .map(function(a){
-              return {label:a.label, value:a.amount, sub:grp.amount?pct(a.amount/grp.amount):''};
+              return {label:a.label, value:a.amount, sub:(grp.amount?pct(a.amount/grp.amount)+' dari kategori':'')};
             });
           showTxnDrilldown(kat, 'Rincian transaksi'+(proj?' — Project: '+proj:''), sub, akunSummary);
         };
