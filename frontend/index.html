@@ -646,7 +646,7 @@ function guessLedgerName(displayName, knownLedgerNames){
 // Both the old and current COA numbering are listed per category — a
 // jurnal_umum entry keeps whatever code it was posted with, so matching
 // only today's COA codes would silently stop counting older rows.
-var RAP_COST_CODES={bahan:['5.1.1','5.1.01'], upah:['5.1.2','5.1.9','5.1.02','5.1.09','5.1.10'],
+var RAP_COST_CODES={bahan:['5.1.1','5.1.01','5.1.18','5.1.19'], upah:['5.1.2','5.1.9','5.1.02','5.1.09','5.1.10'],
   akomodasi:['5.1.26','6.2.36','5.1.11']};
 function matchesRapCost(akunStr, kind){ return RAP_COST_CODES[kind].indexOf(akunKode(akunStr))>-1; }
 
@@ -659,7 +659,7 @@ function matchesRapCost(akunStr, kind){ return RAP_COST_CODES[kind].indexOf(akun
    residual "other" bucket) — per owner's explicit categorization. */
 function matchesPlainCost(akunLawan, kind){
   var s=akunNamaOnly(akunLawan);
-  if(kind==='bahan') return s==='Biaya Bahan';
+  if(kind==='bahan') return s==='Biaya Bahan'||s==='Biaya Bahan2'||s==='Biaya Bahan3';
   if(kind==='upah') return s==='Biaya Upah'||s==='Biaya Upah2'||s==='Biaya Upah3';
   if(kind==='akomodasi') return s==='Biaya Akomodasi';
   if(kind==='admFee') return s==='Biaya ADM Fee';
@@ -707,6 +707,53 @@ function isBiayaAkun(nama){
   var h=akunHead(nama);
   return h!=='1' && h!=='2' && h!=='3';
 }
+
+/* Kelompok Kebutuhan (business-need category) per akun, powering
+   Laporan Kategori — adapted from the owner's own manual rekap
+   (Rekap_Uang_Keluar_Per_Kelompok.xlsx) and extended to cover every
+   account in Master COA, not just the Cost Center subset that rekap
+   analyzed. One account -> one kategori regardless of kas_masuk/keluar
+   direction; the page itself splits PEMASUKAN vs PENGELUARAN by jenis,
+   same as Cash Flow. Falls back to the account's own name (grouped
+   under "Lain-lain") when nothing below matches, so a future new akun
+   never silently disappears from the report. */
+var KATEGORI_GROUPS=[
+  ['Pendapatan Usaha',['Pendapatan Proyek','Pendapatan Pengadaan','Pendapatan Kandang','Pendapatan Lainnya','Pendapatan Jasa Giro','Pendapatan Bunga Deposito']],
+  ['Bahan & Material Proyek',['Biaya Bahan','Biaya Bahan2','Biaya Bahan3','Persediaan Bahan']],
+  ['Gaji, Upah & SDM',['Biaya Upah','Biaya Upah2','Biaya Upah3','Biaya Gaji Pegawai','Biaya Gaji Direksi',
+    'Biaya Bonus Karyawan','Biaya Bonus Pegawai','Biaya Honor Tenaga Ahli','Fee Tenaga Ahli','Cadangan THR','Kas Cadangan THR',
+    'Biaya Jamsostek Ketenagakerjaan','Biaya Jamsostek Kesehatan','Biaya Makan Pegawai','Biaya Makan Karyawan','Biaya Makan Kantor Direksi']],
+  ['Operasional Proyek & Lapangan',['Biaya ADM','Biaya ADM Fee','Biaya Akomodasi','Biaya Jakon','Biaya Lelang',
+    'Biaya Produksi Lainnya','Biaya Operasional','Biaya Operasional Lainnya','Biaya Pemeliharaan Peralatan & Kendaraan']],
+  ['Peternakan / Kandang',['Biaya Perlengkapan Kandang','Biaya Treatment Ayam','Biaya Panen',
+    'Biaya Pemeliharaan Alat & Kandang','Biaya Cuci Kandang','Biaya Lainnya','Biaya Listrik, Air & Telepon']],
+  ['Entertain, Relasi & CSR',['Biaya entertain','Biaya Entertain Direksi','Atensi','Biaya CSR/Kompensasi/Sumbangan','Biaya Sumbangan /Zakat','Biaya CSR']],
+  ['Kendaraan & Transportasi',['Biaya Pemeliharaan Kendaraan Kantor','Biaya BBM/Parkir/Tol','Biaya Pajak Kendaraan']],
+  ['Operasional Kantor',['Biaya Listrik & Internet','Biaya ATK & Perlengkapan Kantor','Biaya Rumah Tangga Kantor',
+    'Biaya Pemeliharaan Peralatan Kantor','Biaya Telepon','Biaya Air','Biaya Pemeliharaan Kantor','Biaya kirim Paket dan Dokumen','Perlengkapan Kantor']],
+  ['Perjalanan Dinas',['Biaya Perjalanan Dinas Pegawai','Biaya Perjalanan Dinas Direksi']],
+  ['Kesehatan & Asuransi',['Biaya Pengobatan Direksi','Biaya Pengobatan Karyawan','Biaya Asuransi','Asuransi Dibayar Dimuka']],
+  ['Administrasi, Legalitas & Perizinan',['Biaya Legalitas & Perizinan','Biaya Administrasi Lainnya','Biaya PNBP','Biaya lain-lain','Biaya Proyek Tidak Jadi']],
+  ['Pajak',['Biaya Denda Pajak','Beban Pajak Badan','Pajak Dibayar Dimuka-PPh 21','Pajak Dibayar Dimuka-PPh 22','Pajak Dibayar Dimuka-PPh 23','Pajak Dibayar Dimuka-PPh 25','PPN Masukan','PPN Keluaran','PPN Keluaran-Pemungut','Hutang Pajak PPh 21','Hutang Pajak PPh 22 Pemungut','Hutang Pajak PPh 23','Hutang PPh 29','Hutang PPh Pasal 4 ayat2 Final']],
+  ['Biaya Perbankan & Bunga',['Biaya Admistrasi Bank','Biaya Bunga Bank','Biaya Provisi','Biaya Bunga Lainnya']],
+  ['Penyusutan',['Biaya Penyusutan Gedung','Biaya Penyusutan Kendaraan Kantor','Biaya Penyusutan Peralatan Kantor',
+    'Akumulasi Depresiasi-Bangunan','Akumulasi Depresiasi-Kendaraan','Akumulasi Depresiasi-Peralatan Kantor']],
+  ['Aset - Peralatan & Bangunan',['Peralatan Kantor dan Proyek','Bangunan','Peralatan Kandang','Tanah','Kendaraan']],
+  ['Pelunasan / Penerimaan Pokok Hutang',['Hutang Dagang','Hutang Pihak Ke-3','Hutang Bank Jk.Pendek PT','Hutang Bank Jk.Pendek Prakasa',
+    'Hutang Bank Jk.Pendek Purbayanti','Hutang lancar Lainnya','Hutang Bank Jk.Panjang','Hutang Leasing JkPendek','Hutang Leasing Jk Panjang',
+    'Hutang Jk panjang Lainnya','Hutang Gaji','Hutang Jamsostek','Biaya Yang Masih Harus Dibayar','Pendapatan Diterima Dimuka']],
+  ['Pinjaman / Piutang Diberikan',['Piutang Usaha','Piutang Karyawan','Piutang Lainnya','Biaya Dibayar Dimuka','Sewa Dibayar Dimuka','Aktiva Lancar Lainnya']],
+  ['Modal & Pendanaan',['Modal Disetor-A','Modal Disetor-B','Modal Disetor-C']],
+  ['Prive / Pengambilan Pribadi',['Prive']],
+  ['Ayat Silang / Transfer Internal',['Ayat Silang Kas Besar Kas-Kecil','Ayat Silang Kas Besar Kas-Bank','Ayat Silang Antar Bank']]
+];
+var KATEGORI_MAP={};
+KATEGORI_GROUPS.forEach(function(g){ g[1].forEach(function(nama){ KATEGORI_MAP[nama]=g[0]; }); });
+function akunKategori(akunLawan){
+  var nama=akunNamaOnly(akunLawan);
+  return KATEGORI_MAP[nama]||'Lain-lain ('+nama+')';
+}
+
 /* Jurnal Umum refs the owner wants temporarily left OUT of every report
    (Laba Rugi, Neraca, Dashboard, Trial Hutang) without changing their
    status — the entry stays exactly as posted/visible as it is in Jurnal
@@ -2345,6 +2392,7 @@ var NAV=[
     {id:'buku_besar', label:'Buku Besar', ic:'○'},
     {id:'trial', label:'Trial Balance', ic:'○'},
     {id:'cashflow', label:'Cash Flow', ic:'○'},
+    {id:'lap_kategori', label:'Laporan Kategori', ic:'○'},
     {id:'neraca', label:'Neraca', ic:'○'},
     {id:'laba_rugi', label:'Laba Rugi', ic:'○'},
     {id:'analisa', label:'Analisa Pengeluaran', ic:'○'}
@@ -4756,6 +4804,139 @@ function registerPages(){
     };
     document.getElementById('cfPdf').onclick=function(){
       exportPdf('Cash_Flow', ['Keterangan','Jumlah'], cashFlowRows(), {title:'Laporan Cash Flow'});
+    };
+  };
+
+  /* ---------------- LAPORAN KATEGORI (Kelompok Kebutuhan) ---------------- */
+  /* Same shell as Cash Flow (date range + project filter + Excel/PDF)
+     but grouped by KATEGORI_MAP's business-need category instead of raw
+     akun lawan, for the owner to see pemasukan/pengeluaran by need
+     rather than by individual account. Each kategori row expands to its
+     underlying akun breakdown on click, and drills further into the raw
+     transaction list — same two-level drill pattern as Cash Flow's
+     per-akun rows, just with the category as the extra outer layer. */
+  PAGES.lap_kategori=function(c){
+    var today=todayISO();
+    var defFrom=today.slice(0,7)+'-01';
+    var lastDayOfMonth=new Date(Number(today.slice(0,4)), Number(today.slice(5,7)), 0).getDate();
+    var defTo=today.slice(0,7)+'-'+String(lastDayOfMonth).padStart(2,'0');
+
+    c.innerHTML = pageHead('Laporan Kategori','Pemasukan dan pengeluaran dikelompokkan per kategori kebutuhan',
+      '<button class="btn btn-success btn-sm" id="lkExcel">▤ Excel</button>'+
+      '<button class="btn btn-danger btn-sm" id="lkPdf">▤ PDF</button>')+
+      '<div class="filterbar">'+
+        '<div class="field"><label>Tanggal Awal</label><input type="date" id="fFrom" value="'+esc(defFrom)+'"></div>'+
+        '<div class="field"><label>Tanggal Akhir</label><input type="date" id="fTo" value="'+esc(defTo)+'"></div>'+
+        '<div class="field grow"><label>Project</label>'+
+          '<div id="fProject_ssel"></div><input type="hidden" id="fProject" value=""></div>'+
+        '<button class="btn btn-steel" id="btnFilter">Terapkan Filter</button>'+
+        '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
+      '</div>'+
+      '<div id="lkBody"></div>';
+
+    function groupByKategori(list, jenisArr){
+      var isIn=/masuk$/.test(jenisArr[0]);
+      var map={}, order=[];
+      list.forEach(function(t){
+        if(jenisArr.indexOf(t.jenis)===-1) return;
+        if(t.jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]) return;
+        var kat=akunKategori(t.akunLawan), label=akunNamaOnly(t.akunLawan);
+        var amt=isIn?t.debet:t.kredit;
+        if(!map[kat]){ map[kat]={kategori:kat, amount:0, byAkun:{}, akunOrder:[]}; order.push(kat); }
+        map[kat].amount+=amt;
+        if(!map[kat].byAkun[label]){ map[kat].byAkun[label]={label:label, akunLawan:t.akunLawan, amount:0}; map[kat].akunOrder.push(label); }
+        map[kat].byAkun[label].amount+=amt;
+      });
+      return order.map(function(k){ return map[k]; }).sort(function(a,b){ return b.amount-a.amount; });
+    }
+
+    function sectionHTML(title, barClass, rows, totalLabel, kind){
+      var total=rows.reduce(function(a,b){ return a+b.amount; },0);
+      return '<div class="cf-section">'+
+        '<div class="cf-bar '+barClass+'">'+esc(title)+'</div>'+
+        '<div class="cf-table">'+
+        (rows.length?rows.map(function(r,i){
+          return '<div class="cf-row'+(i%2?' alt':'')+'">'+
+            '<button type="button" class="linklike" data-lk-kategori="'+esc(r.kategori)+'" data-lk-kind="'+kind+'">'+esc(r.kategori)+'</button>'+
+            '<span class="cf-amt">'+num0(r.amount)+'</span></div>';
+        }).join(''):'<div class="cf-row"><span class="faint-italic">Tidak ada transaksi pada periode ini.</span></div>')+
+        '<div class="cf-row cf-total"><b>'+esc(totalLabel)+'</b><b>'+num0(total)+'</b></div>'+
+        '</div></div>';
+    }
+
+    var lastFrom='', lastTo='', lastProj='', lastBy={}, list=[];
+    function refresh(){
+      var from=fv('fFrom')||defFrom, to=fv('fTo')||defTo, proj=fv('fProject');
+      lastFrom=from; lastTo=to; lastProj=proj;
+      list=DB.txns.filter(function(t){
+        if(!inRange(t.tgl,from,to)) return false;
+        if(proj && t.project!==proj) return false;
+        return true;
+      });
+      lastBy={
+        masuk: groupByKategori(list,['kas_masuk','bank_masuk']),
+        keluar: groupByKategori(list,['kas_keluar','bank_keluar'])
+      };
+      var totalMasuk=lastBy.masuk.reduce(function(a,b){ return a+b.amount; },0);
+      var totalKeluar=lastBy.keluar.reduce(function(a,b){ return a+b.amount; },0);
+      var net=totalMasuk-totalKeluar;
+
+      document.getElementById('lkBody').innerHTML=
+        sectionHTML('PEMASUKAN','cf-in',lastBy.masuk,'Total Pemasukan','masuk')+
+        sectionHTML('PENGELUARAN','cf-out',lastBy.keluar,'Total Pengeluaran','keluar')+
+        '<div class="cf-net"><b>SELISIH (Pemasukan - Pengeluaran)</b>'+
+          '<b class="'+(net<0?'neg':'pos')+'">'+numSigned(net)+'</b></div>';
+
+      document.querySelectorAll('#lkBody [data-lk-kategori]').forEach(function(b){
+        b.onclick=function(){
+          var kat=b.getAttribute('data-lk-kategori'), kind=b.getAttribute('data-lk-kind');
+          var grp=(kind==='masuk'?lastBy.masuk:lastBy.keluar).filter(function(g){ return g.kategori===kat; })[0];
+          if(!grp) return;
+          var jenisArr=kind==='masuk'?['kas_masuk','bank_masuk']:['kas_keluar','bank_keluar'];
+          var isIn=kind==='masuk';
+          var sub=list.filter(function(t){
+            return jenisArr.indexOf(t.jenis)!==-1 && akunKategori(t.akunLawan)===kat &&
+              !(t.jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]);
+          }).map(function(t){
+            return {tgl:t.tgl, ref:t.ref, ket:akunNamaOnly(t.akunLawan)+' — '+t.ket+(t.project?' — '+t.project:''), amount:isIn?t.debet:t.kredit};
+          }).sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+          showTxnDrilldown(kat, 'Rincian transaksi'+(proj?' — Project: '+proj:''), sub);
+        };
+      });
+    }
+    searchableSelect('fProject_ssel','fProject',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
+      placeholder:'Cari / semua project…'});
+    refresh();
+    document.getElementById('btnFilter').onclick=refresh;
+    document.getElementById('btnReset').onclick=function(){
+      clearFilterFields(['fFrom','fTo','fProject']);
+      document.getElementById('fFrom').value=defFrom;
+      document.getElementById('fTo').value=defTo;
+      refresh();
+    };
+    function kategoriRows(){
+      var rows=[];
+      [['PEMASUKAN','masuk','Total Pemasukan'],['PENGELUARAN','keluar','Total Pengeluaran']].forEach(function(sec){
+        var grp=lastBy[sec[1]]||[];
+        rows.push([sec[0],null]);
+        grp.forEach(function(g){
+          rows.push([g.kategori, g.amount]);
+          g.akunOrder.forEach(function(ak){
+            rows.push(['    '+ak, g.byAkun[ak].amount]);
+          });
+        });
+        rows.push([sec[2], grp.reduce(function(a,b){ return a+b.amount; },0)]);
+      });
+      var totalMasuk=(lastBy.masuk||[]).reduce(function(a,b){ return a+b.amount; },0);
+      var totalKeluar=(lastBy.keluar||[]).reduce(function(a,b){ return a+b.amount; },0);
+      rows.push(['SELISIH (Pemasukan - Pengeluaran)', totalMasuk-totalKeluar]);
+      return rows;
+    }
+    document.getElementById('lkExcel').onclick=function(){
+      exportExcel('Laporan_Kategori', ['Kategori / Akun','Jumlah'], kategoriRows());
+    };
+    document.getElementById('lkPdf').onclick=function(){
+      exportPdf('Laporan_Kategori', ['Kategori / Akun','Jumlah'], kategoriRows(), {title:'Laporan Kategori'});
     };
   };
 
