@@ -722,8 +722,9 @@ var KATEGORI_GROUPS=[
   ['Bahan & Material Proyek',['Biaya Bahan','Biaya Bahan2','Biaya Bahan3','Persediaan Bahan']],
   ['Gaji, Upah & SDM',['Biaya Upah','Biaya Upah2','Biaya Upah3','Biaya Gaji Pegawai','Biaya Gaji Direksi',
     'Biaya Bonus Karyawan','Biaya Bonus Pegawai','Biaya Honor Tenaga Ahli','Fee Tenaga Ahli','Cadangan THR','Kas Cadangan THR',
-    'Biaya Jamsostek Ketenagakerjaan','Biaya Jamsostek Kesehatan','Biaya Makan Pegawai','Biaya Makan Karyawan','Biaya Makan Kantor Direksi']],
-  ['Operasional Proyek & Lapangan',['Biaya ADM','Biaya ADM Fee','Biaya Akomodasi','Biaya Jakon','Biaya Lelang',
+    'Biaya Jamsostek Ketenagakerjaan','Biaya Jamsostek Kesehatan']],
+  ['Konsumsi / Uang Makan',['Biaya Makan Pegawai','Biaya Makan Karyawan','Biaya Makan Kantor Direksi']],
+  ['Operasional Proyek & Lapangan',['Biaya ADM Fee','Biaya Akomodasi','Biaya Jakon','Biaya Lelang',
     'Biaya Produksi Lainnya','Biaya Operasional','Biaya Operasional Lainnya','Biaya Pemeliharaan Peralatan & Kendaraan']],
   ['Peternakan / Kandang',['Biaya Perlengkapan Kandang','Biaya Treatment Ayam','Biaya Panen',
     'Biaya Pemeliharaan Alat & Kandang','Biaya Cuci Kandang','Biaya Lainnya','Biaya Listrik, Air & Telepon']],
@@ -733,14 +734,15 @@ var KATEGORI_GROUPS=[
     'Biaya Pemeliharaan Peralatan Kantor','Biaya Telepon','Biaya Air','Biaya Pemeliharaan Kantor','Biaya kirim Paket dan Dokumen','Perlengkapan Kantor']],
   ['Perjalanan Dinas',['Biaya Perjalanan Dinas Pegawai','Biaya Perjalanan Dinas Direksi']],
   ['Kesehatan & Asuransi',['Biaya Pengobatan Direksi','Biaya Pengobatan Karyawan','Biaya Asuransi','Asuransi Dibayar Dimuka']],
-  ['Administrasi, Legalitas & Perizinan',['Biaya Legalitas & Perizinan','Biaya Administrasi Lainnya','Biaya PNBP','Biaya lain-lain','Biaya Proyek Tidak Jadi']],
+  ['Administrasi, Legalitas & Perizinan',['Biaya ADM','Biaya Legalitas & Perizinan','Biaya Administrasi Lainnya','Biaya PNBP','Biaya lain-lain','Biaya Proyek Tidak Jadi']],
   ['Pajak',['Biaya Denda Pajak','Beban Pajak Badan','Pajak Dibayar Dimuka-PPh 21','Pajak Dibayar Dimuka-PPh 22','Pajak Dibayar Dimuka-PPh 23','Pajak Dibayar Dimuka-PPh 25','PPN Masukan','PPN Keluaran','PPN Keluaran-Pemungut','Hutang Pajak PPh 21','Hutang Pajak PPh 22 Pemungut','Hutang Pajak PPh 23','Hutang PPh 29','Hutang PPh Pasal 4 ayat2 Final']],
   ['Biaya Perbankan & Bunga',['Biaya Admistrasi Bank','Biaya Bunga Bank','Biaya Provisi','Biaya Bunga Lainnya']],
   ['Penyusutan',['Biaya Penyusutan Gedung','Biaya Penyusutan Kendaraan Kantor','Biaya Penyusutan Peralatan Kantor',
     'Akumulasi Depresiasi-Bangunan','Akumulasi Depresiasi-Kendaraan','Akumulasi Depresiasi-Peralatan Kantor']],
   ['Aset - Peralatan & Bangunan',['Peralatan Kantor dan Proyek','Bangunan','Peralatan Kandang','Tanah','Kendaraan']],
-  ['Pelunasan / Penerimaan Pokok Hutang',['Hutang Dagang','Hutang Pihak Ke-3','Hutang Bank Jk.Pendek PT','Hutang Bank Jk.Pendek Prakasa',
-    'Hutang Bank Jk.Pendek Purbayanti','Hutang lancar Lainnya','Hutang Bank Jk.Panjang','Hutang Leasing JkPendek','Hutang Leasing Jk Panjang',
+  ['Pinjaman / Pelunasan Bank',['Hutang Bank Jk.Pendek PT','Hutang Bank Jk.Pendek Prakasa','Hutang Bank Jk.Pendek Purbayanti','Hutang Bank Jk.Panjang']],
+  ['Pinjaman / Pelunasan Pihak Ke-3',['Hutang Pihak Ke-3']],
+  ['Pelunasan Hutang Lainnya',['Hutang Dagang','Hutang lancar Lainnya','Hutang Leasing JkPendek','Hutang Leasing Jk Panjang',
     'Hutang Jk panjang Lainnya','Hutang Gaji','Hutang Jamsostek','Biaya Yang Masih Harus Dibayar','Pendapatan Diterima Dimuka']],
   ['Pinjaman / Piutang Diberikan',['Piutang Usaha','Piutang Karyawan','Piutang Lainnya','Biaya Dibayar Dimuka','Sewa Dibayar Dimuka','Aktiva Lancar Lainnya']],
   ['Modal & Pendanaan',['Modal Disetor-A','Modal Disetor-B','Modal Disetor-C']],
@@ -1301,7 +1303,7 @@ function showTxnDrilldown(title, subtitle, list, summary){
   var total=list.reduce(function(a,b){ return a+(b.amount||0); },0);
   var hasStatus=list.some(function(r){ return r.status; });
   var summaryHtml=(summary&&summary.length)?'<div class="kpi-grid" style="margin-bottom:12px;">'+
-    summary.map(function(s){ return kpiCard(s.label, num0(s.value), '', 'accent'); }).join('')+'</div>':'';
+    summary.map(function(s){ return kpiCard(s.label, num0(s.value), s.sub||'', s.variant||'accent'); }).join('')+'</div>':'';
   var body=summaryHtml+
     (subtitle?'<div class="panel-desc" style="margin-bottom:10px;">'+esc(subtitle)+'</div>':'')+
     (list.length?'<input type="text" id="drillSearch" placeholder="Cari tanggal, ref, atau keterangan..." '+
@@ -4900,7 +4902,15 @@ function registerPages(){
           }).map(function(t){
             return {tgl:t.tgl, ref:t.ref, ket:akunNamaOnly(t.akunLawan)+' — '+t.ket+(t.project?' — '+t.project:''), amount:isIn?t.debet:t.kredit};
           }).sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
-          showTxnDrilldown(kat, 'Rincian transaksi'+(proj?' — Project: '+proj:''), sub);
+          // Distribusi per akun di dalam kategori ini -- card kecil di atas
+          // rincian transaksi, terurut dari yang terbesar, supaya owner
+          // langsung lihat akun mana yang paling dominan di kategori ini.
+          var akunSummary=grp.akunOrder.map(function(ak){ return grp.byAkun[ak]; })
+            .sort(function(a,b){ return b.amount-a.amount; })
+            .map(function(a){
+              return {label:a.label, value:a.amount, sub:grp.amount?pct(a.amount/grp.amount):''};
+            });
+          showTxnDrilldown(kat, 'Rincian transaksi'+(proj?' — Project: '+proj:''), sub, akunSummary);
         };
       });
     }
