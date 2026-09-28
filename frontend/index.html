@@ -1916,7 +1916,12 @@ function loadExcelJS(){
 // One tab's worth of styled rows -- pulled out of exportExcel() so a
 // caller needing more than one tab (opts.extraSheets) can add each one
 // the same way instead of hand-rolling ExcelJS styling per report.
-function addStyledSheet(wb, sheetName, title, headers, rows){
+// rowStyleFn(row, rowIndex) is optional: return 'section' for a bold
+// dark-tinted divider (e.g. "PEMASUKAN"), 'group' for a lighter bold
+// sub-divider (e.g. a project name), or 'total' for a bold row with a
+// top border (a subtotal/grand total) -- anything else (including
+// omitting rowStyleFn entirely) keeps the plain banded-row look below.
+function addStyledSheet(wb, sheetName, title, headers, rows, rowStyleFn){
   var ws=wb.addWorksheet(sheetName.slice(0,31).replace(/[\\/*?:\[\]]/g,' '));
 
   var titleRow=ws.addRow([title]);
@@ -1944,12 +1949,23 @@ function addStyledSheet(wb, sheetName, title, headers, rows){
 
   rows.forEach(function(r, ri){
     var row=ws.addRow(r);
+    var style=rowStyleFn?rowStyleFn(r,ri):null;
     row.eachCell({includeEmpty:true}, function(cell, ci){
       cell.font={name:'Calibri', size:10.5};
       cell.border={bottom:{style:'hair', color:{argb:'FFE3E7EE'}}};
       if(isNumCol[ci-1]){ cell.numFmt='#,##0'; cell.alignment={horizontal:'right'}; }
       else cell.alignment={horizontal:'left'};
       if(ri%2===1) cell.fill={type:'pattern', pattern:'solid', fgColor:{argb:'FFF7F9FC'}};
+      if(style==='section'){
+        cell.font={name:'Calibri', size:11, bold:true, color:{argb:'FFFFFFFF'}};
+        cell.fill={type:'pattern', pattern:'solid', fgColor:{argb:'FF1F3864'}};
+      } else if(style==='group'){
+        cell.font={name:'Calibri', size:10.5, bold:true, color:{argb:'FF1F3864'}};
+        cell.fill={type:'pattern', pattern:'solid', fgColor:{argb:'FFDCE6F5'}};
+      } else if(style==='total'){
+        cell.font={name:'Calibri', size:10.5, bold:true};
+        cell.border={top:{style:'thin', color:{argb:'FF1F3864'}}, bottom:{style:'hair', color:{argb:'FFE3E7EE'}}};
+      }
     });
   });
 
@@ -1973,12 +1989,12 @@ async function exportExcel(filename, headers, rows, opts){
   wb.creator='Prakasa Group — ACC v2';
   wb.created=new Date();
   var title=opts.title||filename.replace(/_/g,' ');
-  addStyledSheet(wb, opts.sheetName||filename, title, headers, rows);
+  addStyledSheet(wb, opts.sheetName||filename, title, headers, rows, opts.rowStyleFn);
   // Extra tabs (e.g. a per-project breakdown alongside the main rekap) --
-  // each entry: {sheetName, title, headers, rows}. Callers that don't
-  // pass this keep the single-sheet behavior above unchanged.
+  // each entry: {sheetName, title, headers, rows, rowStyleFn}. Callers
+  // that don't pass this keep the single-sheet behavior above unchanged.
   (opts.extraSheets||[]).forEach(function(s){
-    addStyledSheet(wb, s.sheetName, s.title||s.sheetName, s.headers, s.rows);
+    addStyledSheet(wb, s.sheetName, s.title||s.sheetName, s.headers, s.rows, s.rowStyleFn);
   });
 
   var buf=await wb.xlsx.writeBuffer();
@@ -5006,64 +5022,101 @@ function registerPages(){
       document.getElementById('fTo').value=defTo;
       refresh();
     };
-    function kategoriRows(){
-      var rows=[];
+    // Baris + "kind" sejajar (dipakai rowStyleFn di Excel supaya PEMASUKAN/
+    // PENGELUARAN jadi pita gelap, tiap Kategori jadi pita muda, dan baris
+    // Total/Selisih digarisbawahi tebal -- tanpa itu semuanya rata sama,
+    // makanya sebelumnya kelihatan "acak"). Selalu Pemasukan dulu baru
+    // Pengeluaran, dan ada baris kosong (spasi) di antara tiap Kategori.
+    function kategoriRowsStyled(){
+      var rows=[], kinds=[];
+      function push(row,kind){ rows.push(row); kinds.push(kind||null); }
       [['PEMASUKAN','masuk','Total Pemasukan'],['PENGELUARAN','keluar','Total Pengeluaran']].forEach(function(sec){
         var grp=lastBy[sec[1]]||[];
-        rows.push([sec[0],null]);
+        push([sec[0],null],'section');
         grp.forEach(function(g){
-          rows.push([g.kategori, g.amount]);
+          push([g.kategori, g.amount],'group');
           g.akunOrder.forEach(function(ak){
-            rows.push(['    '+ak, g.byAkun[ak].amount]);
+            push(['    '+ak, g.byAkun[ak].amount]);
           });
+          push(['',null]); // jarak antar kategori
         });
-        rows.push([sec[2], grp.reduce(function(a,b){ return a+b.amount; },0)]);
+        push([sec[2], grp.reduce(function(a,b){ return a+b.amount; },0)],'total');
+        push(['',null]); // jarak antar bagian Pemasukan/Pengeluaran
       });
       var totalMasuk=(lastBy.masuk||[]).reduce(function(a,b){ return a+b.amount; },0);
       var totalKeluar=(lastBy.keluar||[]).reduce(function(a,b){ return a+b.amount; },0);
-      rows.push(['SELISIH (Pemasukan - Pengeluaran)', totalMasuk-totalKeluar]);
-      return rows;
+      push(['SELISIH (Pemasukan - Pengeluaran)', totalMasuk-totalKeluar],'total');
+      return {rows:rows, styleFn:function(r,ri){ return kinds[ri]; }};
     }
+    // exportPdf tidak dapat rowStyleFn (bold-nya pakai isPdfHeaderRow
+    // sendiri, lihat di bawah) -- jadi baris kosong & label section/kategori
+    // yang sama sudah cukup, tidak perlu argumen kind terpisah untuknya.
+    function kategoriRows(){ return kategoriRowsStyled().rows; }
     // Rincian per Project (SEMUA project, seperti file rekap acuan yang
     // owner kirim) -- sengaja pakai tanggal saja, TIDAK ikut filter
     // Project di atas, supaya tab/berkas ini selalu memuat seluruh
     // project sekaligus meski laporan utamanya sedang difilter ke satu
     // project saja.
-    function perProjectRows(){
+    // Sama seperti kategoriRowsStyled() tapi satu tingkat lebih dalam:
+    // JENIS -> Project -> Kategori -> Akun, dengan baris kosong di antara
+    // tiap Project supaya tidak menyatu jadi satu blok panjang. Sengaja
+    // pakai tanggal saja (lastFrom/lastTo), TIDAK ikut filter Project di
+    // atas, supaya sheet/berkas ini selalu memuat SEMUA project sekaligus
+    // meski laporan utamanya sedang difilter ke satu project saja.
+    function perProjectRowsStyled(){
       var dateOnly=DB.txns.filter(function(t){ return inRange(t.tgl,lastFrom,lastTo); });
-      var projMap={}; // project -> {masuk:{kat:amt}, keluar:{kat:amt}}
+      var projMap={}; // project -> {masuk:{kat:{amt,akun:{nama:amt}}}, keluar:{...}}
       dateOnly.forEach(function(t){
         var isMasuk=/masuk$/.test(t.jenis);
         if(t.jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]) return;
-        var pj=t.project||'(Tanpa Project)', kat=akunKategori(t.akunLawan);
+        var pj=t.project||'(Tanpa Project)', kat=akunKategori(t.akunLawan), ak=akunNamaOnly(t.akunLawan);
         var amt=isMasuk?t.debet:t.kredit;
         if(!projMap[pj]) projMap[pj]={masuk:{}, keluar:{}};
         var bucket=isMasuk?projMap[pj].masuk:projMap[pj].keluar;
-        bucket[kat]=(bucket[kat]||0)+amt;
+        if(!bucket[kat]) bucket[kat]={amt:0, akun:{}};
+        bucket[kat].amt+=amt;
+        bucket[kat].akun[ak]=(bucket[kat].akun[ak]||0)+amt;
       });
-      var rows=[];
-      Object.keys(projMap).sort().forEach(function(pj){
-        [['Pemasukan','masuk'],['Pengeluaran','keluar']].forEach(function(sec){
+      var projects=Object.keys(projMap).sort();
+      var rows=[], kinds=[];
+      function push(row,kind){ rows.push(row); kinds.push(kind||null); }
+      [['PEMASUKAN','masuk'],['PENGELUARAN','keluar']].forEach(function(sec){
+        push([sec[0],null],'section');
+        var sectionTotal=0;
+        projects.forEach(function(pj){
           var bucket=projMap[pj][sec[1]];
-          Object.keys(bucket).sort(function(a,b){ return bucket[b]-bucket[a]; }).forEach(function(kat){
-            rows.push([pj, sec[0], kat, bucket[kat]]);
+          var katKeys=Object.keys(bucket);
+          if(!katKeys.length) return; // project ini tidak punya aktivitas jenis ini pada periode ini
+          var projTotal=katKeys.reduce(function(a,k){ return a+bucket[k].amt; },0);
+          sectionTotal+=projTotal;
+          push([pj, projTotal],'group');
+          katKeys.sort(function(a,b){ return bucket[b].amt-bucket[a].amt; }).forEach(function(kat){
+            push(['  '+kat, bucket[kat].amt]);
+            Object.keys(bucket[kat].akun).sort(function(a,b){ return bucket[kat].akun[b]-bucket[kat].akun[a]; })
+              .forEach(function(ak){ push(['    '+ak, bucket[kat].akun[ak]]); });
           });
+          push(['',null]); // jarak antar project
         });
+        push(['Total '+(sec[0]==='PEMASUKAN'?'Pemasukan':'Pengeluaran')+' (Semua Project)', sectionTotal],'total');
+        push(['',null]);
       });
-      return rows;
+      return {rows:rows, styleFn:function(r,ri){ return kinds[ri]; }};
     }
+    function perProjectRows(){ return perProjectRowsStyled().rows; }
     document.getElementById('lkExcel').onclick=function(){
-      exportExcel('Laporan_Kategori', ['Kategori / Akun','Jumlah'], kategoriRows(), {
+      var main=kategoriRowsStyled(), pp=perProjectRowsStyled();
+      exportExcel('Laporan_Kategori', ['Kategori / Akun','Jumlah'], main.rows, {
+        rowStyleFn:main.styleFn,
         extraSheets:[{sheetName:'Per Project', title:'Laporan Kategori — Rincian per Project (Semua Project)',
-          headers:['Project','Jenis','Kategori','Jumlah'], rows:perProjectRows()}]
+          headers:['Project / Kategori / Akun','Jumlah'], rows:pp.rows, rowStyleFn:pp.styleFn}]
       });
     };
     document.getElementById('lkPdf').onclick=function(){
       exportPdf('Laporan_Kategori', ['Kategori / Akun','Jumlah'], kategoriRows(), {title:'Laporan Kategori'});
       // PDF tidak punya konsep "sheet" seperti Excel -- rincian per
       // project diunduh sebagai berkas kedua yang terpisah.
-      exportPdf('Laporan_Kategori_Per_Project', ['Project','Jenis','Kategori','Jumlah'], perProjectRows(),
-        {title:'Laporan Kategori — Rincian per Project'});
+      exportPdf('Laporan_Kategori_Per_Project', ['Project / Kategori / Akun','Jumlah'], perProjectRows(),
+        {title:'Laporan Kategori — Rincian per Project (Semua Project)'});
     };
   };
 
