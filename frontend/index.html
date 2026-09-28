@@ -5143,13 +5143,19 @@ function registerPages(){
     // senada. Angka (Jumlah) diberi ruang pas untuk milyaran rupiah.
     var KATEGORI_COL_WIDTHS=[34,38,20];
     var PER_PROJECT_COL_WIDTHS=[26,34,38,20];
+    // Rincian "per Project (Semua Project)" cuma berguna kalau laporan
+    // utamanya sedang menampilkan SEMUA project -- begitu owner sendiri
+    // sudah menyaring ke satu project lewat filter di atas, sheet/berkas
+    // itu jadi mubazir (isinya cuma project yang sama, diulang).
     document.getElementById('lkExcel').onclick=function(){
-      var main=kategoriRowsStyled(), pp=perProjectRowsStyled();
-      exportExcel('Laporan_Kategori', ['Kategori','Akun','Jumlah'], main.rows, {
-        rowStyleFn:main.styleFn, colWidths:KATEGORI_COL_WIDTHS,
-        extraSheets:[{sheetName:'Per Project', title:'Laporan Kategori — Rincian per Project (Semua Project)',
-          headers:['Project','Kategori','Akun','Jumlah'], rows:pp.rows, rowStyleFn:pp.styleFn, colWidths:PER_PROJECT_COL_WIDTHS}]
-      });
+      var main=kategoriRowsStyled();
+      var opts={rowStyleFn:main.styleFn, colWidths:KATEGORI_COL_WIDTHS};
+      if(!lastProj){
+        var pp=perProjectRowsStyled();
+        opts.extraSheets=[{sheetName:'Per Project', title:'Laporan Kategori — Rincian per Project (Semua Project)',
+          headers:['Project','Kategori','Akun','Jumlah'], rows:pp.rows, rowStyleFn:pp.styleFn, colWidths:PER_PROJECT_COL_WIDTHS}];
+      }
+      exportExcel('Laporan_Kategori', ['Kategori','Akun','Jumlah'], main.rows, opts);
     };
     document.getElementById('lkPdf').onclick=function(){
       // landscape:true -- 3-4 kolom teks lebar terlalu sempit kalau
@@ -5157,13 +5163,17 @@ function registerPages(){
       // kolomnya >5), jadi dipaksa manual di sini. rowStyleFn dipakai
       // supaya PEMASUKAN/PENGELUARAN, Kategori/Project, dan Total juga
       // tebal+berwarna di PDF, sama seperti versi Excel-nya.
-      var main=kategoriRowsStyled(), pp=perProjectRowsStyled();
+      var main=kategoriRowsStyled();
       exportPdf('Laporan_Kategori', ['Kategori','Akun','Jumlah'], main.rows,
         {title:'Laporan Kategori', landscape:true, rowStyleFn:main.styleFn});
       // PDF tidak punya konsep "sheet" seperti Excel -- rincian per
-      // project diunduh sebagai berkas kedua yang terpisah.
-      exportPdf('Laporan_Kategori_Per_Project', ['Project','Kategori','Akun','Jumlah'], pp.rows,
-        {title:'Laporan Kategori — Rincian per Project (Semua Project)', landscape:true, rowStyleFn:pp.styleFn});
+      // project diunduh sebagai berkas kedua yang terpisah, dan cuma
+      // kalau filter Project di atas sedang "Semua".
+      if(!lastProj){
+        var pp=perProjectRowsStyled();
+        exportPdf('Laporan_Kategori_Per_Project', ['Project','Kategori','Akun','Jumlah'], pp.rows,
+          {title:'Laporan Kategori — Rincian per Project (Semua Project)', landscape:true, rowStyleFn:pp.styleFn});
+      }
     };
   };
 
