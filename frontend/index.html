@@ -1913,17 +1913,12 @@ function loadExcelJS(){
   });
   return _exceljsLoading;
 }
-async function exportExcel(filename, headers, rows, opts){
-  opts=opts||{};
-  try{ await loadExcelJS(); }
-  catch(e){ toast('Gagal memuat modul Excel — cek koneksi lalu coba lagi.','danger'); return; }
+// One tab's worth of styled rows -- pulled out of exportExcel() so a
+// caller needing more than one tab (opts.extraSheets) can add each one
+// the same way instead of hand-rolling ExcelJS styling per report.
+function addStyledSheet(wb, sheetName, title, headers, rows){
+  var ws=wb.addWorksheet(sheetName.slice(0,31).replace(/[\\/*?:\[\]]/g,' '));
 
-  var wb=new ExcelJS.Workbook();
-  wb.creator='Prakasa Group — ACC v2';
-  wb.created=new Date();
-  var ws=wb.addWorksheet((opts.sheetName||filename).slice(0,31).replace(/[\\/*?:\[\]]/g,' '));
-
-  var title=opts.title||filename.replace(/_/g,' ');
   var titleRow=ws.addRow([title]);
   titleRow.font={bold:true, size:13, name:'Calibri', color:{argb:'FF1F3864'}};
   ws.mergeCells(titleRow.number,1,titleRow.number,Math.max(headers.length,1));
@@ -1966,6 +1961,24 @@ async function exportExcel(filename, headers, rows, opts){
       if(len>maxLen) maxLen=len;
     });
     ws.getColumn(i+1).width=Math.min(Math.max(maxLen+2, 10), 48);
+  });
+  return ws;
+}
+async function exportExcel(filename, headers, rows, opts){
+  opts=opts||{};
+  try{ await loadExcelJS(); }
+  catch(e){ toast('Gagal memuat modul Excel — cek koneksi lalu coba lagi.','danger'); return; }
+
+  var wb=new ExcelJS.Workbook();
+  wb.creator='Prakasa Group — ACC v2';
+  wb.created=new Date();
+  var title=opts.title||filename.replace(/_/g,' ');
+  addStyledSheet(wb, opts.sheetName||filename, title, headers, rows);
+  // Extra tabs (e.g. a per-project breakdown alongside the main rekap) --
+  // each entry: {sheetName, title, headers, rows}. Callers that don't
+  // pass this keep the single-sheet behavior above unchanged.
+  (opts.extraSheets||[]).forEach(function(s){
+    addStyledSheet(wb, s.sheetName, s.title||s.sheetName, s.headers, s.rows);
   });
 
   var buf=await wb.xlsx.writeBuffer();
@@ -3606,6 +3619,38 @@ function registerPages(){
           .sort(function(a,b){ return Math.abs(b.total)-Math.abs(a.total); });
 
         var totalAll=rows.reduce(function(a,b){ return a+b.total; },0);
+        // Klik nama ATAU total -> rincian transaksi yang membentuk baris
+        // itu (seluruh riwayat untuk relasi ini, tidak dibatasi filter
+        // tanggal di atas — lebih berguna untuk "kenapa angkanya segini"
+        // daripada cuma bagian mutasi periode berjalan).
+        function historyRowsFor(key){
+          return ent.filter(function(e){ return (e.relasi||'(Tanpa Relasi)')===key; })
+            .map(function(e){ return {tgl:e.tgl, ref:e.ref, ket:(e.ket||'')+(e.project?' — '+e.project:''), amount:cfg.sign(e)}; })
+            .sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+        }
+        function drilldownFor(key){
+          showTxnDrilldown(key, 'Rincian transaksi — '+cfg.title, historyRowsFor(key));
+        }
+        // Pilih satu vendor/pemilik lewat filter di atas (bukan klik baris)
+        // -> riwayat transaksinya langsung tampil di bawah tabel juga,
+        // tidak perlu klik lagi. Sama sumber datanya (historyRowsFor) jadi
+        // dijamin konsisten dengan angka Total di baris tunggal itu.
+        var historyHtml='';
+        if(rel){
+          var hist=historyRowsFor(rel);
+          var histTotal=hist.reduce(function(a,b){ return a+b.amount; },0);
+          historyHtml='<div class="panel" style="margin-top:14px;"><h3>Riwayat Transaksi — '+esc(rel)+'</h3>'+
+            '<div class="panel-desc">Seluruh riwayat untuk '+esc(rel)+', tidak dibatasi rentang tanggal di atas</div>'+
+            '<div class="table-scroll"><table class="dtab"><thead><tr>'+
+            '<th>Tanggal</th><th>Ref No</th><th>Keterangan</th><th style="text-align:right;">Jumlah</th>'+
+            '</tr></thead><tbody>'+
+            (hist.length?hist.map(function(r){
+              return '<tr><td>'+fmtDate(r.tgl)+'</td><td class="mono" style="font-size:11.5px;">'+esc(r.ref||'–')+'</td>'+
+                '<td class="wrap">'+esc(r.ket||'–')+'</td><td style="text-align:right;">'+numSigned(r.amount)+'</td></tr>';
+            }).join(''):'<tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:18px;">Tidak ada transaksi.</td></tr>')+
+            '</tbody><tfoot><tr><td colspan="3"><b>Total</b></td><td style="text-align:right;"><b>'+numSigned(histTotal)+'</b></td></tr></tfoot>'+
+            '</table></div></div>';
+        }
         document.getElementById('reportBody').innerHTML=
           '<div class="kpi-grid" style="margin-bottom:14px;">'+
             kpiCard(cfg.kpiLabel, rp(totalAll), rows.length+' '+cfg.unit, totalAll<0?'danger':'accent')+
@@ -3613,18 +3658,8 @@ function registerPages(){
           '</div>'+
           '<div class="panel"><div class="toolbar">'+
             '<div class="search-box"><span class="ic">⌕</span><input type="text" id="q" placeholder="Cari…"></div>'+
-            '<span class="result-count" id="cnt"></span></div><div id="tbl"></div></div>';
-
-        // Klik nama ATAU total -> rincian transaksi yang membentuk baris
-        // itu (seluruh riwayat untuk relasi ini, tidak dibatasi filter
-        // tanggal di atas — lebih berguna untuk "kenapa angkanya segini"
-        // daripada cuma bagian mutasi periode berjalan).
-        function drilldownFor(key){
-          var list=ent.filter(function(e){ return (e.relasi||'(Tanpa Relasi)')===key; })
-            .map(function(e){ return {tgl:e.tgl, ref:e.ref, ket:(e.ket||'')+(e.project?' — '+e.project:''), amount:cfg.sign(e)}; })
-            .sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
-          showTxnDrilldown(key, 'Rincian transaksi — '+cfg.title, list);
-        }
+            '<span class="result-count" id="cnt"></span></div><div id="tbl"></div></div>'+
+          historyHtml;
         tbl=DataTable('tbl',[
           {key:'_no',label:'No',sort:false,render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
           {key:'nama',label:cfg.colName,render:function(r){
@@ -4989,11 +5024,46 @@ function registerPages(){
       rows.push(['SELISIH (Pemasukan - Pengeluaran)', totalMasuk-totalKeluar]);
       return rows;
     }
+    // Rincian per Project (SEMUA project, seperti file rekap acuan yang
+    // owner kirim) -- sengaja pakai tanggal saja, TIDAK ikut filter
+    // Project di atas, supaya tab/berkas ini selalu memuat seluruh
+    // project sekaligus meski laporan utamanya sedang difilter ke satu
+    // project saja.
+    function perProjectRows(){
+      var dateOnly=DB.txns.filter(function(t){ return inRange(t.tgl,lastFrom,lastTo); });
+      var projMap={}; // project -> {masuk:{kat:amt}, keluar:{kat:amt}}
+      dateOnly.forEach(function(t){
+        var isMasuk=/masuk$/.test(t.jenis);
+        if(t.jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]) return;
+        var pj=t.project||'(Tanpa Project)', kat=akunKategori(t.akunLawan);
+        var amt=isMasuk?t.debet:t.kredit;
+        if(!projMap[pj]) projMap[pj]={masuk:{}, keluar:{}};
+        var bucket=isMasuk?projMap[pj].masuk:projMap[pj].keluar;
+        bucket[kat]=(bucket[kat]||0)+amt;
+      });
+      var rows=[];
+      Object.keys(projMap).sort().forEach(function(pj){
+        [['Pemasukan','masuk'],['Pengeluaran','keluar']].forEach(function(sec){
+          var bucket=projMap[pj][sec[1]];
+          Object.keys(bucket).sort(function(a,b){ return bucket[b]-bucket[a]; }).forEach(function(kat){
+            rows.push([pj, sec[0], kat, bucket[kat]]);
+          });
+        });
+      });
+      return rows;
+    }
     document.getElementById('lkExcel').onclick=function(){
-      exportExcel('Laporan_Kategori', ['Kategori / Akun','Jumlah'], kategoriRows());
+      exportExcel('Laporan_Kategori', ['Kategori / Akun','Jumlah'], kategoriRows(), {
+        extraSheets:[{sheetName:'Per Project', title:'Laporan Kategori — Rincian per Project (Semua Project)',
+          headers:['Project','Jenis','Kategori','Jumlah'], rows:perProjectRows()}]
+      });
     };
     document.getElementById('lkPdf').onclick=function(){
       exportPdf('Laporan_Kategori', ['Kategori / Akun','Jumlah'], kategoriRows(), {title:'Laporan Kategori'});
+      // PDF tidak punya konsep "sheet" seperti Excel -- rincian per
+      // project diunduh sebagai berkas kedua yang terpisah.
+      exportPdf('Laporan_Kategori_Per_Project', ['Project','Jenis','Kategori','Jumlah'], perProjectRows(),
+        {title:'Laporan Kategori — Rincian per Project'});
     };
   };
 
