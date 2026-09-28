@@ -4842,6 +4842,13 @@ function registerPages(){
         if(t.jenis!==jenis) return;
         if(jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]) return;
         var label=akunNamaOnly(t.akunLawan);
+        // Ayat Silang = mutasi internal antar kas/bank sendiri, bukan
+        // pemasukan/pengeluaran riil -- tidak ikut ditotal di laporan
+        // rincian per akun ini (beda dari NET CASH FLOW/Saldo Akhir di
+        // bawah, yang tetap pakai sumRange() apa adanya karena Ayat
+        // Silang selalu berpasangan sama besar di sisi Masuk & Keluar
+        // sehingga menghilangkannya di sini tidak mengubah saldo).
+        if(label.indexOf('Ayat Silang')===0) return;
         if(!map[label]){ map[label]={label:label, akunLawan:t.akunLawan, amount:0}; order.push(label); }
         map[label].amount += isIn?t.debet:t.kredit;
       });
@@ -4972,7 +4979,14 @@ function registerPages(){
       list.forEach(function(t){
         if(jenisArr.indexOf(t.jenis)===-1) return;
         if(t.jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]) return;
-        var kat=akunKategori(t.akunLawan), label=akunNamaOnly(t.akunLawan);
+        var label=akunNamaOnly(t.akunLawan);
+        // Ayat Silang = mutasi internal, bukan pemasukan/pengeluaran
+        // riil -- tidak ikut ditotal (sama seperti Cash Flow). Selalu
+        // berpasangan sama besar di Pemasukan & Pengeluaran jadi SELISIH
+        // di bawah tidak berubah, cuma Total Pemasukan/Pengeluaran yang
+        // jadi lebih kecil dan lebih mencerminkan arus kas yang riil.
+        if(label.indexOf('Ayat Silang')===0) return;
+        var kat=akunKategori(t.akunLawan);
         var amt=isIn?t.debet:t.kredit;
         if(!map[kat]){ map[kat]={kategori:kat, amount:0, byAkun:{}, akunOrder:[]}; order.push(kat); }
         map[kat].amount+=amt;
@@ -5103,7 +5117,9 @@ function registerPages(){
       dateOnly.forEach(function(t){
         var isMasuk=/masuk$/.test(t.jenis);
         if(t.jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]) return;
-        var pj=t.project||'(Tanpa Project)', kat=akunKategori(t.akunLawan), ak=akunNamaOnly(t.akunLawan);
+        var ak=akunNamaOnly(t.akunLawan);
+        if(ak.indexOf('Ayat Silang')===0) return;
+        var pj=t.project||'(Tanpa Project)', kat=akunKategori(t.akunLawan);
         var amt=isMasuk?t.debet:t.kredit;
         if(!projMap[pj]) projMap[pj]={masuk:{}, keluar:{}};
         var bucket=isMasuk?projMap[pj].masuk:projMap[pj].keluar;
