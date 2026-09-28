@@ -1916,12 +1916,19 @@ function loadExcelJS(){
 // One tab's worth of styled rows -- pulled out of exportExcel() so a
 // caller needing more than one tab (opts.extraSheets) can add each one
 // the same way instead of hand-rolling ExcelJS styling per report.
-// rowStyleFn(row, rowIndex) is optional: return 'section' for a bold
-// dark-tinted divider (e.g. "PEMASUKAN"), 'group' for a lighter bold
-// sub-divider (e.g. a project name), or 'total' for a bold row with a
-// top border (a subtotal/grand total) -- anything else (including
-// omitting rowStyleFn entirely) keeps the plain banded-row look below.
-function addStyledSheet(wb, sheetName, title, headers, rows, rowStyleFn){
+// sheetOpts (optional): {rowStyleFn, colWidths}.
+// rowStyleFn(row, rowIndex) -> 'section' for a bold dark-tinted divider
+// (e.g. "PEMASUKAN"), 'group' for a lighter bold sub-divider (e.g. a
+// project name), or 'total' for a bold row with a top border (a
+// subtotal/grand total) -- anything else (including omitting
+// rowStyleFn entirely) keeps the plain banded-row look below.
+// colWidths: fixed width per column, in place of the auto-fit-to-
+// longest-value default -- worth setting explicitly on a report with
+// several text columns where "widest single cell" auto-fit makes some
+// columns needlessly wide and the sheet as a whole hard to scan.
+function addStyledSheet(wb, sheetName, title, headers, rows, sheetOpts){
+  sheetOpts=sheetOpts||{};
+  var rowStyleFn=sheetOpts.rowStyleFn;
   var ws=wb.addWorksheet(sheetName.slice(0,31).replace(/[\\/*?:\[\]]/g,' '));
 
   var titleRow=ws.addRow([title]);
@@ -1970,6 +1977,10 @@ function addStyledSheet(wb, sheetName, title, headers, rows, rowStyleFn){
   });
 
   headers.forEach(function(h, i){
+    if(sheetOpts.colWidths && sheetOpts.colWidths[i]!=null){
+      ws.getColumn(i+1).width=sheetOpts.colWidths[i];
+      return;
+    }
     var maxLen=String(h).length;
     rows.forEach(function(r){
       var v=r[i];
@@ -1989,12 +2000,13 @@ async function exportExcel(filename, headers, rows, opts){
   wb.creator='Prakasa Group — ACC v2';
   wb.created=new Date();
   var title=opts.title||filename.replace(/_/g,' ');
-  addStyledSheet(wb, opts.sheetName||filename, title, headers, rows, opts.rowStyleFn);
+  addStyledSheet(wb, opts.sheetName||filename, title, headers, rows, {rowStyleFn:opts.rowStyleFn, colWidths:opts.colWidths});
   // Extra tabs (e.g. a per-project breakdown alongside the main rekap) --
-  // each entry: {sheetName, title, headers, rows, rowStyleFn}. Callers
-  // that don't pass this keep the single-sheet behavior above unchanged.
+  // each entry: {sheetName, title, headers, rows, rowStyleFn, colWidths}.
+  // Callers that don't pass this keep the single-sheet behavior above
+  // unchanged.
   (opts.extraSheets||[]).forEach(function(s){
-    addStyledSheet(wb, s.sheetName, s.title||s.sheetName, s.headers, s.rows, s.rowStyleFn);
+    addStyledSheet(wb, s.sheetName, s.title||s.sheetName, s.headers, s.rows, {rowStyleFn:s.rowStyleFn, colWidths:s.colWidths});
   });
 
   var buf=await wb.xlsx.writeBuffer();
@@ -2162,13 +2174,37 @@ async function exportPdf(filename, headers, rows, opts){
     didParseCell:function(data){
       if(data.section!=='body') return;
       var raw=data.cell.raw;
+      // opts.rowStyleFn is the explicit version of the isPdfHeaderRow
+      // guess below -- the caller already knows which of its own rows
+      // are a section/group/total divider (it built them), so it never
+      // needs the "first column reads like SHOUTING or 'Total'" heuristic
+      // and the risk that comes with it on a table with more than 2
+      // columns (a project called "ZIDAM" is data, not a header).
+      if(opts.rowStyleFn){
+        var kind=opts.rowStyleFn(rows[data.row.index], data.row.index);
+        if(kind==='section'){
+          data.cell.styles.fontStyle='bold';
+          data.cell.styles.fillColor=[31,56,100];
+          data.cell.styles.textColor=255;
+          return;
+        } else if(kind==='group'){
+          data.cell.styles.fontStyle='bold';
+          data.cell.styles.fillColor=[220,230,245];
+          data.cell.styles.textColor=[31,56,100];
+          return;
+        } else if(kind==='total'){
+          data.cell.styles.fontStyle='bold';
+          data.cell.styles.lineWidth={top:1};
+          data.cell.styles.lineColor=[31,56,100];
+        }
+      }
       // Section-divider rows ("PENDAPATAN", "TOTAL AKTIVA", ...) only
       // ever occur in a plain 2-column statement (Laba Rugi, Neraca,
       // Cash Flow, ...) — a wide table's first column is always a real
       // name/label (a project called "ZIDAM" is data, not a header), so
       // this check must not run there or it'll bold real rows by
       // accident.
-      if(headers.length<=2 && isPdfHeaderRow(data.row.raw[0])){
+      if(!opts.rowStyleFn && headers.length<=2 && isPdfHeaderRow(data.row.raw[0])){
         data.cell.styles.fontStyle='bold';
         data.cell.styles.fillColor=[234,240,249];
         return;
@@ -5101,20 +5137,33 @@ function registerPages(){
       return {rows:rows, styleFn:function(r,ri){ return kinds[ri]; }};
     }
     function perProjectRows(){ return perProjectRowsStyled().rows; }
+    // Lebar kolom ditentukan manual (bukan auto-fit ke isi terpanjang) --
+    // dengan banyak kolom teks, auto-fit gampang bikin satu kolom melar
+    // gara-gara satu baris outlier, dan lebar antar sheet jadi tidak
+    // senada. Angka (Jumlah) diberi ruang pas untuk milyaran rupiah.
+    var KATEGORI_COL_WIDTHS=[34,38,20];
+    var PER_PROJECT_COL_WIDTHS=[26,34,38,20];
     document.getElementById('lkExcel').onclick=function(){
       var main=kategoriRowsStyled(), pp=perProjectRowsStyled();
       exportExcel('Laporan_Kategori', ['Kategori','Akun','Jumlah'], main.rows, {
-        rowStyleFn:main.styleFn,
+        rowStyleFn:main.styleFn, colWidths:KATEGORI_COL_WIDTHS,
         extraSheets:[{sheetName:'Per Project', title:'Laporan Kategori — Rincian per Project (Semua Project)',
-          headers:['Project','Kategori','Akun','Jumlah'], rows:pp.rows, rowStyleFn:pp.styleFn}]
+          headers:['Project','Kategori','Akun','Jumlah'], rows:pp.rows, rowStyleFn:pp.styleFn, colWidths:PER_PROJECT_COL_WIDTHS}]
       });
     };
     document.getElementById('lkPdf').onclick=function(){
-      exportPdf('Laporan_Kategori', ['Kategori','Akun','Jumlah'], kategoriRows(), {title:'Laporan Kategori'});
+      // landscape:true -- 3-4 kolom teks lebar terlalu sempit kalau
+      // dipaksa potret (aturan default exportPdf cuma landscape kalau
+      // kolomnya >5), jadi dipaksa manual di sini. rowStyleFn dipakai
+      // supaya PEMASUKAN/PENGELUARAN, Kategori/Project, dan Total juga
+      // tebal+berwarna di PDF, sama seperti versi Excel-nya.
+      var main=kategoriRowsStyled(), pp=perProjectRowsStyled();
+      exportPdf('Laporan_Kategori', ['Kategori','Akun','Jumlah'], main.rows,
+        {title:'Laporan Kategori', landscape:true, rowStyleFn:main.styleFn});
       // PDF tidak punya konsep "sheet" seperti Excel -- rincian per
       // project diunduh sebagai berkas kedua yang terpisah.
-      exportPdf('Laporan_Kategori_Per_Project', ['Project','Kategori','Akun','Jumlah'], perProjectRows(),
-        {title:'Laporan Kategori — Rincian per Project (Semua Project)'});
+      exportPdf('Laporan_Kategori_Per_Project', ['Project','Kategori','Akun','Jumlah'], pp.rows,
+        {title:'Laporan Kategori — Rincian per Project (Semua Project)', landscape:true, rowStyleFn:pp.styleFn});
     };
   };
 
