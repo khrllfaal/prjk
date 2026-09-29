@@ -3204,34 +3204,35 @@ function registerPages(){
 
       var pemberi=fv('fPemberi');
       var data=pemberi?progRows.filter(function(r){ return r.pemberiProyek===pemberi; }):progRows;
+      function sumFoot(key){ return function(list){ return '<b>'+num0(list.reduce(function(a,b){ return a+b[key]; },0))+'</b>'; }; }
       progTbl=DataTable('tblProg',[
-        {key:'no',label:'No',sort:false,render:function(r){ return '<span class="no">'+r.no+'</span>'; }},
+        {key:'no',label:'No',sort:false,render:function(r,idx){ return '<span class="no">'+(idx+1)+'</span>'; }},
         {key:'nama',label:'Nama Proyek',cls:'wrap',render:function(r){
           return esc(r.nama)+'<div class="faint-italic" style="font-size:11px;">'+esc(r.pemberiProyek)+
             (r.linked?'':' · <span style="color:var(--danger);">⚠ belum tertaut ke transaksi — atur di Master Project</span>')+
-            '</div>'; }},
-        {key:'kontrak',label:'Nilai Kontrak',num:true,render:function(r){ return num0(r.kontrak); }},
-        {key:'rap',label:'Nilai RAP (65%)',num:true,render:function(r){ return num0(r.rap); }},
-        {key:'bahan',label:'Biaya Bahan',num:true,render:function(r){ return drillCell(r.bahan,r,'bahan'); }},
+            '</div>'; }, foot:function(){ return '<b>TOTAL</b>'; }},
+        {key:'kontrak',label:'Nilai Kontrak',num:true,render:function(r){ return num0(r.kontrak); }, foot:sumFoot('kontrak')},
+        {key:'rap',label:'Nilai RAP (65%)',num:true,render:function(r){ return num0(r.rap); }, foot:sumFoot('rap')},
+        {key:'bahan',label:'Biaya Bahan',num:true,render:function(r){ return drillCell(r.bahan,r,'bahan'); }, foot:sumFoot('bahan')},
         {key:'bahanPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.bahanPct):'–'; }},
-        {key:'upah',label:'Biaya Upah',num:true,render:function(r){ return drillCell(r.upah,r,'upah'); }},
+        {key:'upah',label:'Biaya Upah',num:true,render:function(r){ return drillCell(r.upah,r,'upah'); }, foot:sumFoot('upah')},
         {key:'upahPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.upahPct):'–'; }},
-        {key:'akomodasi',label:'Biaya Akomodasi',num:true,render:function(r){ return drillCell(r.akomodasi,r,'akomodasi'); }},
+        {key:'akomodasi',label:'Biaya Akomodasi',num:true,render:function(r){ return drillCell(r.akomodasi,r,'akomodasi'); }, foot:sumFoot('akomodasi')},
         {key:'akomodasiPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.akomodasiPct):'–'; }},
-        {key:'totalRap',label:'Total Pengeluaran RAP',num:true,render:function(r){ return drillCell(r.totalRap,r,'all'); }},
+        {key:'totalRap',label:'Total Pengeluaran RAP',num:true,render:function(r){ return drillCell(r.totalRap,r,'all'); }, foot:sumFoot('totalRap')},
         {key:'totalRapPct',label:'%',num:true,render:function(r){ return r.rap?pct(r.totalRapPct):'–'; }},
-        {key:'sisaRap',label:'Sisa RAP',num:true,render:function(r){ return num0(r.sisaRap); }},
+        {key:'sisaRap',label:'Sisa RAP',num:true,render:function(r){ return num0(r.sisaRap); }, foot:sumFoot('sisaRap')},
         {key:'sisaRapPct',label:'%',num:true,render:function(r){ return r.rap?pct(r.sisaRapPct):'–'; }},
         {key:'statusRap',label:'Status RAP',cls:function(r){ return statusCellClass(r.statusRap); },
           render:function(r){ return statusCellText(r.statusRap); }},
-        {key:'costCenter',label:'Cost Center',num:true,render:function(r){ return drillCell(r.costCenter,r,'costCenter'); }},
-        {key:'admFee',label:'Adm Fee',num:true,render:function(r){ return drillCell(r.admFee,r,'admFee'); }},
-        {key:'totalPengeluaran',label:'Total Pengeluaran',num:true,render:function(r){ return num0(r.totalPengeluaran); }},
+        {key:'costCenter',label:'Cost Center',num:true,render:function(r){ return drillCell(r.costCenter,r,'costCenter'); }, foot:sumFoot('costCenter')},
+        {key:'admFee',label:'Adm Fee',num:true,render:function(r){ return drillCell(r.admFee,r,'admFee'); }, foot:sumFoot('admFee')},
+        {key:'totalPengeluaran',label:'Total Pengeluaran',num:true,render:function(r){ return num0(r.totalPengeluaran); }, foot:sumFoot('totalPengeluaran')},
         {key:'totalPengeluaranPct',label:'%',num:true,render:function(r){ return r.kontrak?pct(r.totalPengeluaranPct):'–'; }},
         {key:'hasilUsaha',label:'Hasil Usaha',num:true,render:function(r){
-          return '<b class="'+(r.hasilUsaha<0?'neg':'pos')+'">'+num0(r.hasilUsaha)+'</b>'; }},
+          return '<b class="'+(r.hasilUsaha<0?'neg':'pos')+'">'+num0(r.hasilUsaha)+'</b>'; }, foot:sumFoot('hasilUsaha')},
         {key:'hasilUsahaPct',label:'%',num:true,render:function(r){ return r.kontrak?pct(r.hasilUsahaPct):'–'; }}
-      ], data, {defaultSort:'kontrak',defaultDir:'desc',perPage:15,
+      ], data, {defaultSort:'kontrak',defaultDir:'desc',perPage:15,showFoot:true,
         searchFn:function(r){ return r.nama+' '+r.pemberiProyek; }, countId:'cntProg',
         onRender:function(){
           document.querySelectorAll('#tblProg [data-drill-ledger]').forEach(function(b){
@@ -3245,12 +3246,19 @@ function registerPages(){
         }});
       bindSearch('qProg', progTbl);
       bindExport('prog', 'Rincian_Progress_Proyek',
-        ['Nama Proyek','Pemberi Proyek','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Biaya Akomodasi','Total Pengeluaran RAP',
+        ['No','Nama Proyek','Pemberi Proyek','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Biaya Akomodasi','Total Pengeluaran RAP',
          'Sisa RAP','Status RAP','Cost Center','Adm Fee','Total Pengeluaran','Hasil Usaha'],
-        function(){ return progTbl.getFiltered().map(function(r){
-          return [r.nama,r.pemberiProyek,r.kontrak,r.rap,r.bahan,r.upah,r.akomodasi,r.totalRap,r.sisaRap,r.statusRap,
-            r.costCenter,r.admFee,r.totalPengeluaran,r.hasilUsaha];
-        }); });
+        function(){
+          var list=progTbl.getFiltered();
+          var rows=list.map(function(r,i){
+            return [i+1,r.nama,r.pemberiProyek,r.kontrak,r.rap,r.bahan,r.upah,r.akomodasi,r.totalRap,r.sisaRap,r.statusRap,
+              r.costCenter,r.admFee,r.totalPengeluaran,r.hasilUsaha];
+          });
+          function sum(key){ return list.reduce(function(a,b){ return a+b[key]; },0); }
+          rows.push(['','TOTAL','',sum('kontrak'),sum('rap'),sum('bahan'),sum('upah'),sum('akomodasi'),sum('totalRap'),sum('sisaRap'),'',
+            sum('costCenter'),sum('admFee'),sum('totalPengeluaran'),sum('hasilUsaha')]);
+          return rows;
+        });
     }
     drawProgTbl();
     pemberiSel.addEventListener('change', drawProgTbl);
@@ -5292,33 +5300,35 @@ function registerPages(){
       document.getElementById('dpBody').innerHTML=bodyHtml ||
         '<div class="panel"><p class="faint-italic">Belum ada proyek di Master Project.</p></div>';
 
+      function sumFoot(key){ return function(list){ return '<b>'+num0(list.reduce(function(a,b){ return a+b[key]; },0))+'</b>'; }; }
       sections.forEach(function(sec){
         var tbl=DataTable(sec.idp+'_tbl',[
-          {key:'no',label:'No',sort:false,render:function(r){ return '<span class="no">'+r.no+'</span>'; }},
+          {key:'no',label:'No',sort:false,render:function(r,idx){ return '<span class="no">'+(idx+1)+'</span>'; }},
           {key:'nama',label:'Nama Proyek',cls:'wrap',render:function(r){
-            return esc(r.nama)+(r.linked?'':'<div class="faint-italic" style="font-size:11px;color:var(--danger);">⚠ belum tertaut ke transaksi — atur di Master Project</div>'); }},
-          {key:'kontrak',label:'Nilai Kontrak',num:true,render:function(r){ return num0(r.kontrak); }},
-          {key:'rap',label:'Nilai RAP (65%)',num:true,render:function(r){ return num0(r.rap); }},
-          {key:'bahan',label:'Biaya Bahan',num:true,render:function(r){ return drillCell(r.bahan,r,'bahan'); }},
+            return esc(r.nama)+(r.linked?'':'<div class="faint-italic" style="font-size:11px;color:var(--danger);">⚠ belum tertaut ke transaksi — atur di Master Project</div>'); },
+            foot:function(){ return '<b>TOTAL</b>'; }},
+          {key:'kontrak',label:'Nilai Kontrak',num:true,render:function(r){ return num0(r.kontrak); }, foot:sumFoot('kontrak')},
+          {key:'rap',label:'Nilai RAP (65%)',num:true,render:function(r){ return num0(r.rap); }, foot:sumFoot('rap')},
+          {key:'bahan',label:'Biaya Bahan',num:true,render:function(r){ return drillCell(r.bahan,r,'bahan'); }, foot:sumFoot('bahan')},
           {key:'bahanPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.bahanPct):'–'; }},
-          {key:'upah',label:'Biaya Upah',num:true,render:function(r){ return drillCell(r.upah,r,'upah'); }},
+          {key:'upah',label:'Biaya Upah',num:true,render:function(r){ return drillCell(r.upah,r,'upah'); }, foot:sumFoot('upah')},
           {key:'upahPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.upahPct):'–'; }},
-          {key:'akomodasi',label:'Biaya Akomodasi',num:true,render:function(r){ return drillCell(r.akomodasi,r,'akomodasi'); }},
+          {key:'akomodasi',label:'Biaya Akomodasi',num:true,render:function(r){ return drillCell(r.akomodasi,r,'akomodasi'); }, foot:sumFoot('akomodasi')},
           {key:'akomodasiPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.akomodasiPct):'–'; }},
-          {key:'totalRap',label:'Total Pengeluaran RAP',num:true,render:function(r){ return drillCell(r.totalRap,r,'all'); }},
+          {key:'totalRap',label:'Total Pengeluaran RAP',num:true,render:function(r){ return drillCell(r.totalRap,r,'all'); }, foot:sumFoot('totalRap')},
           {key:'totalRapPct',label:'%',num:true,render:function(r){ return r.rap?pct(r.totalRapPct):'–'; }},
-          {key:'sisaRap',label:'Sisa RAP',num:true,render:function(r){ return num0(r.sisaRap); }},
+          {key:'sisaRap',label:'Sisa RAP',num:true,render:function(r){ return num0(r.sisaRap); }, foot:sumFoot('sisaRap')},
           {key:'sisaRapPct',label:'%',num:true,render:function(r){ return r.rap?pct(r.sisaRapPct):'–'; }},
           {key:'statusRap',label:'Status RAP',cls:function(r){ return statusCellClass(r.statusRap); },
             render:function(r){ return statusCellText(r.statusRap); }},
-          {key:'costCenter',label:'Cost Center',num:true,render:function(r){ return drillCell(r.costCenter,r,'costCenter'); }},
-          {key:'admFee',label:'Adm Fee',num:true,render:function(r){ return drillCell(r.admFee,r,'admFee'); }},
-          {key:'totalPengeluaran',label:'Total Pengeluaran',num:true,render:function(r){ return num0(r.totalPengeluaran); }},
+          {key:'costCenter',label:'Cost Center',num:true,render:function(r){ return drillCell(r.costCenter,r,'costCenter'); }, foot:sumFoot('costCenter')},
+          {key:'admFee',label:'Adm Fee',num:true,render:function(r){ return drillCell(r.admFee,r,'admFee'); }, foot:sumFoot('admFee')},
+          {key:'totalPengeluaran',label:'Total Pengeluaran',num:true,render:function(r){ return num0(r.totalPengeluaran); }, foot:sumFoot('totalPengeluaran')},
           {key:'totalPengeluaranPct',label:'%',num:true,render:function(r){ return r.kontrak?pct(r.totalPengeluaranPct):'–'; }},
           {key:'hasilUsaha',label:'Hasil Usaha',num:true,render:function(r){
-            return '<b class="'+(r.hasilUsaha<0?'neg':'pos')+'">'+num0(r.hasilUsaha)+'</b>'; }},
+            return '<b class="'+(r.hasilUsaha<0?'neg':'pos')+'">'+num0(r.hasilUsaha)+'</b>'; }, foot:sumFoot('hasilUsaha')},
           {key:'hasilUsahaPct',label:'%',num:true,render:function(r){ return r.kontrak?pct(r.hasilUsahaPct):'–'; }}
-        ], sec.rows, {defaultSort:'kontrak',defaultDir:'desc',perPage:15,
+        ], sec.rows, {defaultSort:'kontrak',defaultDir:'desc',perPage:15,showFoot:true,
           searchFn:function(r){ return r.nama; }, countId:sec.idp+'_cnt',
           onRender:function(){
             document.querySelectorAll('#'+sec.idp+'_tbl [data-drill-ledger]').forEach(function(b){
@@ -5332,12 +5342,19 @@ function registerPages(){
           }});
         bindSearch(sec.idp+'_q', tbl);
         bindExport(sec.idp, 'Dashboard_Proyek_'+sec.bucket.replace(/\s+/g,'_'),
-          ['Nama Proyek','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Biaya Akomodasi','Total Pengeluaran RAP',
+          ['No','Nama Proyek','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Biaya Akomodasi','Total Pengeluaran RAP',
            'Sisa RAP','Status RAP','Cost Center','Adm Fee','Total Pengeluaran','Hasil Usaha'],
-          function(){ return tbl.getFiltered().map(function(r){
-            return [r.nama,r.kontrak,r.rap,r.bahan,r.upah,r.akomodasi,r.totalRap,r.sisaRap,r.statusRap,
-              r.costCenter,r.admFee,r.totalPengeluaran,r.hasilUsaha];
-          }); }, {title:'Dashboard Proyek — '+sec.bucket});
+          function(){
+            var list=tbl.getFiltered();
+            var rows=list.map(function(r,i){
+              return [i+1,r.nama,r.kontrak,r.rap,r.bahan,r.upah,r.akomodasi,r.totalRap,r.sisaRap,r.statusRap,
+                r.costCenter,r.admFee,r.totalPengeluaran,r.hasilUsaha];
+            });
+            function sum(key){ return list.reduce(function(a,b){ return a+b[key]; },0); }
+            rows.push(['','TOTAL',sum('kontrak'),sum('rap'),sum('bahan'),sum('upah'),sum('akomodasi'),sum('totalRap'),sum('sisaRap'),'',
+              sum('costCenter'),sum('admFee'),sum('totalPengeluaran'),sum('hasilUsaha')]);
+            return rows;
+          }, {title:'Dashboard Proyek — '+sec.bucket});
       });
     }
 
