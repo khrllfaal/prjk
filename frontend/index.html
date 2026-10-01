@@ -2787,7 +2787,7 @@ function financePage(jenis, title, sub){
       {key:'tgl', label:'Tanggal', render:function(r){ return fmtDate(r.tgl); }},
       {key:'ref', label:'Ref No', render:function(r){ return '<span class="mono" style="font-size:11.5px;">'+esc(r.ref)+'</span>'; }},
       {key:'akunKas', label:'Akun '+(isBank?'Bank':'Kas'), render:function(r){ return esc(r.akunKas); }},
-      {key:'akunLawan', label:'Akun Lawan', render:function(r){ return esc(r.akunLawan||'–'); }},
+      {key:'akunLawan', label:'Akun Lawan', render:function(r){ return r.akunLawan?esc(akunLabel(r.akunLawan)):'–'; }},
       {key:'project', label:'Project', render:function(r){ return esc(r.project||'–'); }},
       {key:'relasi', label:'Relasi', render:function(r){ return r.relasi?esc(r.relasi):'<span class="faint-italic">–</span>'; }},
       {key:'amount', label:'Amount', num:true, sortVal:function(r){ return isIn?r.debet:r.kredit; },
@@ -2837,8 +2837,13 @@ function financePage(jenis, title, sub){
 
     function form(id){
       var rec=id?DB.txns.find(function(x){ return x.id===id; }):null;
+      // Dropdown LABEL shows "kode-nama" for easy lookup, but the stored
+      // VALUE is the bare name — same convention Akun Kas already uses
+      // above (see its own comment) — so a newly-saved transaction's Akun
+      // Lawan no longer carries its COA code into every list/report/export
+      // that shows this field verbatim.
       var lawanOpts=DB.coa.filter(function(a){ return a.level>=3; })
-        .map(function(a){ return a.kode+'-'+a.nama; });
+        .map(function(a){ return {value:a.nama, label:a.kode+'-'+a.nama}; });
       var relasiList=isIn?DB.customers:DB.vendors;
       var relasiOpts=[''].concat(relasiList.map(function(r){ return r.nama; }));
       var relasiLabel=isIn?'Customer':'Vendor';
@@ -2886,7 +2891,7 @@ function financePage(jenis, title, sub){
       }});
       searchableSelect('f_akunKas_ssel','f_akunKas',{options:kasAkunOpts,
         placeholder:'Cari akun '+(isBank?'bank':'kas')+'…'});
-      searchableSelect('f_akunLawan_ssel','f_akunLawan',{options:lawanOpts.map(function(a){ return {value:a,label:a}; }),
+      searchableSelect('f_akunLawan_ssel','f_akunLawan',{options:lawanOpts,
         placeholder:'Cari kode / nama akun…'});
       searchableSelect('f_project_ssel','f_project',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
         placeholder:'Cari project…'});
@@ -2933,7 +2938,7 @@ function financePage(jenis, title, sub){
     bindExport('exp', title.replace(/\s+/g,'_'),
       ['Tanggal','Ref No','Akun','Akun Lawan','Project','Relasi','Amount','Description'],
       function(){ return tbl.getFiltered().map(function(r){
-        return [r.tgl,r.ref,r.akunKas,r.akunLawan,r.project,r.relasi,(isIn?r.debet:r.kredit),r.ket]; }); });
+        return [r.tgl,r.ref,r.akunKas,r.akunLawan?akunLabel(r.akunLawan):'',r.project,r.relasi,(isIn?r.debet:r.kredit),r.ket]; }); });
   };
 }
 
@@ -3529,8 +3534,8 @@ function registerPages(){
         {key:'ref',label:'No. Bukti',render:function(r){ return '<span class="mono" style="font-size:11.5px;">'+esc(r.ref)+'</span>'; }},
         {key:'noFaktur',label:'No. Faktur/PO',render:function(r){ return r.noFaktur?esc(r.noFaktur):'<span class="faint-italic">–</span>'; }},
         {key:'_akun',label:'Akun (Debit → Kredit)',cls:'wrap',sort:false,render:function(r){
-          var d=r.lines.filter(function(l){ return l.debet>0; }).map(function(l){ return esc(l.akun); });
-          var k=r.lines.filter(function(l){ return l.kredit>0; }).map(function(l){ return esc(l.akun); });
+          var d=r.lines.filter(function(l){ return l.debet>0; }).map(function(l){ return esc(akunLabel(l.akun)); });
+          var k=r.lines.filter(function(l){ return l.kredit>0; }).map(function(l){ return esc(akunLabel(l.akun)); });
           return '<button type="button" class="linklike" data-detail="'+esc(r.ref)+'">'+d.join(', ')+' → '+k.join(', ')+'</button>';
         }},
         {key:'project',label:'Project',render:function(r){ return esc(r.project||'–'); }},
@@ -3563,7 +3568,7 @@ function registerPages(){
     function showVoucherDetail(ref){
       var lines=DB.jurnal.filter(function(j){ return j.ref===ref; });
       var list=lines.map(function(l){
-        return {tgl:l.tgl, ref:l.akun, ket:(l.debet>0?'Debit':'Kredit'), amount:l.debet>0?l.debet:l.kredit};
+        return {tgl:l.tgl, ref:akunLabel(l.akun), ket:(l.debet>0?'Debit':'Kredit'), amount:l.debet>0?l.debet:l.kredit};
       });
       showTxnDrilldown('Bukti Jurnal '+ref, 'Rincian baris debit/kredit bukti jurnal ini', list);
     }
@@ -3585,7 +3590,9 @@ function registerPages(){
     function form(ref){
       var lines=ref?DB.jurnal.filter(function(j){ return j.ref===ref; }):null;
       var head=lines?lines[0]:null;
-      var akunOpts=DB.coa.filter(function(a){ return a.level>=3; }).map(function(a){ return a.kode+'-'+a.nama; });
+      // Same convention as Akun Kas / Akun Lawan on the Kas/Bank forms:
+      // dropdown LABEL shows "kode-nama", stored VALUE is the bare name.
+      var akunOpts=DB.coa.filter(function(a){ return a.level>=3; }).map(function(a){ return {value:a.nama, label:a.kode+'-'+a.nama}; });
       var relasiOpts=DB.customers.concat(DB.vendors).map(function(r){ return r.nama; });
       var rowDefs=(lines||[null,null]).map(lineRowHtml);
 
@@ -3661,7 +3668,7 @@ function registerPages(){
           '<span style="color:'+(bal?'var(--safe)':'var(--danger)')+';">'+(bal?'✓ Balance':'⚠ Selisih '+num0(sel))+'</span>';
       }
       function wireRow(rid){
-        searchableSelect(rid+'_akun_ssel', rid+'_akun', {options:akunOpts.map(function(a){ return {value:a,label:a}; }), placeholder:'Cari kode / nama akun…'});
+        searchableSelect(rid+'_akun_ssel', rid+'_akun', {options:akunOpts, placeholder:'Cari kode / nama akun…'});
         bindCurrencyInput(rid+'_debet');
         bindCurrencyInput(rid+'_kredit');
         document.getElementById(rid+'_debet').addEventListener('input', updateBalance);
@@ -3704,7 +3711,7 @@ function registerPages(){
       function(){
         var from=fv('fFrom'), to=fv('fTo'), out=[];
         DB.jurnal.filter(function(j){ return inRange(j.tgl,from,to); }).forEach(function(j){
-          out.push([j.tgl,j.ref,j.noFaktur||'',j.status||'posted',j.akun,j.project,j.relasi,j.ket,j.debet,j.kredit]);
+          out.push([j.tgl,j.ref,j.noFaktur||'',j.status||'posted',akunLabel(j.akun),j.project,j.relasi,j.ket,j.debet,j.kredit]);
         });
         return out;
       });
