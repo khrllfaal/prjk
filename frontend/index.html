@@ -2977,32 +2977,14 @@ function registerPages(){
 
   /* ---------------- DASHBOARD ---------------- */
   PAGES.dashboard=function(c){
-    // Always all-time — overall project health (alerts, donuts, KPI
-    // counts) shouldn't shrink to near-zero just because the separate
-    // "Rincian Progress per Proyek" table below is filtered to one week.
-    var allProgRows=computeProjectProgressRows();
-    var proyekAktif=DB.projects.length;
-    var totalKontrak=DB.projects.reduce(function(a,p){ return a+(p.kontrak||0); },0);
-    var rows=allProgRows.map(function(r){
-      return {no:r.no, nama:r.nama, kontrak:r.kontrak, rap:r.rap,
-        pengeluaran_bahan_upah:r.totalRap,
-        progress_keuangan:r.rap?r.totalRap/r.rap:0,
-        progress_lapangan:(r.progressLapangan===null)?'Belum Lapor':r.progressLapangan,
-        selisih:(r.progressLapangan===null)?null:((r.rap?r.totalRap/r.rap:0)-r.progressLapangan),
-        sisa_rap:r.sisaRap, status_rap:r.statusRap};
-    });
-    var belum=rows.filter(function(r){ return r.progress_lapangan==='Belum Lapor'; });
-    var sudah=rows.filter(function(r){ return typeof r.progress_lapangan==='number'; });
-    var bermasalah=rows.filter(function(r){ var x=statusInfo(r.status_rap).cls; return x==='danger'||x==='warn'; });
-    var melebihi=rows.filter(function(r){ return statusInfo(r.status_rap).cls==='danger'; });
-
-    var alerts=[];
-    if(melebihi.length) alerts.push(alertHTML('danger','⚠',melebihi.length+' proyek melebihi RAP', melebihi.map(function(r){ return esc(r.nama); }).join(', ')));
-    if(belum.length) alerts.push(alertHTML('warn','⚠','Progress lapangan belum lengkap',
-      belum.length+' dari '+rows.length+' proyek belum melaporkan progress lapangan.'));
+    // allProgRows/rows/alerts/counts/cashPeriods etc. are all recomputed
+    // fresh from DB inside refreshDashboardData() below — on the initial
+    // render AND on every later live-sync update (see window.__liveRefresh)
+    // — so nothing here is stale once another admin's save comes in.
+    var allProgRows, proyekAktif, totalKontrak, rows, belum, sudah, bermasalah, melebihi, alerts, counts;
 
     c.innerHTML = pageHead('Dashboard','Ringkasan kas, kumulatif tahun berjalan, dan status RAP seluruh proyek','') +
-      '<div class="alerts">'+alerts.join('')+'</div>'+
+      '<div class="alerts" id="dashAlerts"></div>'+
       '<div class="section-head"><h2><span class="icon-chip">$</span>Posisi Kas — Per Periode</h2>'+
         '<span class="desc">Pilih minggu yang ingin ditampilkan</span></div>'+
       '<div class="period-bar"><span class="plabel">Periode</span>'+
@@ -3021,15 +3003,10 @@ function registerPages(){
       '<div id="kumWrap"></div>'+
       '<hr class="section-divider">'+
       '<div class="section-head"><h2><span class="icon-chip">◔</span>Progress &amp; Status RAP</h2>'+
-        '<span class="desc">Snapshot '+fmtDate(todayISO())+' · '+rows.length+' proyek</span></div>'+
-      '<div class="kpi-grid">'+
-        kpiCard('Proyek Aktif', String(proyekAktif),'Dipantau minggu ini','accent')+
-        kpiCard('Total Nilai Kontrak', rp(totalKontrak),'Seluruh proyek','accent')+
-        kpiCard('Status RAP ⚠ Melebihi / Hampir Habis', String(bermasalah.length),'dari '+rows.length+' proyek',
-          bermasalah.length?'danger':'safe')+
-      '</div>'+
+        '<span class="desc" id="dashRapDesc"></span></div>'+
+      '<div class="kpi-grid" id="dashTopKpi"></div>'+
       '<div class="grid-2" style="margin-top:14px;">'+
-        '<div class="panel tick"><h3>Status RAP</h3><div class="panel-desc">'+rows.length+' proyek</div>'+
+        '<div class="panel tick"><h3>Status RAP</h3><div class="panel-desc" id="dashRapCount"></div>'+
           '<div id="donutRap" class="donut-wrap"></div></div>'+
         '<div class="panel tick"><h3>Pelaporan Progress Lapangan</h3><div class="panel-desc">Sudah lapor vs belum lapor</div>'+
           '<div id="donutLapor" class="donut-wrap"></div></div>'+
@@ -3051,8 +3028,7 @@ function registerPages(){
         '<div class="table-scroll"><div id="tblProg"></div></div></div>';
 
     /* --- period logic --- */
-    var cashPeriods=computeCashPeriods();
-    var curId=cashPeriods.defaultId;
+    var cashPeriods, curId; // assigned fresh on every refreshDashboardData() call below
     function period(){ return cashPeriods.list.find(function(p){ return p.id===curId; }); }
 
     function drawPeriodSel(){
@@ -3158,42 +3134,7 @@ function registerPages(){
     }
 
     /* --- progress section --- */
-    var counts={AMAN:0,HAMPIR:0,MELEBIHI:0,LAIN:0};
-    rows.forEach(function(r){
-      var x=statusInfo(r.status_rap).cls;
-      if(x==='safe')counts.AMAN++; else if(x==='warn')counts.HAMPIR++;
-      else if(x==='danger')counts.MELEBIHI++; else counts.LAIN++;
-    });
-    drawPeriodSel(); drawKas(); drawKum();
-
-    renderDonut(document.getElementById('donutRap'),[
-      {label:'Aman',value:counts.AMAN,color:'var(--safe)'},
-      {label:'Hampir Habis RAP',value:counts.HAMPIR,color:'var(--warn)'},
-      {label:'⚠ Melebihi RAP',value:counts.MELEBIHI,color:'var(--danger)'},
-      {label:'Data Tidak Lengkap',value:counts.LAIN,color:'var(--neutral)'}
-    ],{centerLabel:String(rows.length),centerSub:'Proyek'});
-
-    renderDonut(document.getElementById('donutLapor'),[
-      {label:'Sudah Lapor',value:sudah.length,color:'var(--steel)'},
-      {label:'Belum Lapor',value:belum.length,color:'var(--neutral)'}
-    ],{centerLabel:sudah.length+'/'+rows.length,centerSub:'Lapor'});
-
-    document.getElementById('dualWrap').innerHTML = sudah.length ?
-      ('<div style="display:flex;gap:16px;margin-bottom:14px;font-size:11.5px;color:var(--text-mute);">'+
-      '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--steel);margin-right:5px;"></span>Progress Keuangan</span>'+
-      '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#E0A100;margin-right:5px;"></span>Progress Lapangan</span></div>'+
-      sudah.slice().sort(function(a,b){ return b.kontrak-a.kontrak; }).map(function(r){
-        return '<div class="dualbar-row"><div class="dtitle">'+esc(r.nama)+'</div>'+
-          '<div class="dualbar-line"><span class="dlabel">Keuangan</span><div class="track"><div class="fill fin" style="width:'+
-            Math.min(100,Math.round(r.progress_keuangan*100))+'%;"></div></div><span class="dval">'+pct(r.progress_keuangan)+'</span></div>'+
-          '<div class="dualbar-line"><span class="dlabel">Lapangan</span><div class="track"><div class="fill fld" style="width:'+
-            Math.min(100,Math.round(r.progress_lapangan*100))+'%;"></div></div><span class="dval">'+pct(r.progress_lapangan)+'</span></div></div>';
-      }).join('')) : '<p style="color:var(--text-faint);font-size:12.5px;">Belum ada proyek dengan progress lapangan yang dilaporkan.</p>';
-
     var pemberiSel=document.getElementById('fPemberi');
-    var pemberiList=Array.from(new Set(allProgRows.map(function(r){ return r.pemberiProyek; }))).sort();
-    pemberiSel.innerHTML='<option value="">Semua Pemberi Proyek</option>'+
-      pemberiList.map(function(p){ return '<option value="'+esc(p)+'">'+esc(p)+'</option>'; }).join('');
 
     function drillCell(amount, r, kind){
       if(!amount) return '<span class="faint-italic">–</span>';
@@ -3276,7 +3217,98 @@ function registerPages(){
           return rows;
         });
     }
-    drawProgTbl();
+
+    // Everything above this point (cards, donuts, dual progress bars,
+    // alerts, the Pemberi Proyek dropdown, the progress table) depends on
+    // the live DB — this is the page's refresh(), registered as
+    // window.__liveRefresh so a background sync update (another admin's
+    // save) repaints all of it in place instead of a full go(CURRENT)
+    // rebuild. fProgFrom/fProgTo/fPemberi are read fresh each call, same
+    // as drawProgTbl() already did, so an open filter is never reset.
+    function refreshDashboardData(){
+      window.__liveRefresh=refreshDashboardData;
+
+      allProgRows=computeProjectProgressRows();
+      proyekAktif=DB.projects.length;
+      totalKontrak=DB.projects.reduce(function(a,p){ return a+(p.kontrak||0); },0);
+      rows=allProgRows.map(function(r){
+        return {no:r.no, nama:r.nama, kontrak:r.kontrak, rap:r.rap,
+          pengeluaran_bahan_upah:r.totalRap,
+          progress_keuangan:r.rap?r.totalRap/r.rap:0,
+          progress_lapangan:(r.progressLapangan===null)?'Belum Lapor':r.progressLapangan,
+          selisih:(r.progressLapangan===null)?null:((r.rap?r.totalRap/r.rap:0)-r.progressLapangan),
+          sisa_rap:r.sisaRap, status_rap:r.statusRap};
+      });
+      belum=rows.filter(function(r){ return r.progress_lapangan==='Belum Lapor'; });
+      sudah=rows.filter(function(r){ return typeof r.progress_lapangan==='number'; });
+      bermasalah=rows.filter(function(r){ var x=statusInfo(r.status_rap).cls; return x==='danger'||x==='warn'; });
+      melebihi=rows.filter(function(r){ return statusInfo(r.status_rap).cls==='danger'; });
+
+      alerts=[];
+      if(melebihi.length) alerts.push(alertHTML('danger','⚠',melebihi.length+' proyek melebihi RAP', melebihi.map(function(r){ return esc(r.nama); }).join(', ')));
+      if(belum.length) alerts.push(alertHTML('warn','⚠','Progress lapangan belum lengkap',
+        belum.length+' dari '+rows.length+' proyek belum melaporkan progress lapangan.'));
+      document.getElementById('dashAlerts').innerHTML=alerts.join('');
+
+      document.getElementById('dashRapDesc').textContent='Snapshot '+fmtDate(todayISO())+' · '+rows.length+' proyek';
+      document.getElementById('dashRapCount').textContent=rows.length+' proyek';
+      document.getElementById('dashTopKpi').innerHTML=[
+        kpiCard('Proyek Aktif', String(proyekAktif),'Dipantau minggu ini','accent'),
+        kpiCard('Total Nilai Kontrak', rp(totalKontrak),'Seluruh proyek','accent'),
+        kpiCard('Status RAP ⚠ Melebihi / Hampir Habis', String(bermasalah.length),'dari '+rows.length+' proyek',
+          bermasalah.length?'danger':'safe')
+      ].join('');
+
+      // curId (the selected Posisi Kas period) is kept across a live
+      // refresh when it still exists in the recomputed list — a new week
+      // boundary appearing doesn't yank the user back to the default.
+      cashPeriods=computeCashPeriods();
+      if(curId===undefined || !cashPeriods.list.some(function(p){ return p.id===curId; })) curId=cashPeriods.defaultId;
+      drawPeriodSel(); drawKas(); drawKum();
+
+      counts={AMAN:0,HAMPIR:0,MELEBIHI:0,LAIN:0};
+      rows.forEach(function(r){
+        var x=statusInfo(r.status_rap).cls;
+        if(x==='safe')counts.AMAN++; else if(x==='warn')counts.HAMPIR++;
+        else if(x==='danger')counts.MELEBIHI++; else counts.LAIN++;
+      });
+      renderDonut(document.getElementById('donutRap'),[
+        {label:'Aman',value:counts.AMAN,color:'var(--safe)'},
+        {label:'Hampir Habis RAP',value:counts.HAMPIR,color:'var(--warn)'},
+        {label:'⚠ Melebihi RAP',value:counts.MELEBIHI,color:'var(--danger)'},
+        {label:'Data Tidak Lengkap',value:counts.LAIN,color:'var(--neutral)'}
+      ],{centerLabel:String(rows.length),centerSub:'Proyek'});
+
+      renderDonut(document.getElementById('donutLapor'),[
+        {label:'Sudah Lapor',value:sudah.length,color:'var(--steel)'},
+        {label:'Belum Lapor',value:belum.length,color:'var(--neutral)'}
+      ],{centerLabel:sudah.length+'/'+rows.length,centerSub:'Lapor'});
+
+      document.getElementById('dualWrap').innerHTML = sudah.length ?
+        ('<div style="display:flex;gap:16px;margin-bottom:14px;font-size:11.5px;color:var(--text-mute);">'+
+        '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--steel);margin-right:5px;"></span>Progress Keuangan</span>'+
+        '<span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#E0A100;margin-right:5px;"></span>Progress Lapangan</span></div>'+
+        sudah.slice().sort(function(a,b){ return b.kontrak-a.kontrak; }).map(function(r){
+          return '<div class="dualbar-row"><div class="dtitle">'+esc(r.nama)+'</div>'+
+            '<div class="dualbar-line"><span class="dlabel">Keuangan</span><div class="track"><div class="fill fin" style="width:'+
+              Math.min(100,Math.round(r.progress_keuangan*100))+'%;"></div></div><span class="dval">'+pct(r.progress_keuangan)+'</span></div>'+
+            '<div class="dualbar-line"><span class="dlabel">Lapangan</span><div class="track"><div class="fill fld" style="width:'+
+              Math.min(100,Math.round(r.progress_lapangan*100))+'%;"></div></div><span class="dval">'+pct(r.progress_lapangan)+'</span></div></div>';
+        }).join('')) : '<p style="color:var(--text-faint);font-size:12.5px;">Belum ada proyek dengan progress lapangan yang dilaporkan.</p>';
+
+      // Rebuild the Pemberi Proyek options from fresh data but keep
+      // whatever the user currently has selected, if it's still a valid
+      // option — a live refresh must never silently drop their filter.
+      var curPemberi=fv('fPemberi');
+      var pemberiList=Array.from(new Set(allProgRows.map(function(r){ return r.pemberiProyek; }))).sort();
+      pemberiSel.innerHTML='<option value="">Semua Pemberi Proyek</option>'+
+        pemberiList.map(function(p){ return '<option value="'+esc(p)+'">'+esc(p)+'</option>'; }).join('');
+      if(curPemberi && pemberiList.indexOf(curPemberi)!==-1) pemberiSel.value=curPemberi;
+
+      drawProgTbl();
+    }
+
+    refreshDashboardData();
     pemberiSel.addEventListener('change', drawProgTbl);
     document.getElementById('fProgFrom').addEventListener('change', drawProgTbl);
     document.getElementById('fProgTo').addEventListener('change', drawProgTbl);
@@ -5302,6 +5334,7 @@ function registerPages(){
     }
 
     function drawAll(){
+      window.__liveRefresh=drawAll; // see go() and refreshDbFromServer() in auth.js
       progFrom = fv('fProgFrom')||null;
       progTo = fv('fProgTo')||null;
       document.getElementById('progPeriodDesc').textContent = (progFrom||progTo)
