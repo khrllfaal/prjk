@@ -60,26 +60,37 @@ function enterApp(){
    opts.rerender (default true): re-render the current page afterwards,
    skipped while a Tambah/Edit modal is open so a live poll never yanks
    a form out from under someone mid-edit. */
+/* Prefer the open page's own light-weight refresh() (see
+   window.__liveRefresh, set by go() in index.html) over a full
+   go(CURRENT) rebuild — shared by refreshDbFromServer() below and by
+   syncUpsert()/handleSyncConflict() in data-sync.js, for the same
+   reason: a background-driven re-render (another admin's save landing
+   via the sync poll) should never feel like the page reloaded. Falls
+   back to go(CURRENT) (scroll position restored after) when the open
+   page hasn't registered one, or its own refresh() throws. No-op if a
+   Tambah/Edit modal is open — never pull a form out from under someone
+   mid-edit; the caller's next tick/attempt re-checks normally. */
+function softRerender(){
+  var modalOpen=document.getElementById('modalBack') && document.getElementById('modalBack').classList.contains('on');
+  if(modalOpen) return;
+  if(typeof window.__liveRefresh==='function'){
+    try{ window.__liveRefresh(); return; }
+    catch(e){ console.error('live refresh failed, falling back to full reload', e); }
+  }
+  if(typeof CURRENT!=='undefined' && typeof go==='function'){
+    var scrollY=window.scrollY;
+    go(CURRENT);
+    window.scrollTo(0, scrollY);
+  }
+}
+
 async function refreshDbFromServer(opts){
   opts = opts || {};
   var fresh = await fetchAllData();
   var stillPending = await flushPendingSync();
   if(stillPending.length) fresh = reapplyPendingToDb(fresh);
   DB = fresh; saveDB();
-  if(opts.rerender !== false){
-    var modalOpen=document.getElementById('modalBack').classList.contains('on');
-    if(!modalOpen){
-      // go() always rebuilds the page from scratch and jumps scroll to
-      // the top — fine for the one-time cache-first boot refresh, but a
-      // 30s background poll doing that mid-read (e.g. scrolled halfway
-      // down a long report) would be exactly the kind of interruption
-      // this is supposed to avoid. Re-render in place, then put the
-      // scroll position back where the user actually was.
-      var scrollY = window.scrollY;
-      go(CURRENT);
-      window.scrollTo(0, scrollY);
-    }
-  }
+  if(opts.rerender !== false) softRerender();
   if(stillPending.length){
     toast(stillPending.length+' perubahan masih belum tersinkron ke server — akan dicoba lagi otomatis.', 'danger');
   }

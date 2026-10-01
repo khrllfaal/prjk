@@ -255,11 +255,8 @@ async function syncUpsert(table, obj){
       toast('Ref No disesuaikan otomatis ke '+result.ref+' (bentrok dengan input dari user lain di waktu yang sama; sebelumnya '+oldRef+').', 'danger');
       // The form that created this row is already closed by the time this
       // resolves (syncUpsert is fired without await), so it's always safe
-      // to re-render in place — same pattern as refreshDbFromServer().
-      if(typeof CURRENT!=='undefined' && typeof go==='function'){
-        var modalOpen=document.getElementById('modalBack') && document.getElementById('modalBack').classList.contains('on');
-        if(!modalOpen){ var scrollY=window.scrollY; go(CURRENT); window.scrollTo(0,scrollY); }
-      }
+      // to re-render in place — see softRerender() in auth.js.
+      if(typeof softRerender==='function') softRerender();
     }
     // Re-baseline this row's own "last known updated_at" to what the
     // server just wrote, so the row's NEXT edit (by anyone) is checked
@@ -312,10 +309,7 @@ function handleSyncConflict(table, obj, errData){
     msg = 'PERUBAHAN TIDAK TERSIMPAN: data ini sudah DIHAPUS oleh pengguna lain sejak Anda membukanya.';
   }
   toast(msg, 'danger');
-  if(typeof CURRENT!=='undefined' && typeof go==='function'){
-    var modalOpen=document.getElementById('modalBack') && document.getElementById('modalBack').classList.contains('on');
-    if(!modalOpen){ var scrollY=window.scrollY; go(CURRENT); window.scrollTo(0,scrollY); }
-  }
+  if(typeof softRerender==='function') softRerender();
 }
 async function syncDelete(table, id){
   if(!isBackendConfigured()) return; // local mode — saveDB() already persisted it

@@ -2525,8 +2525,22 @@ function buildNav(){
 var PAGES={};      // id -> render function
 var CURRENT=null;
 
+/* window.__liveRefresh: the CURRENTLY OPEN page's own cheap redraw (just
+   its own refresh() — re-reads DB and repaints only its #kpi/#tbl-style
+   mount points, leaving the filter bar, search box text and scroll
+   position untouched), re-registered every time that page's refresh()
+   runs. refreshDbFromServer() in auth.js calls it instead of a full
+   go(CURRENT) rebuild when a background sync picks up another admin's
+   save — that's what makes their change just quietly appear instead of
+   the whole page visibly reloading. Cleared here on every navigation so
+   a stale hook from the page just left (whose #tbl etc. no longer exist)
+   is never called afterwards; go(CURRENT) is always the correct, if
+   heavier, fallback once this is null. */
+window.__liveRefresh=null;
+
 function go(pageId){
   if(!PAGES[pageId]){ toast('Halaman belum tersedia.','danger'); return; }
+  window.__liveRefresh=null;
   CURRENT=pageId;
   location.hash='#/'+pageId;
 
@@ -2631,6 +2645,7 @@ function masterPage(cfg){
 
     var tbl;
     function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
       tbl=DataTable('tbl', cols, DB[cfg.coll], {
         searchFn:cfg.searchFn, countId:'cnt', perPage:15,
         onRender:function(){
@@ -2798,6 +2813,7 @@ function financePage(jenis, title, sub){
     }
 
     function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
       var rows=currentRows();
       var total=rows.reduce(function(a,b){ return a+(isIn?b.debet:(NON_CASH_KAS_KELUAR_REFS[b.ref]?0:b.kredit)); },0);
       var projSet={}; rows.forEach(function(r){ if(r.project) projSet[r.project]=1; });
@@ -3458,6 +3474,7 @@ function registerPages(){
 
     var tbl;
     function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
       var from=fv('fFrom'), to=fv('fTo');
       var legRows=DB.jurnal.filter(function(j){ return inRange(j.tgl,from,to); });
 
@@ -3670,6 +3687,7 @@ function registerPages(){
 
       var tbl;
       function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
         var from=fv('fFrom'), to=fv('fTo'), rel=fv('fRel');
         var ent=allEntries().filter(cfg.match);
         var map={};
@@ -3809,6 +3827,7 @@ function registerPages(){
     }
 
     function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
       var rows=currentRows();
       var totalNota=rows.reduce(function(a,b){ return a+b.amount; },0);
       var totalSisa=rows.reduce(function(a,b){ return a+b.sisa; },0);
@@ -4039,6 +4058,7 @@ function registerPages(){
     reportShell(c,'Mutasi Kas / Bank','Rekap pergerakan saldo tiap akun kas dan bank');
     var tbl;
     function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
       var from=fv('fFrom'), to=fv('fTo');
       var map={};
       DB.txns.forEach(function(t){
@@ -4098,6 +4118,7 @@ function registerPages(){
 
     var tbl;
     function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
       var from=fv('fFrom'), to=fv('fTo'), akunKodeSel=fv('fAkun'), proj=fv('fProject');
       var akunCoa=DB.coa.find(function(cc){ return cc.kode===akunKodeSel; });
       var akun=akunCoa?akunCoa.nama:'';
@@ -4229,6 +4250,7 @@ function registerPages(){
 
     var lastRows=[]; // flat leaf rows, for export
     function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
       var bulan=Number(fv('fBulan')), tahun=fv('fTahun');
       var mm=String(bulan).padStart(2,'0');
       var lastDay=new Date(Number(tahun), bulan, 0).getDate();
@@ -4537,6 +4559,7 @@ function registerPages(){
       '<div id="reportBody"></div>';
 
     function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
       var bulan=fv('fBulan'), tahun=fv('fTahun'), project=fv('fProject');
       var from=null, to=null;
       if(tahun){
@@ -4707,6 +4730,7 @@ function registerPages(){
     // it from the button's label text.
     var rowClickInfo=[];
     function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
       var to=fv('fPer')||todayISO();
       var aktiva=groupByHead(null,to,['1']);
       var kewajiban=groupByHead(null,to,['2']);
@@ -4892,6 +4916,7 @@ function registerPages(){
 
     var lastFrom='', lastTo='', lastProj='', lastByJenis={}, lastSummary=null;
     function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
       var from=fv('fFrom')||defFrom, to=fv('fTo')||defTo, proj=fv('fProject');
       lastFrom=from; lastTo=to; lastProj=proj;
       var list=DB.txns.filter(function(t){
@@ -5038,6 +5063,7 @@ function registerPages(){
 
     var lastFrom='', lastTo='', lastProj='', lastBy={}, list=[];
     function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
       var from=fv('fFrom')||defFrom, to=fv('fTo')||defTo, proj=fv('fProject');
       lastFrom=from; lastTo=to; lastProj=proj;
       list=DB.txns.filter(function(t){
@@ -5376,6 +5402,7 @@ function registerPages(){
 
     var tbl;
     function refresh(){
+      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
       var from=fv('fFrom'), to=fv('fTo'), mode=fv('fMode')||'project';
       var map={}, total=0;
       DB.txns.forEach(function(t){
