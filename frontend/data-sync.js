@@ -22,7 +22,16 @@ async function apiFetch(path, opts){
   var res = await fetch(window.API_BASE_URL + path, opts);
   var data = {};
   try{ data = await res.json(); }catch(e){}
-  if(!res.ok) throw new Error(data.error || ('HTTP '+res.status));
+  if(!res.ok){
+    // Status + full body attached to the error (not just its message) so
+    // callers like syncUpsert() can tell a real conflict (409, two admins
+    // editing the same row) apart from a plain network/server failure —
+    // the two need very different handling (see handleSyncConflict()).
+    var err = new Error(data.error || ('HTTP '+res.status));
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
   return data;
 }
 
@@ -30,7 +39,7 @@ async function apiFetch(path, opts){
 function txnFromDb(r){
   return {id:r.id, jenis:r.jenis, tgl:r.tgl, ref:r.ref, akunKas:r.akun_kas, akunLawan:r.akun_lawan,
     project:r.project||'', relasi:r.relasi||'', customerId:r.customer_id, vendorId:r.vendor_id,
-    ket:r.ket||'', debet:Number(r.debet)||0, kredit:Number(r.kredit)||0};
+    ket:r.ket||'', debet:Number(r.debet)||0, kredit:Number(r.kredit)||0, updatedAt:r.updated_at||null};
 }
 function txnToDb(obj){
   var isIn=/masuk$/.test(obj.jenis);
@@ -38,33 +47,36 @@ function txnToDb(obj){
     project:obj.project||'', relasi:obj.relasi||'',
     customer_id: isIn ? (obj.customerId||null) : null,
     vendor_id: !isIn ? (obj.vendorId||null) : null,
-    ket:obj.ket||'', debet:obj.debet||0, kredit:obj.kredit||0};
+    ket:obj.ket||'', debet:obj.debet||0, kredit:obj.kredit||0,
+    _expected_updated_at: obj.updatedAt||null};
 }
-function coaFromDb(r){ return {id:r.id, kode:r.kode, nama:r.nama, level:r.level, tipe:r.tipe, saldoAwal:Number(r.saldo_awal)||0}; }
-function coaToDb(obj){ return {id:obj.id, kode:obj.kode, nama:obj.nama, level:obj.level, tipe:obj.tipe, saldo_awal:obj.saldoAwal||0}; }
+function coaFromDb(r){ return {id:r.id, kode:r.kode, nama:r.nama, level:r.level, tipe:r.tipe, saldoAwal:Number(r.saldo_awal)||0, updatedAt:r.updated_at||null}; }
+function coaToDb(obj){ return {id:obj.id, kode:obj.kode, nama:obj.nama, level:obj.level, tipe:obj.tipe, saldo_awal:obj.saldoAwal||0, _expected_updated_at:obj.updatedAt||null}; }
 
-function relasiFromDb(r){ return {id:r.id, kode:r.kode, nama:r.nama, alamat:r.alamat||'', telp:r.telp||'', email:r.email||''}; }
-function relasiToDb(obj){ return {id:obj.id, kode:obj.kode, nama:obj.nama, alamat:obj.alamat||'', telp:obj.telp||'', email:obj.email||''}; }
+function relasiFromDb(r){ return {id:r.id, kode:r.kode, nama:r.nama, alamat:r.alamat||'', telp:r.telp||'', email:r.email||'', updatedAt:r.updated_at||null}; }
+function relasiToDb(obj){ return {id:obj.id, kode:obj.kode, nama:obj.nama, alamat:obj.alamat||'', telp:obj.telp||'', email:obj.email||'', _expected_updated_at:obj.updatedAt||null}; }
 
 function projectFromDb(r){
   return {id:r.id, nama:r.nama, ledgerName:r.ledger_name||'', kontrak:Number(r.kontrak)||0, rap:Number(r.rap)||0,
     progress:(r.progress===null||r.progress===undefined)?null:Number(r.progress), pemberiProyek:r.pemberi_proyek||'',
-    costCenter:Number(r.cost_center)||0, admFee:Number(r.adm_fee)||0};
+    costCenter:Number(r.cost_center)||0, admFee:Number(r.adm_fee)||0, updatedAt:r.updated_at||null};
 }
 function projectToDb(obj){
   return {id:obj.id, nama:obj.nama, ledger_name:obj.ledgerName||'', kontrak:obj.kontrak||0, rap:obj.rap||0,
     progress:(obj.progress===null||obj.progress===undefined)?null:obj.progress,
-    pemberi_proyek:obj.pemberiProyek||'', cost_center:obj.costCenter||0, adm_fee:obj.admFee||0};
+    pemberi_proyek:obj.pemberiProyek||'', cost_center:obj.costCenter||0, adm_fee:obj.admFee||0,
+    _expected_updated_at:obj.updatedAt||null};
 }
 function jurnalFromDb(r){
   return {id:r.id, tgl:r.tgl, ref:r.ref, akun:r.akun, project:r.project||'', relasi:r.relasi||'',
     kategori:r.kategori||'', noFaktur:r.no_faktur||'', status:r.status||'posted',
-    ket:r.ket||'', debet:Number(r.debet)||0, kredit:Number(r.kredit)||0};
+    ket:r.ket||'', debet:Number(r.debet)||0, kredit:Number(r.kredit)||0, updatedAt:r.updated_at||null};
 }
 function jurnalToDb(obj){
   return {id:obj.id, tgl:obj.tgl, ref:obj.ref, akun:obj.akun, project:obj.project||'', relasi:obj.relasi||'',
     kategori:obj.kategori||'', no_faktur:obj.noFaktur||'', status:obj.status||'posted',
-    ket:obj.ket||'', debet:obj.debet||0, kredit:obj.kredit||0};
+    ket:obj.ket||'', debet:obj.debet||0, kredit:obj.kredit||0,
+    _expected_updated_at:obj.updatedAt||null};
 }
 
 var TABLE_MAP = {
@@ -74,6 +86,15 @@ var TABLE_MAP = {
   coa:       {from:coaFromDb, to:coaToDb},
   transactions: {from:txnFromDb, to:txnToDb},
   jurnal_umum:  {from:jurnalFromDb, to:jurnalToDb},
+};
+// table name -> key of the matching array on DB (transactions/jurnal_umum
+// are the two whose DB key doesn't match their table name) — used by
+// handleSyncConflict() to drop a row that turned out to be deleted by
+// someone else, since removing it from the wrong array would silently
+// leave the real one stale.
+var DB_ARRAY_KEY = {
+  customers: 'customers', vendors: 'vendors', projects: 'projects',
+  coa: 'coa', transactions: 'txns', jurnal_umum: 'jurnal',
 };
 var MYSQL_ENDPOINT = {
   customers: '/customers.php', vendors: '/vendors.php', projects: '/projects.php',
@@ -240,11 +261,60 @@ async function syncUpsert(table, obj){
         if(!modalOpen){ var scrollY=window.scrollY; go(CURRENT); window.scrollTo(0,scrollY); }
       }
     }
+    // Re-baseline this row's own "last known updated_at" to what the
+    // server just wrote, so the row's NEXT edit (by anyone) is checked
+    // against this save, not a stale value from before it.
+    if(result && result.updated_at) obj.updatedAt = result.updated_at;
     markOwnSyncChange();
   }catch(e){
+    if(e.status===409){
+      handleSyncConflict(table, obj, e.data);
+      return;
+    }
     console.error('syncUpsert failed', table, e);
     queuePendingSync({table:table, id:obj.id, action:'upsert', obj:obj});
     toast('Gagal menyimpan ke server: '+(e.message||e)+'. Perubahan tersimpan lokal, akan dicoba lagi otomatis.', 'danger');
+  }
+}
+
+/* Two admins editing the SAME existing row within the same window: the
+   second save to reach the server is rejected (409, see the
+   _expected_updated_at check in resource_crud.php) instead of silently
+   overwriting the first admin's edit — the usual INSERT..ON DUPLICATE
+   KEY UPDATE has no idea two people touched the same row, so without
+   this check whichever save lands last would just clobber the other
+   one with no trace beyond audit_log.
+   Recovery: pull this row back to what the OTHER admin's save actually
+   left in the database (never a silent merge/guess), update it in place
+   — obj is the exact object already rendered on screen, same as the
+   ref-reassignment case above — and tell the user plainly that THEIR
+   edit was NOT saved, so they know to redo it against the fresh value
+   rather than assume it went through. */
+function handleSyncConflict(table, obj, errData){
+  var mapper = TABLE_MAP[table];
+  var msg;
+  if(errData && errData.current){
+    // The 409 body already carries the row exactly as the OTHER admin's
+    // save left it (see resource_crud.php) — use that directly rather
+    // than a second round-trip, which would leave a (tiny but real)
+    // window for yet another save to land in between.
+    var mapped = mapper.from(errData.current);
+    Object.keys(mapped).forEach(function(k){ obj[k]=mapped[k]; });
+    saveDB();
+    msg = 'PERUBAHAN TIDAK TERSIMPAN: data ini sudah diubah oleh pengguna lain sejak Anda membukanya. Tampilan sudah diperbarui ke versi terbaru dari server — silakan ulangi perubahan Anda jika masih diperlukan.';
+  }else{
+    // current===null: the row was deleted by someone else in the
+    // meantime — nothing to merge, it just needs to disappear from this
+    // tab's own copy too, instead of this save silently resurrecting it.
+    var arrKey = DB_ARRAY_KEY[table];
+    if(arrKey && DB[arrKey]) DB[arrKey] = DB[arrKey].filter(function(x){ return x.id!==obj.id; });
+    saveDB();
+    msg = 'PERUBAHAN TIDAK TERSIMPAN: data ini sudah DIHAPUS oleh pengguna lain sejak Anda membukanya.';
+  }
+  toast(msg, 'danger');
+  if(typeof CURRENT!=='undefined' && typeof go==='function'){
+    var modalOpen=document.getElementById('modalBack') && document.getElementById('modalBack').classList.contains('on');
+    if(!modalOpen){ var scrollY=window.scrollY; go(CURRENT); window.scrollTo(0,scrollY); }
   }
 }
 async function syncDelete(table, id){

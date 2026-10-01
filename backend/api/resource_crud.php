@@ -40,23 +40,74 @@ function handle_resource_crud(string $table, array $columns, string $idColumn = 
         }
         if (empty($data[$idColumn])) json_error('id wajib diisi', 422);
 
-        $cols = array_keys($data);
-        $placeholders = implode(',', array_fill(0, count($cols), '?'));
-        $colList = implode(',', array_map(fn($c) => "`$c`", $cols));
-        $updateCols = array_filter($cols, fn($c) => $c !== $idColumn && !in_array($c, $insertOnlyColumns, true));
-        $updateList = implode(',', array_map(fn($c) => "`$c`=VALUES(`$c`)", $updateCols));
-        $sql = "INSERT INTO `$table` ($colList) VALUES ($placeholders)"
-             . ($updateList ? " ON DUPLICATE KEY UPDATE $updateList" : '');
-        $stmt = db()->prepare($sql);
-        $stmt->execute(array_values($data));
+        // Optimistic concurrency check: an EDIT (as opposed to a brand-new
+        // row) carries `_expected_updated_at` — the updated_at this client
+        // last saw for this row (see txnToDb() etc. in data-sync.js). A
+        // brand-new row never has one, so it always skips straight to the
+        // insert below, exactly as before this check existed.
+        //
+        // SELECT ... FOR UPDATE + the write happening in the same
+        // transaction closes the race a plain "check, then separately
+        // write" would leave open: two admins' requests arriving
+        // milliseconds apart both passing the check before either writes.
+        // The row lock serializes them, so the second one re-checks
+        // against what the first just committed.
+        $expectedUpdatedAt = $body['_expected_updated_at'] ?? null;
+        $checkConflict = $expectedUpdatedAt !== null && $expectedUpdatedAt !== '';
+
+        $pdo = db();
+        $pdo->beginTransaction();
+        try {
+            if ($checkConflict) {
+                $cur = $pdo->prepare("SELECT * FROM `$table` WHERE `$idColumn` = ? FOR UPDATE");
+                $cur->execute([$data[$idColumn]]);
+                $existing = $cur->fetch();
+                if (!$existing) {
+                    $pdo->rollBack();
+                    json_response([
+                        'error' => 'conflict',
+                        'message' => 'Data ini sudah dihapus oleh pengguna lain sejak Anda membukanya.',
+                        'current' => null,
+                    ], 409);
+                }
+                if ($existing['updated_at'] !== $expectedUpdatedAt) {
+                    $pdo->rollBack();
+                    json_response([
+                        'error' => 'conflict',
+                        'message' => 'Data ini sudah diubah oleh pengguna lain sejak Anda membukanya.',
+                        'current' => $existing,
+                    ], 409);
+                }
+            }
+
+            $cols = array_keys($data);
+            $placeholders = implode(',', array_fill(0, count($cols), '?'));
+            $colList = implode(',', array_map(fn($c) => "`$c`", $cols));
+            $updateCols = array_filter($cols, fn($c) => $c !== $idColumn && !in_array($c, $insertOnlyColumns, true));
+            $updateList = implode(',', array_map(fn($c) => "`$c`=VALUES(`$c`)", $updateCols));
+            $sql = "INSERT INTO `$table` ($colList) VALUES ($placeholders)"
+                 . ($updateList ? " ON DUPLICATE KEY UPDATE $updateList" : '');
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(array_values($data));
+
+            $fresh = $pdo->prepare("SELECT updated_at FROM `$table` WHERE `$idColumn` = ?");
+            $fresh->execute([$data[$idColumn]]);
+            $updatedAt = $fresh->fetchColumn();
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
 
         audit('update', $table, (string)$data[$idColumn]);
         // Echo back every column that was actually written, not just the
         // id — reserve_unique_ref() (transactions.php) can silently
         // change `ref` from what the client sent, and the caller needs
         // that back to keep its own in-memory copy of the record correct
-        // (see syncUpsert() in data-sync.js).
-        json_response(array_merge(['ok' => true], $data));
+        // (see syncUpsert() in data-sync.js). updated_at goes along too,
+        // so the NEXT edit of this row is checked against THIS save.
+        json_response(array_merge(['ok' => true], $data, ['updated_at' => $updatedAt]));
         return;
     }
 
