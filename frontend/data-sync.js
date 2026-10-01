@@ -89,6 +89,25 @@ async function fetchSyncStatus(){
   return res.signature;
 }
 
+/* After THIS browser's own successful write, re-baseline the 30s poll's
+   signature (see startRemotePolling() in auth.js) to the post-write
+   server state. Without this, the very next poll tick sees the save
+   this same tab just made as "someone else changed something" and
+   force-reloads the whole page (go(CURRENT)) moments after every save
+   — not just the odd Ref No collision, but literally every successful
+   Tambah/Edit/Hapus across the app. The data is already correct on
+   screen (this call pushed it there), so there's nothing to pull.
+   Fire-and-forget: a concurrent edit from another device landing in
+   this same window just surfaces on the next real external change
+   instead of this one, which is a fair trade against reloading the
+   page out from under the user after their own save. */
+function markOwnSyncChange(){
+  if(!isBackendConfigured()) return;
+  fetchSyncStatus().then(function(sig){
+    if(typeof _lastSyncSignature!=='undefined') _lastSyncSignature=sig;
+  }).catch(function(){}); // next poll tick just re-checks normally
+}
+
 /* Fetch everything into the shape seedDB()/loadDB() already produce,
    so the rest of the app (buildNav/registerPages/all PAGES.*) needs
    zero changes. */
@@ -221,6 +240,7 @@ async function syncUpsert(table, obj){
         if(!modalOpen){ var scrollY=window.scrollY; go(CURRENT); window.scrollTo(0,scrollY); }
       }
     }
+    markOwnSyncChange();
   }catch(e){
     console.error('syncUpsert failed', table, e);
     queuePendingSync({table:table, id:obj.id, action:'upsert', obj:obj});
@@ -231,6 +251,7 @@ async function syncDelete(table, id){
   if(!isBackendConfigured()) return; // local mode — saveDB() already persisted it
   try{
     await apiFetch(MYSQL_ENDPOINT[table]+'?id='+encodeURIComponent(id), {method:'DELETE'});
+    markOwnSyncChange();
   }catch(e){
     console.error('syncDelete failed', table, e);
     queuePendingSync({table:table, id:id, action:'delete'});
@@ -245,6 +266,7 @@ async function syncHutangOverride(notaId, paid, status){
   try{
     await apiFetch('/hutang_overrides.php', {method:'POST',
       body:JSON.stringify({nota_id:notaId, paid:paid, status:status})});
+    markOwnSyncChange();
   }catch(e){
     console.error('syncHutangOverride failed', e);
     queuePendingSync({table:'hutangOverride', id:notaId, action:'hutangOverride', obj:{paid:paid, status:status}});
@@ -255,6 +277,7 @@ async function syncHutangOverrideDelete(notaId){
   if(!isBackendConfigured()) return;
   try{
     await apiFetch('/hutang_overrides.php?id='+encodeURIComponent(notaId), {method:'DELETE'});
+    markOwnSyncChange();
   }catch(e){
     console.error('syncHutangOverrideDelete failed', e);
     queuePendingSync({table:'hutangOverride', id:notaId, action:'hutangOverrideDelete'});
