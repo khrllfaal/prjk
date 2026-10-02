@@ -795,13 +795,12 @@ function computeProjectProgressRows(from, to){
       else if(matchesPlainCost(t.akunLawan,'upah')) upah+=t.kredit;
       else if(matchesPlainCost(t.akunLawan,'akomodasi')) akomodasi+=t.kredit;
       else if(matchesPlainCost(t.akunLawan,'admFee')) admFee+=t.kredit;
-      // Cost Center is a residual "other project cost" bucket — Bank
-      // Keluar postings linked to a project are almost always internal
-      // Kas<->Bank transfers ("Ayat Silang...") or loan
-      // repayments/drawdowns (never a P&L account), and a Hutang/Piutang/
-      // Prive/fixed-asset kas_keluar isn't a cost either — isCostAkun()
-      // excludes all of those by COA head, same as Laba Rugi.
-      else if(t.jenis==='kas_keluar' && isCostAkun(t.akunLawan)) costCenter+=t.kredit;
+      // Cost Center is a residual "other project cost" bucket. Internal
+      // Kas<->Bank transfers ("Ayat Silang..."), loan repayments/drawdowns,
+      // and any non-P&L kas/bank keluar (Hutang/Piutang, Prive, fixed-asset,
+      // ...) are COA heads 1-3 and never counted here — isCostAkun() excludes
+      // all of those by head, same as Laba Rugi, for both Kas and Bank Keluar.
+      else if(isCostAkun(t.akunLawan)) costCenter+=t.kredit;
     });
     postedJurnal().forEach(function(j){
       if(j.project!==ledger) return;
@@ -1182,15 +1181,15 @@ function projectCostTxns(projectNama, kind, from, to){
     if(t.project!==projectNama || !/keluar$/.test(t.jenis)) return;
     if(from && t.tgl<from) return;
     if(to && t.tgl>to) return;
-    // Bank Keluar residual postings (mostly internal Kas<->Bank transfers
-    // and loan repayments) and any non-P&L kas_keluar (Hutang/Piutang,
-    // Prive, fixed-asset, ...) never count as Cost Center — see
+    // Internal Kas<->Bank transfers, loan repayments/drawdowns and any
+    // non-P&L kas/bank keluar (Hutang/Piutang, Prive, fixed-asset, ...) are
+    // COA heads 1-3 and never count as Cost Center — see
     // computeProjectProgressRows() for the matching rule this mirrors.
     var cat = matchesPlainCost(t.akunLawan,'bahan') ? 'bahan'
       : matchesPlainCost(t.akunLawan,'upah') ? 'upah'
       : matchesPlainCost(t.akunLawan,'akomodasi') ? 'akomodasi'
       : matchesPlainCost(t.akunLawan,'admFee') ? 'admFee'
-      : (t.jenis==='kas_keluar' && isCostAkun(t.akunLawan) ? 'costCenter' : 'excluded');
+      : (isCostAkun(t.akunLawan) ? 'costCenter' : 'excluded');
     if(kind!=='all' && cat!==kind) return;
     list.push({tgl:t.tgl, ref:t.ref, ket:t.ket+' — '+t.akunLawan, amount:t.kredit});
   });
