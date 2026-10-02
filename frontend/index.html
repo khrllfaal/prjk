@@ -646,7 +646,7 @@ function guessLedgerName(displayName, knownLedgerNames){
 // Both the old and current COA numbering are listed per category — a
 // jurnal_umum entry keeps whatever code it was posted with, so matching
 // only today's COA codes would silently stop counting older rows.
-var RAP_COST_CODES={bahan:['5.1.1','5.1.01','5.1.18','5.1.19'], upah:['5.1.2','5.1.02'],
+var RAP_COST_CODES={bahan:['5.1.1','5.1.01','5.1.18','5.1.19'], upah:['5.1.2','5.1.9','5.1.02','5.1.09','5.1.10'],
   akomodasi:['5.1.26','6.2.36','5.1.11']};
 function matchesRapCost(akunStr, kind){ return RAP_COST_CODES[kind].indexOf(akunKode(akunStr))>-1; }
 
@@ -660,7 +660,7 @@ function matchesRapCost(akunStr, kind){ return RAP_COST_CODES[kind].indexOf(akun
 function matchesPlainCost(akunLawan, kind){
   var s=akunNamaOnly(akunLawan);
   if(kind==='bahan') return s==='Biaya Bahan'||s==='Biaya Bahan2'||s==='Biaya Bahan3';
-  if(kind==='upah') return s==='Biaya Upah';
+  if(kind==='upah') return s==='Biaya Upah'||s==='Biaya Upah2'||s==='Biaya Upah3';
   if(kind==='akomodasi') return s==='Biaya Akomodasi';
   if(kind==='admFee') return s==='Biaya ADM Fee';
   return false;
