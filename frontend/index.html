@@ -795,13 +795,18 @@ function computeProjectProgressRows(from, to){
       else if(matchesPlainCost(t.akunLawan,'upah')) upah+=t.kredit;
       else if(matchesPlainCost(t.akunLawan,'akomodasi')) akomodasi+=t.kredit;
       else if(matchesPlainCost(t.akunLawan,'admFee')) admFee+=t.kredit;
-      // Cost Center is a residual "other project cost" bucket — Bank
-      // Keluar postings linked to a project are almost always internal
-      // Kas<->Bank transfers ("Ayat Silang...") or loan
-      // repayments/drawdowns (never a P&L account), and a Hutang/Piutang/
-      // Prive/fixed-asset kas_keluar isn't a cost either — isCostAkun()
-      // excludes all of those by COA head, same as Laba Rugi.
-      else if(t.jenis==='kas_keluar' && isCostAkun(t.akunLawan)) costCenter+=t.kredit;
+      // Cost Center is a residual "other project cost" bucket — an
+      // internal Kas<->Bank transfer ("Ayat Silang...") or a
+      // Hutang/Piutang/Prive/fixed-asset posting isn't a cost either way;
+      // isCostAkun() already excludes all of those by COA head (only
+      // heads 5-8 pass), same as Laba Rugi — so whatever's left here is a
+      // real P&L expense regardless of whether it was paid via Kas or
+      // Bank Keluar. Previously restricted to kas_keluar only, which
+      // silently dropped real bank-paid project costs (confirmed: Rp2.5
+      // miliar of Biaya Bunga & Administrasi Bank and similar accounts
+      // paid via Bank Keluar were missing from Total Pengeluaran here
+      // while Laba Rugi's Total Beban correctly included them).
+      else if(isCostAkun(t.akunLawan)) costCenter+=t.kredit;
     });
     postedJurnal().forEach(function(j){
       if(j.project!==ledger) return;
