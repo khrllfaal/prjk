@@ -1207,6 +1207,58 @@ function projectCostTxns(projectNama, kind, from, to){
   return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
 }
 
+/* Dashboard Pemasukan: per-project income, one column per Pendapatan
+   (COA head 4) account that actually has activity — most projects only
+   ever post to "Pendapatan Proyek", but a Farm/Kandang-type project can
+   post to several (Pendapatan Proyek, Pendapatan Pengadaan, Pendapatan
+   Kandang, ...), so this sums EVERY head-4 account per project rather
+   than assuming one fixed account name; the page decides per bucket
+   which of those columns are worth showing (see dashboard_pemasukan). */
+function computeProjectIncomeRows(from, to){
+  var incomeAccounts=DB.coa.filter(function(a){ return a.level>=3 && a.kode.split('.')[0]==='4'; })
+    .map(function(a){ return a.nama; });
+  return DB.projects.map(function(p){
+    var ledger=p.ledgerName||p.nama;
+    var byAccount={};
+    incomeAccounts.forEach(function(nm){ byAccount[nm]=0; });
+    DB.txns.forEach(function(t){
+      if(t.project!==ledger || !/masuk$/.test(t.jenis)) return;
+      if(from && t.tgl<from) return;
+      if(to && t.tgl>to) return;
+      var nm=akunNamaOnly(t.akunLawan);
+      if(byAccount.hasOwnProperty(nm)) byAccount[nm]+=t.debet;
+    });
+    postedJurnal().forEach(function(j){
+      if(j.project!==ledger) return;
+      if(from && j.tgl<from) return;
+      if(to && j.tgl>to) return;
+      var nm=akunNamaOnly(j.akun);
+      if(byAccount.hasOwnProperty(nm)) byAccount[nm]+=(j.kredit-j.debet);
+    });
+    var totalPemasukan=incomeAccounts.reduce(function(a,nm){ return a+byAccount[nm]; },0);
+    return {id:p.id, nama:p.nama, ledgerName:ledger, linked:!!ledger,
+      pemberiProyek:p.pemberiProyek||'Lainnya', byAccount:byAccount, totalPemasukan:totalPemasukan};
+  });
+}
+function projectIncomeTxns(projectNama, accountName, from, to){
+  var list=[];
+  DB.txns.forEach(function(t){
+    if(t.project!==projectNama || !/masuk$/.test(t.jenis)) return;
+    if(from && t.tgl<from) return;
+    if(to && t.tgl>to) return;
+    if(akunNamaOnly(t.akunLawan)!==accountName) return;
+    list.push({tgl:t.tgl, ref:t.ref, ket:t.ket+' — '+t.akunLawan, amount:t.debet});
+  });
+  postedJurnal().forEach(function(j){
+    if(j.project!==projectNama) return;
+    if(from && j.tgl<from) return;
+    if(to && j.tgl>to) return;
+    if(akunNamaOnly(j.akun)!==accountName) return;
+    list.push({tgl:j.tgl, ref:j.ref, ket:j.ket+' — '+j.akun, amount:j.kredit-j.debet});
+  });
+  return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+}
+
 var HUTANG_DAGANG_CODE='2.1.1';
 
 /* Trial Hutang: per-nota (invoice-level) payable status. A "nota" is a
@@ -2477,7 +2529,8 @@ function akunNamaOnly(s){ return String(s||'').replace(/^[\d.]+-/,'').trim()||'(
 var NAV=[
   {sec:null, items:[
     {id:'dashboard', label:'Dashboard', ic:'◈'},
-    {id:'dashboard_proyek', label:'Dashboard Proyek', ic:'▦'}
+    {id:'dashboard_proyek', label:'Dashboard Proyek', ic:'▦'},
+    {id:'dashboard_pemasukan', label:'Dashboard Pemasukan', ic:'↓'}
   ]},
   {sec:'Master Data', items:[
     {id:'customer', label:'Master Customer', ic:'☺'},
@@ -5436,6 +5489,150 @@ function registerPages(){
     document.getElementById('btnFilter').onclick=drawAll;
     document.getElementById('btnReset').onclick=function(){
       clearFilterFields(['fProgFrom','fProgTo']);
+      drawAll();
+    };
+  };
+
+
+  /* ---------------- DASHBOARD PEMASUKAN ---------------- */
+  /* Same shell as Dashboard Proyek (grouped by pemberi proyek, one panel
+     per bucket) but for income instead of cost. A project normally only
+     ever posts to one Pendapatan account ("Pendapatan Proyek"), so most
+     buckets show a single income column — but a Farm/Kandang-type
+     project can post to several (Pendapatan Proyek, Pendapatan
+     Pengadaan, Pendapatan Kandang, ...), so each bucket shows exactly
+     the income accounts its OWN projects actually used, not a single
+     global column every other bucket would show empty. The rightmost
+     column compares this against Dashboard Proyek's own Total
+     Pengeluaran for the same project, so a profit/loss gap per project
+     is visible without flipping between the two menus. */
+  PAGES.dashboard_pemasukan=function(c){
+    c.innerHTML = pageHead('Dashboard Pemasukan','Pemasukan tiap proyek dari akun Pendapatan, dikelompokkan per pemberi proyek','') +
+      '<div class="filterbar">'+
+        '<div class="field"><label>Dari Tanggal</label><input type="date" id="fPmFrom"></div>'+
+        '<div class="field"><label>Sampai Tanggal</label><input type="date" id="fPmTo"></div>'+
+        '<button class="btn btn-steel" id="btnFilter">Terapkan</button>'+
+        '<button class="btn btn-ghost" id="btnReset">Reset</button>'+
+      '</div>'+
+      '<div id="pmPeriodDesc" class="panel-desc" style="margin:-4px 0 14px;"></div>'+
+      '<div id="pmBody"></div>';
+
+    var pmFrom, pmTo;
+
+    function incomeCell(amount, r, akun){
+      if(!amount) return '<span class="faint-italic">–</span>';
+      return '<button type="button" class="linklike" data-drill-ledger="'+esc(r.ledgerName)+'" '+
+        'data-drill-label="'+esc(r.nama)+'" data-drill-akun="'+esc(akun)+'">'+num0(amount)+'</button>';
+    }
+
+    function buildSection(bucket, rows){
+      var idp='pm_'+bucket.replace(/[^a-zA-Z0-9]/g,'');
+      var html='<div class="section-head" style="margin-top:22px;"><h2><span class="icon-chip">☰</span>'+esc(bucket)+'</h2>'+
+        '<span class="desc">'+rows.length+' proyek</span></div>'+
+        '<div class="panel"><div class="toolbar">'+
+          '<div class="search-box"><span class="ic">⌕</span><input type="text" id="'+idp+'_q" placeholder="Cari proyek…"></div>'+
+          exportBtns(idp)+
+          '<span class="result-count" id="'+idp+'_cnt"></span></div>'+
+          '<div class="table-scroll"><div id="'+idp+'_tbl"></div></div></div>';
+      return {idp:idp, html:html};
+    }
+
+    function drawAll(){
+      window.__liveRefresh=drawAll; // see go() and refreshDbFromServer() in auth.js
+      pmFrom = fv('fPmFrom')||null;
+      pmTo = fv('fPmTo')||null;
+      document.getElementById('pmPeriodDesc').textContent = (pmFrom||pmTo)
+        ? 'Pemasukan di bawah ini untuk periode '+(pmFrom?fmtDate(pmFrom):'awal')+' s/d '+(pmTo?fmtDate(pmTo):'sekarang')+'.'
+        : 'Menampilkan total pemasukan sejak awal setiap proyek sampai sekarang.';
+
+      var incomeRows=computeProjectIncomeRows(pmFrom, pmTo);
+      var pengeluaranByLedger={};
+      computeProjectProgressRows(pmFrom, pmTo).forEach(function(r){ pengeluaranByLedger[r.ledgerName]=r.totalPengeluaran; });
+
+      var byBucket={};
+      DASHBOARD_PROYEK_ORDER.forEach(function(b){ byBucket[b]=[]; });
+      incomeRows.forEach(function(r){
+        r.totalPengeluaran=pengeluaranByLedger[r.ledgerName]||0;
+        r.selisih=r.totalPemasukan-r.totalPengeluaran;
+        byBucket[bucketPemberiProyek(r.pemberiProyek)].push(r);
+      });
+
+      var bodyHtml='', sections=[];
+      DASHBOARD_PROYEK_ORDER.forEach(function(bucket){
+        var rows=byBucket[bucket];
+        if(!rows.length) return;
+        // Only show an income column this bucket's projects actually use —
+        // a bucket with just "Pendapatan Proyek" activity stays a single
+        // column; Farm/Kandang-type buckets get one column per account
+        // that has any nonzero total among their own rows.
+        var akunSet={}, akunOrder=[];
+        rows.forEach(function(r){
+          Object.keys(r.byAccount).forEach(function(nm){
+            if(r.byAccount[nm] && !akunSet[nm]){ akunSet[nm]=true; akunOrder.push(nm); }
+          });
+        });
+        if(!akunOrder.length) akunOrder=['Pendapatan Proyek'];
+        var sec=buildSection(bucket, rows);
+        bodyHtml+=sec.html;
+        sections.push({idp:sec.idp, bucket:bucket, rows:rows, akunOrder:akunOrder});
+      });
+      document.getElementById('pmBody').innerHTML=bodyHtml ||
+        '<div class="panel"><p class="faint-italic">Belum ada proyek di Master Project.</p></div>';
+
+      function sumFoot(key){ return function(list){ return '<b>'+num0(list.reduce(function(a,b){ return a+b[key]; },0))+'</b>'; }; }
+      sections.forEach(function(sec){
+        var cols=[
+          {key:'no',label:'No',sort:false,render:function(r,idx){ return '<span class="no">'+(idx+1)+'</span>'; }},
+          {key:'nama',label:'Nama Project',cls:'wrap',render:function(r){
+            return esc(r.nama)+(r.linked?'':'<div class="faint-italic" style="font-size:11px;color:var(--danger);">⚠ belum tertaut ke transaksi — atur di Master Project</div>'); },
+            foot:function(){ return '<b>TOTAL</b>'; }},
+          {key:'pemberiProyek',label:'Pemberi Project',render:function(r){ return esc(r.pemberiProyek||'–'); }}
+        ];
+        sec.akunOrder.forEach(function(akun){
+          cols.push({key:'akun_'+akun,label:akun,num:true,
+            render:function(r){ return incomeCell(r.byAccount[akun]||0, r, akun); },
+            foot:function(list){ return '<b>'+num0(list.reduce(function(a,b){ return a+(b.byAccount[akun]||0); },0))+'</b>'; }});
+        });
+        cols.push({key:'totalPemasukan',label:'Total Pemasukan',num:true,render:function(r){ return '<b>'+num0(r.totalPemasukan)+'</b>'; }, foot:sumFoot('totalPemasukan')});
+        cols.push({key:'totalPengeluaran',label:'Total Pengeluaran',num:true,render:function(r){ return num0(r.totalPengeluaran); }, foot:sumFoot('totalPengeluaran')});
+        cols.push({key:'selisih',label:'Selisih (Pemasukan − Pengeluaran)',num:true,render:function(r){
+          return '<b class="'+(r.selisih<0?'neg':'pos')+'">'+num0(r.selisih)+'</b>'; }, foot:sumFoot('selisih')});
+
+        var tbl=DataTable(sec.idp+'_tbl', cols, sec.rows, {defaultSort:'totalPemasukan',defaultDir:'desc',perPage:15,showFoot:true,
+          searchFn:function(r){ return r.nama; }, countId:sec.idp+'_cnt',
+          onRender:function(){
+            document.querySelectorAll('#'+sec.idp+'_tbl [data-drill-ledger]').forEach(function(b){
+              b.onclick=function(){
+                var ledger=b.getAttribute('data-drill-ledger'), label=b.getAttribute('data-drill-label');
+                var akun=b.getAttribute('data-drill-akun');
+                showTxnDrilldown(akun+' — '+label, 'Rincian transaksi & jurnal yang membentuk angka ini',
+                  projectIncomeTxns(ledger, akun, pmFrom, pmTo));
+              };
+            });
+          }});
+        bindSearch(sec.idp+'_q', tbl);
+        bindExport(sec.idp, 'Dashboard_Pemasukan_'+sec.bucket.replace(/\s+/g,'_'),
+          ['No','Nama Project','Pemberi Project'].concat(sec.akunOrder).concat(['Total Pemasukan','Total Pengeluaran','Selisih']),
+          function(){
+            var list=tbl.getFiltered();
+            var rows=list.map(function(r,i){
+              return [i+1,r.nama,r.pemberiProyek].concat(sec.akunOrder.map(function(ak){ return r.byAccount[ak]||0; }))
+                .concat([r.totalPemasukan,r.totalPengeluaran,r.selisih]);
+            });
+            function sum(key){ return list.reduce(function(a,b){ return a+b[key]; },0); }
+            var totalRow=['','TOTAL',''].concat(sec.akunOrder.map(function(ak){
+              return list.reduce(function(a,b){ return a+(b.byAccount[ak]||0); },0);
+            })).concat([sum('totalPemasukan'),sum('totalPengeluaran'),sum('selisih')]);
+            rows.push(totalRow);
+            return rows;
+          }, {title:'Dashboard Pemasukan — '+sec.bucket});
+      });
+    }
+
+    drawAll();
+    document.getElementById('btnFilter').onclick=drawAll;
+    document.getElementById('btnReset').onclick=function(){
+      clearFilterFields(['fPmFrom','fPmTo']);
       drawAll();
     };
   };
