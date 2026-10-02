@@ -4623,12 +4623,16 @@ function registerPages(){
       // against sistem asli's own Laba Rugi, which folds Pendapatan
       // Lainnya into Total Pendapatan, not Total Beban.
       var mk=function(heads, kodeFilter){
-        var rows=groupByHead(from,to,heads,project||null).filter(function(r){
+        var allRows=groupByHead(from,to,heads,project||null).filter(function(r){
           return !kodeFilter || kodeFilter(r.kode);
         }).map(function(r){
           return {akun:r.akun, val:r.kredit-r.debet};
         });
-        return {rows:rows, total:rows.reduce(function(a,b){ return a+b.val; },0)};
+        // Akun yang nilainya nol pada periode/filter ini tidak perlu tampil
+        // -- total tetap dihitung dari seluruh akun (baris nol menyumbang 0,
+        // jadi hasilnya sama persis).
+        var rows=allRows.filter(function(r){ return Math.abs(r.val)>=0.5; });
+        return {rows:rows, total:allRows.reduce(function(a,b){ return a+b.val; },0)};
       };
       var pend=mk(['4','7'], function(kode){ return kode.split('.')[0]==='4' || kode.indexOf('7.1')===0; });
       var beban=mk(['5','6','7','8'], function(kode){ return kode.indexOf('7.1')!==0; });
@@ -4922,31 +4926,35 @@ function registerPages(){
         if(t.jenis!==jenis) return;
         if(jenis==='kas_keluar' && NON_CASH_KAS_KELUAR_REFS[t.ref]) return;
         var label=akunNamaOnly(t.akunLawan);
+        // Ayat Silang = mutasi internal antar kas/bank sendiri, bukan
+        // pemasukan/pengeluaran riil -- tidak relevan di rincian per akun
+        // lawan ini, jadi tidak ditampilkan sama sekali (beda dari NET
+        // CASH FLOW/Saldo Akhir di bawah, yang tetap pakai sumRange() apa
+        // adanya karena Ayat Silang selalu berpasangan sama besar di sisi
+        // Masuk & Keluar sehingga mengecualikannya di sini tidak mengubah
+        // saldo).
+        if(label.indexOf('Ayat Silang')===0) return;
         if(!map[label]){
-          // Ayat Silang = mutasi internal antar kas/bank sendiri, bukan
-          // pemasukan/pengeluaran riil -- barisnya tetap ditampilkan
-          // (transparansi), tapi nilainya tidak ikut ditotal (beda dari
-          // NET CASH FLOW/Saldo Akhir di bawah, yang tetap pakai
-          // sumRange() apa adanya karena Ayat Silang selalu berpasangan
-          // sama besar di sisi Masuk & Keluar sehingga tidak menotalnya
-          // di sini tidak mengubah saldo).
-          map[label]={label:label, akunLawan:t.akunLawan, amount:0, excludeTotal:label.indexOf('Ayat Silang')===0};
+          map[label]={label:label, akunLawan:t.akunLawan, amount:0};
           order.push(label);
         }
         map[label].amount += isIn?t.debet:t.kredit;
       });
-      return order.map(function(k){ return map[k]; }).sort(function(a,b){ return b.amount-a.amount; });
+      return order.map(function(k){ return map[k]; })
+        // Akun yang nilainya nol pada periode/filter ini tidak perlu tampil.
+        .filter(function(r){ return Math.abs(r.amount)>=0.5; })
+        .sort(function(a,b){ return b.amount-a.amount; });
     }
 
     function sectionHTML(title, barClass, rows, totalLabel, kind){
-      var total=rows.reduce(function(a,b){ return a+(b.excludeTotal?0:b.amount); },0);
+      var total=rows.reduce(function(a,b){ return a+b.amount; },0);
       return '<div class="cf-section">'+
         '<div class="cf-bar '+barClass+'">'+esc(title)+'</div>'+
         '<div class="cf-table">'+
         (rows.length?rows.map(function(r,i){
           return '<div class="cf-row'+(i%2?' alt':'')+'">'+
             '<button type="button" class="linklike" data-cf-akun="'+esc(r.akunLawan)+'" data-cf-kind="'+kind+'">'+esc(r.label)+
-            (r.excludeTotal?' <span class="faint-italic" style="font-size:11px;">(tidak ditotal)</span>':'')+'</button>'+
+            '</button>'+
             '<span class="cf-amt">'+num0(r.amount)+'</span></div>';
         }).join(''):'<div class="cf-row"><span class="faint-italic">Tidak ada transaksi pada periode ini.</span></div>')+
         '<div class="cf-row cf-total"><b>'+esc(totalLabel)+'</b><b>'+num0(total)+'</b></div>'+
@@ -5013,8 +5021,8 @@ function registerPages(){
       .forEach(function(sec){
         var list=lastByJenis[sec[1]]||[];
         rows.push([sec[0],null]);
-        list.forEach(function(r){ rows.push([r.label+(r.excludeTotal?' (tidak ditotal)':''), r.amount]); });
-        rows.push([sec[2], list.reduce(function(a,b){ return a+(b.excludeTotal?0:b.amount); },0)]);
+        list.forEach(function(r){ rows.push([r.label, r.amount]); });
+        rows.push([sec[2], list.reduce(function(a,b){ return a+b.amount; },0)]);
       });
       if(lastSummary){
         rows.push(['NET CASH FLOW', lastSummary.net]);
