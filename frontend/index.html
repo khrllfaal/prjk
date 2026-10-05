@@ -2510,7 +2510,7 @@ var NAV=[
     {id:'lap_kategori', label:'Laporan Kategori', ic:'○'},
     {id:'neraca', label:'Neraca', ic:'○'},
     {id:'laba_rugi', label:'Laba Rugi', ic:'○'},
-    {id:'analisa', label:'Analisa Pengeluaran', ic:'○'}
+    {id:'analisa', label:'Analisa Forecasting', ic:'○'}
   ]}
 ];
 
@@ -5631,67 +5631,207 @@ function registerPages(){
   };
 
 
-  /* ---------------- ANALISA PENGELUARAN ---------------- */
-  PAGES.analisa=function(c){
-    reportShell(c,'Analisa Pengeluaran','Pengeluaran dikelompokkan per project dan per kategori biaya',
-      '<div class="field"><label>Kelompokkan</label><select id="fMode">'+
-      '<option value="project">Per Project</option><option value="kategori">Per Kategori</option>'+
-      '<option value="akun">Per Akun</option></select></div>');
+  /* ---------------- ANALISA FORECASTING ----------------
+     Forecasting berbasis pola historis yang SUDAH berulang di data,
+     bukan prediksi kejadian baru (pinjaman/proyek baru tetap keputusan
+     manual). Dua angka yang dihitung, keduanya murni agregasi dari
+     transaksi yang sudah tercatat (bisa ditelusuri lewat drilldown),
+     bukan model/"kotak hitam":
+       1) rata-rata & median hari bayar per vendor trade payable
+          (nota Hutang Dagang -> lunas, FIFO per vendor), dan
+       2) rata-rata rasio Biaya Bahan/Upah/Akomodasi terhadap Nilai
+          Kontrak, dikelompokkan per Pemberi Proyek (reuse
+          computeProjectProgressRows() -- satu sumber kebenaran yang
+          sama dengan Dashboard Proyek, supaya tidak ada rumus ganda).
+     Kelompok dengan sampel di bawah ambang (default 3, bisa diubah di
+     UI) ditandai "Belum Cukup Data" -- rata-rata dari 1-2 titik data
+     gampang menyesatkan dan jangan dipakai sebagai acuan. */
+  function daysBetweenIso(a, b){
+    return Math.round((new Date(b+'T00:00:00') - new Date(a+'T00:00:00'))/86400000);
+  }
+  function computeVendorPayDays(){
+    var notas=[];
+    postedJurnal().forEach(function(j){
+      if(akunKode(j.akun)!==HUTANG_DAGANG_CODE || !(j.kredit>0) || !j.relasi) return;
+      notas.push({ref:j.ref, tgl:j.tgl, vendor:j.relasi, amount:j.kredit});
+    });
+    var payments=[];
+    DB.txns.forEach(function(t){
+      if(!/keluar$/.test(t.jenis) || akunKode(t.akunLawan)!==HUTANG_DAGANG_CODE || !t.relasi) return;
+      payments.push({tgl:t.tgl, vendor:t.relasi, amount:t.kredit||0});
+    });
+    var byVendorNotas={}, byVendorPay={};
+    notas.forEach(function(n){ (byVendorNotas[n.vendor]=byVendorNotas[n.vendor]||[]).push(n); });
+    payments.forEach(function(p){ (byVendorPay[p.vendor]=byVendorPay[p.vendor]||[]).push(p); });
 
-    var tbl;
-    function refresh(){
-      window.__liveRefresh=refresh; // see go() and refreshDbFromServer() in auth.js
-      var from=fv('fFrom'), to=fv('fTo'), mode=fv('fMode')||'project';
-      var map={}, total=0;
-      DB.txns.forEach(function(t){
-        if(!t.kredit) return;
-        if(!inRange(t.tgl,from,to)) return;
-        var key = mode==='project' ? (t.project||'(Tanpa Project)')
-                : mode==='kategori' ? (t.kategori||'(Tanpa Kategori)')
-                : akunLabel(t.akunLawan);
-        if(!map[key]) map[key]={nama:key,nilai:0,n:0};
-        map[key].nilai+=t.kredit; map[key].n++;
-        total+=t.kredit;
+    var result={};
+    Object.keys(byVendorNotas).forEach(function(vendor){
+      var vnotas=byVendorNotas[vendor].slice().sort(function(a,b){ return a.tgl<b.tgl?-1:1; });
+      var vpays=(byVendorPay[vendor]||[]).slice().sort(function(a,b){ return a.tgl<b.tgl?-1:1; });
+      var payIdx=0, payRemaining=vpays.length?vpays[0].amount:0, payDate=vpays.length?vpays[0].tgl:null;
+      vnotas.forEach(function(n){
+        var need=n.amount, settleDate=null;
+        while(need>0.5 && payIdx<vpays.length){
+          var take=Math.min(payRemaining, need);
+          need-=take; payRemaining-=take;
+          if(need<=0.5) settleDate=payDate;
+          if(payRemaining<=0.5){
+            payIdx++;
+            if(payIdx<vpays.length){ payRemaining=vpays[payIdx].amount; payDate=vpays[payIdx].tgl; }
+          }
+        }
+        if(settleDate && need<=0.5){
+          var lag=daysBetweenIso(n.tgl, settleDate);
+          if(lag>=0){
+            if(!result[vendor]) result[vendor]=[];
+            result[vendor].push({ref:n.ref, tglNota:n.tgl, tglLunas:settleDate, hari:lag, nilai:n.amount});
+          }
+        }
       });
-      var rows=Object.keys(map).map(function(k){ return map[k]; })
-        .sort(function(a,b){ return b.nilai-a.nilai; });
+    });
+    return result;
+  }
+  function median(arr){
+    var s=arr.slice().sort(function(a,b){ return a-b; }), n=s.length;
+    if(!n) return 0;
+    return n%2 ? s[(n-1)/2] : (s[n/2-1]+s[n/2])/2;
+  }
 
-      document.getElementById('reportBody').innerHTML=
-        '<div class="kpi-grid" style="margin-bottom:14px;">'+
-          kpiCard('Total Pengeluaran',rp(total),rows.length+' kelompok','accent')+
-          kpiCard('Kelompok Terbesar',rows.length?esc(rows[0].nama):'–',
-            rows.length?rp(rows[0].nilai):'','accent')+
-        '</div>'+
-        '<div class="panel tick"><h3>10 Kelompok Pengeluaran Terbesar</h3>'+
-          '<div class="panel-desc">Berdasarkan mode pengelompokan terpilih</div><div id="barTop"></div></div>'+
+  PAGES.analisa=function(c){
+    c.innerHTML = pageHead('Analisa Forecasting',
+        'Proyeksi dari pola yang SUDAH berulang di data historis milik perusahaan sendiri — bukan prediksi kejadian baru (pinjaman baru/proyek baru tetap keputusan manual). Akurasi naik seiring histori data bertambah.','') +
+      '<div class="filterbar">'+
+        '<div class="field"><label>Minimal sampel dianggap "Cukup Data"</label>'+
+          '<input type="number" id="fMinN" value="3" min="1" style="width:90px;"></div>'+
+        '<button class="btn btn-steel" id="btnFilter">Terapkan</button>'+
+      '</div>'+
+      '<div id="fcBody"></div>';
+
+    function drawAll(){
+      window.__liveRefresh=drawAll; // see go() and refreshDbFromServer() in auth.js
+      var minN=Math.max(1, parseInt(fv('fMinN'),10)||3);
+
+      // ---- Forecast 1: hari bayar vendor ----
+      var payDaysByVendor=computeVendorPayDays();
+      var f1Rows=Object.keys(payDaysByVendor).sort().map(function(vendor){
+        var detail=payDaysByVendor[vendor];
+        var lags=detail.map(function(d){ return d.hari; });
+        return {vendor:vendor, n:lags.length, rata:lags.reduce(function(a,b){return a+b;},0)/lags.length,
+          median:median(lags), min:Math.min.apply(null,lags), max:Math.max.apply(null,lags),
+          cukup:lags.length>=minN, detail:detail};
+      });
+
+      // ---- Forecast 2: rasio biaya vs kontrak per pemberi proyek ----
+      var progressRows=computeProjectProgressRows(null,null).filter(function(r){ return r.kontrak>0 && r.totalRap>0; });
+      var byPemberi={};
+      progressRows.forEach(function(r){
+        var k=r.pemberiProyek||'Lainnya';
+        (byPemberi[k]=byPemberi[k]||[]).push(r);
+      });
+      var f2Rows=Object.keys(byPemberi).sort().map(function(pemberi){
+        var projs=byPemberi[pemberi];
+        var pctBahan=projs.map(function(r){ return r.bahan/r.kontrak; });
+        var pctUpah=projs.map(function(r){ return r.upah/r.kontrak; });
+        var pctAkomodasi=projs.map(function(r){ return r.akomodasi/r.kontrak; });
+        var pctTotal=projs.map(function(r){ return r.totalRap/r.kontrak; });
+        var avg=function(a){ return a.reduce(function(x,y){return x+y;},0)/a.length; };
+        return {pemberi:pemberi, n:projs.length, pctBahan:avg(pctBahan), pctUpah:avg(pctUpah),
+          pctAkomodasi:avg(pctAkomodasi), pctTotal:avg(pctTotal), medianTotal:median(pctTotal),
+          cukup:projs.length>=minN, projs:projs};
+      });
+
+      document.getElementById('fcBody').innerHTML=
+        alertHTML('info','ℹ','Cara membaca halaman ini',
+          'Setiap baris di bawah murni agregasi dari transaksi yang sudah tercatat (klik angka di kolom "Jumlah" untuk lihat rinciannya) — bukan model prediksi. '+
+          'Baris berwarna <b>kuning "Belum Cukup Data"</b> jangan dipakai sebagai acuan dulu — sampelnya masih terlalu sedikit untuk disimpulkan jadi pola.')+
+        '<div class="section-head" style="margin-top:4px;"><h2><span class="icon-chip">⏱</span>Rata-rata Hari Bayar Vendor (Trade Payable)</h2>'+
+          '<span class="desc">Nota Hutang Dagang s/d lunas, FIFO per vendor — vendor pinjaman/cicilan (bukan nota dagang) tidak termasuk</span></div>'+
         '<div class="panel"><div class="toolbar">'+
-          '<div class="search-box"><span class="ic">⌕</span><input type="text" id="q" placeholder="Cari…"></div>'+
-          '<span class="result-count" id="cnt"></span></div><div id="tbl"></div></div>';
+          '<div class="search-box"><span class="ic">⌕</span><input type="text" id="qF1" placeholder="Cari vendor…"></div>'+
+          exportBtns('expF1')+
+          '<span class="result-count" id="cntF1"></span></div><div id="tblF1"></div></div>'+
+        '<div class="section-head" style="margin-top:22px;"><h2><span class="icon-chip">%</span>Rasio Biaya Bahan/Upah/Akomodasi terhadap Nilai Kontrak</h2>'+
+          '<span class="desc">Per Pemberi Proyek, dari proyek yang sudah punya Nilai Kontrak dan realisasi biaya</span></div>'+
+        '<div class="panel"><div class="toolbar">'+
+          '<div class="search-box"><span class="ic">⌕</span><input type="text" id="qF2" placeholder="Cari pemberi proyek…"></div>'+
+          exportBtns('expF2')+
+          '<span class="result-count" id="cntF2"></span></div><div id="tblF2"></div></div>';
 
-      renderBarList(document.getElementById('barTop'), rows.slice(0,10),{
-        labelFn:function(d){ return d.nama; }, valueFn:function(d){ return d.nilai; },
-        colorFn:function(d){ return /cost center|prive/i.test(d.nama)?'var(--overhead)':'var(--steel)'; },
-        formatFn:rpShort});
-
-      tbl=DataTable('tbl',[
+      var tblF1=DataTable('tblF1',[
         {key:'_no',label:'No',sort:false,render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
-        {key:'nama',label:mode==='project'?'Nama Project':(mode==='kategori'?'Kategori Biaya':'Nama Akun'),
-         cls:'wrap',render:function(r){
-          return '<b>'+esc(r.nama)+'</b>'+(/cost center|prive/i.test(r.nama)?'<span class="name-tag">Overhead</span>':''); }},
-        {key:'n',label:'Jml Transaksi',num:true,render:function(r){ return num0(r.n); },
-         foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+b.n;},0))+'</b>'; }},
-        {key:'nilai',label:'Total Pengeluaran',num:true,render:function(r){ return num0(r.nilai); },
-         foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+b.nilai;},0))+'</b>'; }},
-        {key:'share',label:'% dari Total',num:true,sortVal:function(r){ return total?r.nilai/total:0; },
-         render:function(r){ return total?pct(r.nilai/total):'–'; }}
-      ], rows, {defaultSort:'nilai',defaultDir:'desc',perPage:20,showFoot:true,countId:'cnt',
-        searchFn:function(r){ return r.nama; }, emptyText:'Tidak ada pengeluaran pada rentang ini.'});
-      bindSearch('q',tbl);
+        {key:'vendor',label:'Vendor',cls:'wrap',render:function(r){ return '<b>'+esc(r.vendor)+'</b>'; }},
+        {key:'n',label:'Jumlah Nota Lunas',num:true,render:function(r){
+          return '<button type="button" class="linklike" data-f1-vendor="'+esc(r.vendor)+'">'+num0(r.n)+'</button>'; }},
+        {key:'rata',label:'Rata-rata Hari',num:true,render:function(r){ return r.rata.toFixed(1); }},
+        {key:'median',label:'Median Hari',num:true,render:function(r){ return num0(r.median); }},
+        {key:'min',label:'Tercepat (hari)',num:true,render:function(r){ return num0(r.min); }},
+        {key:'max',label:'Terlama (hari)',num:true,render:function(r){ return num0(r.max); }},
+        {key:'cukup',label:'Status Data',render:function(r){
+          return '<span class="status-'+(r.cukup?'safe':'warn')+'">'+(r.cukup?'Cukup':'Belum Cukup (n<'+minN+')')+'</span>'; }}
+      ], f1Rows, {defaultSort:'n',defaultDir:'desc',perPage:15,countId:'cntF1',
+        searchFn:function(r){ return r.vendor; }, emptyText:'Belum ada nota Hutang Dagang yang lunas & bertag vendor.',
+        onRender:function(){
+          document.querySelectorAll('#tblF1 [data-f1-vendor]').forEach(function(b){
+            b.onclick=function(){
+              var vendor=b.getAttribute('data-f1-vendor');
+              var row=f1Rows.find(function(r){ return r.vendor===vendor; });
+              var list=row.detail.slice().sort(function(a,b){ return a.tglNota<b.tglNota?1:-1; }).map(function(d){
+                return {tgl:d.tglLunas, ref:d.ref, ket:'Nota '+fmtDate(d.tglNota)+' — lunas dalam '+d.hari+' hari', amount:d.nilai};
+              });
+              showTxnDrilldown('Hari Bayar — '+vendor, 'Setiap baris: 1 nota yang sudah lunas', list);
+            };
+          });
+        }});
+      bindSearch('qF1',tblF1);
+      bindExport('expF1','Analisa_Forecasting_Hari_Bayar_Vendor',
+        ['Vendor','Jumlah Nota Lunas','Rata-rata Hari','Median Hari','Tercepat (hari)','Terlama (hari)','Status Data'],
+        function(){ return tblF1.getFiltered().map(function(r){
+          return [r.vendor,r.n,Number(r.rata.toFixed(1)),r.median,r.min,r.max,r.cukup?'Cukup':'Belum Cukup (n<'+minN+')']; }); });
+
+      var tblF2=DataTable('tblF2',[
+        {key:'_no',label:'No',sort:false,render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }},
+        {key:'pemberi',label:'Pemberi Proyek',cls:'wrap',render:function(r){ return '<b>'+esc(r.pemberi)+'</b>'; }},
+        {key:'n',label:'Jumlah Proyek',num:true,render:function(r){
+          return '<button type="button" class="linklike" data-f2-pemberi="'+esc(r.pemberi)+'">'+num0(r.n)+'</button>'; }},
+        {key:'pctBahan',label:'Rata² % Bahan',num:true,render:function(r){ return pct(r.pctBahan); }},
+        {key:'pctUpah',label:'Rata² % Upah',num:true,render:function(r){ return pct(r.pctUpah); }},
+        {key:'pctAkomodasi',label:'Rata² % Akomodasi',num:true,render:function(r){ return pct(r.pctAkomodasi); }},
+        {key:'pctTotal',label:'Rata² % Total RAP',num:true,render:function(r){ return pct(r.pctTotal); }},
+        {key:'medianTotal',label:'Median % Total RAP',num:true,render:function(r){ return pct(r.medianTotal); }},
+        {key:'cukup',label:'Status Data',render:function(r){
+          return '<span class="status-'+(r.cukup?'safe':'warn')+'">'+(r.cukup?'Cukup':'Belum Cukup (n<'+minN+')')+'</span>'; }}
+      ], f2Rows, {defaultSort:'n',defaultDir:'desc',perPage:15,countId:'cntF2',
+        searchFn:function(r){ return r.pemberi; }, emptyText:'Belum ada proyek dengan Nilai Kontrak & realisasi biaya.',
+        onRender:function(){
+          document.querySelectorAll('#tblF2 [data-f2-pemberi]').forEach(function(b){
+            b.onclick=function(){
+              var pemberi=b.getAttribute('data-f2-pemberi');
+              var row=f2Rows.find(function(r){ return r.pemberi===pemberi; });
+              var body='<div class="table-scroll"><table class="dtab"><thead><tr>'+
+                '<th>Nama Proyek</th><th style="text-align:right;">Nilai Kontrak</th>'+
+                '<th style="text-align:right;">Bahan</th><th style="text-align:right;">Upah</th>'+
+                '<th style="text-align:right;">Akomodasi</th><th style="text-align:right;">% Total RAP</th>'+
+                '</tr></thead><tbody>'+row.projs.map(function(p){
+                  return '<tr><td class="wrap">'+esc(p.nama)+'</td>'+
+                    '<td style="text-align:right;">'+num0(p.kontrak)+'</td>'+
+                    '<td style="text-align:right;">'+num0(p.bahan)+'</td>'+
+                    '<td style="text-align:right;">'+num0(p.upah)+'</td>'+
+                    '<td style="text-align:right;">'+num0(p.akomodasi)+'</td>'+
+                    '<td style="text-align:right;">'+pct(p.totalRap/p.kontrak)+'</td></tr>';
+                }).join('')+'</tbody></table></div>';
+              openModal('Rasio Biaya — '+pemberi, body, {wide:true, saveLabel:null});
+            };
+          });
+        }});
+      bindSearch('qF2',tblF2);
+      bindExport('expF2','Analisa_Forecasting_Rasio_Biaya_Proyek',
+        ['Pemberi Proyek','Jumlah Proyek','Rata² % Bahan','Rata² % Upah','Rata² % Akomodasi','Rata² % Total RAP','Median % Total RAP','Status Data'],
+        function(){ return tblF2.getFiltered().map(function(r){
+          return [r.pemberi,r.n,r.pctBahan,r.pctUpah,r.pctAkomodasi,r.pctTotal,r.medianTotal,r.cukup?'Cukup':'Belum Cukup (n<'+minN+')']; }); });
     }
-    refresh(); bindReportFilter(refresh,['fMode']);
-    document.getElementById('fMode').addEventListener('change',refresh);
-    bindExport('exp','Analisa_Pengeluaran',['Kelompok','Jml Transaksi','Total Pengeluaran'],
-      function(){ return tbl.getFiltered().map(function(r){ return [r.nama,r.n,r.nilai]; }); });
+
+    drawAll();
+    document.getElementById('btnFilter').onclick=drawAll;
   };
 }
 
