@@ -4787,18 +4787,24 @@ function registerPages(){
       var totalAktiva=aktiva.reduce(function(a,r){ return a+(r.debet-r.kredit); },0);
       var totalHutang=kewajiban.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
       // "Laba Tahun Berjalan" (current, not-yet-closed period earnings) is
-      // never summed from P&L accounts here — the reference system (sistem
-      // asli) books it as the balancing figure of the sheet itself: Aktiva
-      // minus Hutang minus every other Ekuitas account. That is what
-      // "current year profit not yet closed to retained earnings" means
-      // under double-entry, and matching that formula (rather than an
-      // independent P&L recomputation plus a separate opening-balance
-      // plug line) is what makes NERACA BALANCE agree with sistem asli.
+      // summed directly from every Pendapatan/Beban account (heads 4-8),
+      // cumulative up to the same cutoff date as the rest of this report —
+      // the exact same total Laporan Laba Rugi shows as LABA BERSIH for
+      // "Semua Bulan" of the current year. Owner's explicit call: Laba
+      // Rugi's number is authoritative, Neraca must match it. Previously
+      // this was a balancing plug (Aktiva minus Hutang minus Ekuitas
+      // lainnya) instead, which forced NERACA BALANCE to zero but could
+      // silently disagree with Laba Rugi — a handful of kas_masuk refunds
+      // against a Biaya account (see isBiayaAkun() in groupByHead()) post
+      // their Kas leg normally but never reduce that Biaya in Laba Rugi
+      // (matching sistem asli's own treatment), so NERACA BALANCE below
+      // may now show that same small gap instead of a plug hiding it.
+      var pl=groupByHead(null,to,['4','5','6','7','8']);
+      var labaTahunBerjalan=pl.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
       var isLabaTahunBerjalan=function(r){ return akunNamaOnly(r.akun)==='Laba Tahun Berjalan'; };
       var totalEkuitasLain=ekuitas.reduce(function(a,r){
         return isLabaTahunBerjalan(r)?a:a+(r.kredit-r.debet);
       },0);
-      var labaTahunBerjalan=totalAktiva-totalHutang-totalEkuitasLain;
       var totalEkuitas=totalEkuitasLain+labaTahunBerjalan;
       var totalPasiva=totalHutang+totalEkuitas;
       var selisih=totalAktiva-totalPasiva;
@@ -4831,16 +4837,19 @@ function registerPages(){
       // kas/bank/jurnal postings behind the balance (plus the account's
       // own Saldo Awal, if any, as its own line — that part is a COA
       // field, not a transaction, so it would otherwise be invisible
-      // here); the "Laba Tahun Berjalan" plug shows the balancing
-      // formula itself since it has no transactions of its own.
+      // here); "Laba Tahun Berjalan" shows the same Total Pendapatan /
+      // Total Beban split Laba Rugi itself uses, since it has no
+      // transactions of its own.
       document.querySelectorAll('#reportBody [data-neraca-idx]').forEach(function(b){
         b.onclick=function(){
           var info=rowClickInfo[Number(b.getAttribute('data-neraca-idx'))];
           if(info.isLaba){
-            showTxnDrilldown(info.r.akun, 'Angka penyeimbang Neraca — bukan hasil transaksi, tapi selisih Aktiva dikurangi Hutang dan Ekuitas lainnya (sama seperti sistem asli menghitungnya)', [
-              {tgl:to, ref:'', ket:'Total Aktiva', amount:totalAktiva},
-              {tgl:to, ref:'', ket:'Total Hutang', amount:-totalHutang},
-              {tgl:to, ref:'', ket:'Ekuitas lainnya (Modal, Prive, dst.)', amount:-totalEkuitasLain}
+            var isPend=function(r){ return r.kode.split('.')[0]==='4' || r.kode.indexOf('7.1')===0; };
+            var totPend=pl.filter(isPend).reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
+            var totBeban=pl.filter(function(r){ return !isPend(r); }).reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
+            showTxnDrilldown(info.r.akun, 'Sama seperti LABA BERSIH di Laporan Laba Rugi untuk "Semua Bulan" tahun ini (Total Pendapatan dikurangi Total Beban, kumulatif sampai tanggal di atas)', [
+              {tgl:to, ref:'', ket:'Total Pendapatan', amount:totPend},
+              {tgl:to, ref:'', ket:'Total Beban', amount:totBeban}
             ]);
             return;
           }
