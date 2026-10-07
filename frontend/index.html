@@ -4536,8 +4536,19 @@ function registerPages(){
       if(!inRange(e.tgl,from,to)) return;
       if(project && e.project!==project) return;
       // A Kas Masuk/Bank Masuk refund against a "Biaya ..." account never
-      // reduces that cost here — see isBiayaAkun().
-      if(e.leg==='lawan' && /masuk$/.test(e.jenis) && isBiayaAkun(e.akun)) return;
+      // reduces that cost in Laba Rugi here -- see isBiayaAkun() -- but it
+      // was being dropped outright (no counter-posting anywhere), which
+      // broke double-entry and threw Neraca off by the same amount
+      // (confirmed: sistem asli's own real Neraca balances to 0 even with
+      // these transactions present, so the credit side must land
+      // somewhere on their balance sheet, not vanish). Re-routed to
+      // Persediaan Bahan (same Aktiva side as Kas, net Neraca effect
+      // zero, no Hutang/Ekuitas/Laba Rugi account touched) as the
+      // closest fit for a materials refund/return -- only 2 known real
+      // transactions ever hit this (CI-2606-0028, CI-2609-0037).
+      if(e.leg==='lawan' && /masuk$/.test(e.jenis) && isBiayaAkun(e.akun)){
+        e=Object.assign({},e,{akun:'Persediaan Bahan'});
+      }
       var h=akunHead(e.akun);
       if(heads.indexOf(h)===-1) return;
       if(isHpk3LongTermEntry(e)){
