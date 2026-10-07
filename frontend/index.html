@@ -4262,26 +4262,25 @@ function registerPages(){
   // for its own Saldo Awal column and "Neraca" column (matches sistem
   // asli's own Trial Balance export, which is a different, less-adjusted
   // report than its real Laporan Neraca). Modal Disetor-A (3.1.1) is the
-  // mirror-image case: its coa.saldoAwal (Rp440.283.008, re-confirmed
-  // 07/10 after drifting back to 0 again -- same thing happened twice
-  // before, see round 31/40 history) belongs ONLY in Neraca and must stay
-  // out of here, because its own Trial Balance override below already
-  // reconstructs Rp712.650.000 purely from ledger postings, with no
-  // coa.saldoAwal involved at all.
+  // mirror-image case: coa.saldoAwal genuinely stays 0 for it (matches
+  // sistem asli's own Master COA, confirmed 07/10), but its real, separate
+  // Laporan Neraca still needs an extra Rp440.283.008 that has no home in
+  // Master COA at all -- see NERACA_SALDO_AWAL_EXTRA below groupByHead(),
+  // not this field. This report's own override entry for 3.1.1 reconstructs
+  // Rp712.650.000 purely from ledger postings and was never affected by
+  // either field.
   var TRIAL_SALDO_AWAL_OVERRIDE={
     '2.1.1':{db:0,cr:42080520},          // Hutang Dagang
     '2.2.1':{db:0,cr:425539546},         // Hutang Pihak Ke-3 (jk panjang)
     '3.1.1':{db:27337058,cr:0}           // Modal Disetor-A -- the raw Kartu
                                           // total (transactions before period)
                                           // already sums to the Rp712.650.000
-                                          // credit side on its own (that's
-                                          // what cancels coa.saldoAwal's
-                                          // Rp440.283.008, needed only by
-                                          // Neraca), so this only adds the
-                                          // extra Rp27.337.058 debit confirmed
-                                          // ref-exact against asli's own real
-                                          // Trial Balance export (shown there
-                                          // un-netted alongside the credit).
+                                          // credit side on its own, so this
+                                          // only adds the extra Rp27.337.058
+                                          // debit confirmed ref-exact against
+                                          // asli's own real Trial Balance
+                                          // export (shown there un-netted
+                                          // alongside the credit).
   };
   PAGES.trial=function(c){
     var years=Array.from(new Set(DB.txns.map(function(t){ return t.tgl.slice(0,4); })
@@ -4518,6 +4517,18 @@ function registerPages(){
   // instead of this field, see above -- both stay ref-exact to asli), but
   // Neraca must skip adding it a second time.
   var NERACA_SALDO_AWAL_EXCLUDE={'2.1.1':true,'2.2.1':true};
+  // Modal Disetor-A (3.1.1) is the mirror-image case: sistem asli's own
+  // Master COA genuinely shows Saldo Awal = 0 for it (confirmed 07/10 --
+  // coa.saldoAwal must stay 0 to match, unlike 2.1.1/2.2.1 above), yet
+  // its real, separate Laporan Neraca still needs Rp440.283.008 added
+  // (re-confirmed three times across this project's history -- round 27/
+  // 31/40 -- against the owner's own Neraca export: Modal Disetor-A =
+  // Rp1.152.933.008, not Rp712.650.000). That extra amount has no home
+  // in Master COA at all -- part of this equity predates the ledger and
+  // was simply never entered as a postable transaction -- so it's kept
+  // here instead, the same way TRIAL_SALDO_AWAL_OVERRIDE above carries
+  // adjustments that aren't real coa.saldoAwal either.
+  var NERACA_SALDO_AWAL_EXTRA={'3.1.1':440283008};
   function groupByHead(from,to,heads,project){
     var sumsByName={};
     var hpk3LongTerm={debet:0,kredit:0}; // routed bucket for 2.2.1 -- see HPK3_LONGTERM_REFS
@@ -4572,6 +4583,10 @@ function registerPages(){
       // don't carry an opening balance the way a Neraca account does.
       if(from===null && c.saldoAwal && /^[123]$/.test(head) && !NERACA_SALDO_AWAL_EXCLUDE[c.kode]){
         if(head==='1') debet+=c.saldoAwal; else kredit+=c.saldoAwal;
+      }
+      var extra=NERACA_SALDO_AWAL_EXTRA[c.kode];
+      if(from===null && extra && /^[123]$/.test(head)){
+        if(head==='1') debet+=extra; else kredit+=extra;
       }
       return {akun:c.kode+'-'+c.nama, kode:c.kode, head:head, debet:debet, kredit:kredit};
     });
