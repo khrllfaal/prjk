@@ -4249,17 +4249,19 @@ function registerPages(){
      keeps these separate from Mutasi), Saldo Setelah Adj (the three
      added together), then that net balance placed under Laba Rugi
      (heads 5-8) or Neraca (heads 1-3), whichever the account is. */
-  // Trial Balance's own Saldo Awal for these three accounts does not
-  // match sistem asli's own Neraca/Buku Besar coa.saldoAwal (confirmed
-  // again Oct 7 with a full fresh dump: setting coa.saldoAwal for 2.1.1/
-  // 2.2.1 double-counts -- it matched Trial Balance's own "Neraca" column
-  // only because that column is itself computed off coa.saldoAwal, not
-  // because it matched sistem asli's real, separate Neraca report, which
-  // it did not -- the gap between buatan's Neraca and sistem asli's real
-  // Neraca was exactly Rp42.080.520 / Rp425.539.546, i.e. coa.saldoAwal
-  // counted twice). So this report alone adds these on top of its own raw
-  // Saldo Awal, exactly like before, without ever touching coa.saldoAwal
-  // itself.
+  // Hutang Dagang (2.1.1) and Hutang Pihak Ke-3 jk panjang (2.2.1): Master
+  // COA's saldoAwal for both DOES match sistem asli's real Master COA
+  // (Rp42.080.520 / Rp425.539.546) -- that part was never wrong. What was
+  // wrong (round Oct 7) was feeding that same field into Neraca's own
+  // calculation (groupByHead(), see NERACA_SALDO_AWAL_EXCLUDE below) --
+  // for these two specific accounts the full opening position is already
+  // reconstructed from ordinary postings, so Neraca adding coa.saldoAwal
+  // on top double-counted it by that exact amount (confirmed against
+  // sistem asli's real, separate Laporan Neraca). Trial Balance was never
+  // affected either way: it reads this override table, not coa.saldoAwal,
+  // for its own Saldo Awal column and "Neraca" column (matches sistem
+  // asli's own Trial Balance export, which is a different, less-adjusted
+  // report than its real Laporan Neraca).
   var TRIAL_SALDO_AWAL_OVERRIDE={
     '2.1.1':{db:0,cr:42080520},          // Hutang Dagang
     '2.2.1':{db:0,cr:425539546},         // Hutang Pihak Ke-3 (jk panjang)
@@ -4497,6 +4499,19 @@ function registerPages(){
      a known COA leaf still gets its own row (marked unlisted) so a
      stray/misspelled account name never silently drops money from the
      total. */
+  // Hutang Dagang (2.1.1) and Hutang Pihak Ke-3 jk panjang (2.2.1) are the
+  // one pair where Master COA's saldoAwal does NOT mean "balance from
+  // before this ledger" -- sistem asli's own Trial Balance shows their
+  // full opening position already reconstructed from ordinary postings
+  // (Mutasi), so adding coa.saldoAwal again here double-counts it by
+  // exactly that amount (confirmed ref-exact against sistem asli's real,
+  // separate Laporan Neraca: Rp42.080.520 / Rp425.539.546 too much per
+  // account, matching Master COA's own saldoAwal value 1-for-1). Master
+  // COA still stores the real asli value for these two (so Master COA's
+  // own display and Trial Balance -- which reads TRIAL_SALDO_AWAL_OVERRIDE
+  // instead of this field, see above -- both stay ref-exact to asli), but
+  // Neraca must skip adding it a second time.
+  var NERACA_SALDO_AWAL_EXCLUDE={'2.1.1':true,'2.2.1':true};
   function groupByHead(from,to,heads,project){
     var sumsByName={};
     var hpk3LongTerm={debet:0,kredit:0}; // routed bucket for 2.2.1 -- see HPK3_LONGTERM_REFS
@@ -4549,7 +4564,7 @@ function registerPages(){
       // Kewajiban/Ekuitas). A dated Laba Rugi range must never see it —
       // heads 4-8 (P&L) are excluded on purpose, income/expense accounts
       // don't carry an opening balance the way a Neraca account does.
-      if(from===null && c.saldoAwal && /^[123]$/.test(head)){
+      if(from===null && c.saldoAwal && /^[123]$/.test(head) && !NERACA_SALDO_AWAL_EXCLUDE[c.kode]){
         if(head==='1') debet+=c.saldoAwal; else kredit+=c.saldoAwal;
       }
       return {akun:c.kode+'-'+c.nama, kode:c.kode, head:head, debet:debet, kredit:kredit};
