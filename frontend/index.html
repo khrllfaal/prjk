@@ -4261,7 +4261,13 @@ function registerPages(){
   // affected either way: it reads this override table, not coa.saldoAwal,
   // for its own Saldo Awal column and "Neraca" column (matches sistem
   // asli's own Trial Balance export, which is a different, less-adjusted
-  // report than its real Laporan Neraca).
+  // report than its real Laporan Neraca). Modal Disetor-A (3.1.1) is the
+  // mirror-image case: its coa.saldoAwal (Rp440.283.008, re-confirmed
+  // 07/10 after drifting back to 0 again -- same thing happened twice
+  // before, see round 31/40 history) belongs ONLY in Neraca and must stay
+  // out of here, because its own Trial Balance override below already
+  // reconstructs Rp712.650.000 purely from ledger postings, with no
+  // coa.saldoAwal involved at all.
   var TRIAL_SALDO_AWAL_OVERRIDE={
     '2.1.1':{db:0,cr:42080520},          // Hutang Dagang
     '2.2.1':{db:0,cr:425539546},         // Hutang Pihak Ke-3 (jk panjang)
