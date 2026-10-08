@@ -33,6 +33,19 @@
   --font-body:'Inter',ui-sans-serif,system-ui,sans-serif;
   --font-mono:'IBM Plex Mono',ui-monospace,Consolas,monospace;
   --sidebar-w:248px;
+
+  /* Type scale -- every font-size in the app should be one of these,
+     not a one-off value. Keeps every page reading at the same rhythm
+     instead of drifting by fractions of a pixel between pages that
+     were written at different times. */
+  --fs-2xs:9.5px;    /* micro labels: donut-chart captions, tiny badges */
+  --fs-xs:10.5px;    /* table header labels, field labels (uppercase) */
+  --fs-sm:11.5px;    /* secondary text, descriptions, sub-labels */
+  --fs-base:12.5px;  /* default UI text: inputs, table cells, buttons */
+  --fs-md:14px;      /* body base size, sidebar brand */
+  --fs-lg:16px;      /* section/card headings */
+  --fs-xl:20px;      /* page titles */
+  --fs-2xl:25px;     /* big KPI numbers */
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;height:100%;}
@@ -88,7 +101,7 @@ button,input,select,textarea{font-family:inherit;}
 .sb-mark{width:38px;height:38px;border-radius:9px; background:linear-gradient(135deg,var(--steel),var(--navy-2));
   display:flex;align-items:center;justify-content:center; font-family:var(--font-display); font-weight:700; font-size:15px;
   border:1px solid rgba(255,255,255,.25); flex:none;}
-.sb-brand .t1{font-size:14.5px; font-weight:700; font-family:var(--font-display); line-height:1.2;}
+.sb-brand .t1{font-size:var(--fs-md); font-weight:700; font-family:var(--font-display); line-height:1.2;}
 .sb-brand .t2{font-size:10px; color:var(--steel-soft); letter-spacing:.12em; text-transform:uppercase; margin-top:2px;}
 
 .sb-search{padding:12px 14px 6px 14px;}
@@ -179,6 +192,16 @@ button,input,select,textarea{font-family:inherit;}
 .btn-ghost:hover{border-color:var(--steel); color:var(--text);}
 .btn-sm{padding:5px 10px; font-size:11.5px; border-radius:6px;}
 .btn-row{display:flex; gap:8px; flex-wrap:wrap;}
+/* Row actions (Edit/Hapus repeated down every row of a list) read as
+   noise when they're solid-filled like a real call-to-action — a table
+   of 50 rows shouldn't have 100 loud orange/red blocks competing with
+   the data itself. Quiet outline style here instead, reserving the
+   solid fill for the one-off alert case (btn-danger without btn-sm,
+   e.g. "changes weren't saved"). */
+.btn-sm.btn-warn{background:transparent; color:#9A6A00; border-color:#E8C877;}
+.btn-sm.btn-warn:hover{background:var(--warn-bg);}
+.btn-sm.btn-danger{background:transparent; color:var(--danger); border-color:var(--danger-line);}
+.btn-sm.btn-danger:hover{background:var(--danger-bg);}
 
 /* ============ FILTER BAR ============ */
 .filterbar{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; margin-bottom:14px;
@@ -201,8 +224,8 @@ button,input,select,textarea{font-family:inherit;}
 .result-count{font-size:11px; color:var(--text-faint); margin-left:auto; font-family:var(--font-mono);}
 
 .table-scroll{overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--card);}
-table.dtab{width:100%; border-collapse:separate; border-spacing:0; font-size:12.3px; min-width:640px;}
-table.dtab thead th{background:var(--navy); color:#fff; text-align:left; font-weight:600; font-size:10.6px;
+table.dtab{width:100%; border-collapse:separate; border-spacing:0; font-size:var(--fs-base); min-width:640px;}
+table.dtab thead th{background:var(--navy); color:#fff; text-align:left; font-weight:600; font-size:var(--fs-xs);
   text-transform:uppercase; letter-spacing:.03em; padding:10px 12px; white-space:nowrap; cursor:pointer; user-select:none;}
 table.dtab thead th.num, table.dtab td.num{text-align:right;}
 table.dtab thead th.nosort{cursor:default;}
@@ -232,7 +255,7 @@ tr:hover td.tb-sticky{background:#F6F9FD;}
 .tb-sticky-2{left:64px; min-width:200px;}
 table.dtab tbody td .no{color:var(--text-faint); font-family:var(--font-mono); font-size:11px;}
 table.dtab tbody td .btn-row{flex-wrap:nowrap;}
-table.dtab tfoot td{padding:10px 12px; font-weight:700; background:var(--paper); border-top:2px solid var(--line); font-size:12.3px;}
+table.dtab tfoot td{padding:10px 12px; font-weight:700; background:var(--paper); border-top:2px solid var(--line); font-size:var(--fs-base);}
 table.dtab tfoot td.num{font-family:var(--font-mono); text-align:right;}
 .row-group td{background:#EAF0F9 !important; font-weight:700; color:var(--navy); font-size:11.5px; text-transform:uppercase; letter-spacing:.04em;}
 .row-sub td{background:#F5F8FC !important; font-weight:600;}
@@ -265,7 +288,7 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 
 /* ============ ALERTS ============ */
 .alerts{display:flex; flex-direction:column; gap:8px; margin-bottom:14px;}
-.alert{display:flex; align-items:flex-start; gap:10px; padding:11px 14px; border-radius:9px; font-size:12.8px; border:1px solid; line-height:1.5;}
+.alert{display:flex; align-items:flex-start; gap:10px; padding:11px 14px; border-radius:9px; font-size:var(--fs-base); border:1px solid; line-height:1.5;}
 .alert .ic{font-size:14px; flex:none; margin-top:1px;}
 .alert.danger{background:var(--danger-bg);border-color:var(--danger-line);color:#7A2318;}
 .alert.warn{background:var(--warn-bg);border-color:var(--warn-line);color:#7A5600;}
@@ -323,7 +346,7 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 
 .barlist{display:flex;flex-direction:column;gap:11px;}
 .barlist-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;gap:8px;}
-.barlist-name{font-size:12.3px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.barlist-name{font-size:var(--fs-base);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .barlist-val{font-family:var(--font-mono);font-size:12px;color:var(--text-mute);flex:none;}
 .barlist-track{height:7px;background:var(--paper);border-radius:100px;overflow:hidden;}
 .barlist-fill{height:100%;border-radius:100px;background:var(--steel);}
@@ -349,7 +372,7 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 .period-bar .plabel{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-mute);font-weight:700;flex:none;}
 .period-note{font-size:11.5px;color:var(--text-faint);margin-left:auto;}
 .section-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:26px 0 12px 0;flex-wrap:wrap;}
-.section-head h2{font-size:15.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;}
+.section-head h2{font-size:var(--fs-lg);font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;}
 .section-head .icon-chip{width:26px;height:26px;border-radius:7px;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;flex:none;}
 .section-head .desc{font-size:12px;color:var(--text-mute);}
 .section-divider{border:none;border-top:1px solid var(--line);margin:32px 0 0 0;}
