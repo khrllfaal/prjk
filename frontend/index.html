@@ -4325,12 +4325,12 @@ function registerPages(){
       allEntries().forEach(function(e){
         var key=akunNamaOnly(e.akun).toLowerCase();
         if(isHpk3LongTermEntry(e)) key='hutang pihak ke-3 (jk panjang)';
-        if(!byName[key]) byName[key]={preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0};
+        if(!byName[key]) byName[key]={preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0,preList:[],mutList:[],adjList:[]};
         var b=byName[key];
-        if(e.tgl<periodStart){ b.preDb+=e.debet; b.preCr+=e.kredit; }
+        if(e.tgl<periodStart){ b.preDb+=e.debet; b.preCr+=e.kredit; b.preList.push(e); }
         else if(e.tgl<=periodEnd){
-          if(e.src==='jurnal'){ b.adjDb+=e.debet; b.adjCr+=e.kredit; }
-          else { b.mutDb+=e.debet; b.mutCr+=e.kredit; }
+          if(e.src==='jurnal'){ b.adjDb+=e.debet; b.adjCr+=e.kredit; b.adjList.push(e); }
+          else { b.mutDb+=e.debet; b.mutCr+=e.kredit; b.mutList.push(e); }
         }
       });
       var claimed={};
@@ -4351,9 +4351,9 @@ function registerPages(){
           // TRIAL_HPK3_LONGTERM_REFS above) instead of the normal
           // claimed-pool lookup, so it never fights 2.1.3 over the
           // shared "hutang pihak ke-3" name.
-          b=byName['hutang pihak ke-3 (jk panjang)']||{preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0};
+          b=byName['hutang pihak ke-3 (jk panjang)']||{preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0,preList:[],mutList:[],adjList:[]};
         } else {
-          b=(!claimed[key] && byName[key]) ? byName[key] : {preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0};
+          b=(!claimed[key] && byName[key]) ? byName[key] : {preDb:0,preCr:0,mutDb:0,mutCr:0,adjDb:0,adjCr:0,preList:[],mutList:[],adjList:[]};
         }
         claimed[key]=true;
         var head=String(cAcc.kode).split('.')[0];
@@ -4368,11 +4368,14 @@ function registerPages(){
         // tallied here before being zeroed out for display.
         if(isLabaRugi){ lrCumDb+=b.preDb; lrCumCr+=b.preCr; }
         var preDb=isLabaRugi?0:b.preDb, preCr=isLabaRugi?0:b.preCr;
+        var preList=isLabaRugi?[]:b.preList.slice();
         var saldoOvr=TRIAL_SALDO_AWAL_OVERRIDE[cAcc.kode];
         if(!isLabaRugi && saldoOvr){
           preDb+=saldoOvr.db; preCr+=saldoOvr.cr;
+          if(saldoOvr.db||saldoOvr.cr) preList.push({tgl:periodStart,ref:'',ket:'Saldo Awal (penyesuaian Trial Balance)',debet:saldoOvr.db,kredit:saldoOvr.cr});
         } else if(!isLabaRugi && cAcc.saldoAwal){
           if(head==='1') preDb+=cAcc.saldoAwal; else preCr+=cAcc.saldoAwal;
+          preList.push({tgl:periodStart,ref:'',ket:'Saldo Awal (Master COA)',debet:head==='1'?cAcc.saldoAwal:0,kredit:head==='1'?0:cAcc.saldoAwal});
         }
         var afterDb=preDb+b.mutDb+b.adjDb, afterCr=preCr+b.mutCr+b.adjCr;
         var net=afterDb-afterCr;
@@ -4393,7 +4396,9 @@ function registerPages(){
         if(!showZero && !hasActivity) return;
         var row={header:false, kode:cAcc.kode, nama:cAcc.nama,
           preDb:preDb,preCr:preCr, mutDb:b.mutDb,mutCr:b.mutCr, adjDb:b.adjDb,adjCr:b.adjCr,
-          afterDb:afterDb,afterCr:afterCr, lrDb:lrDb,lrCr:lrCr, nrDb:nrDb,nrCr:nrCr};
+          afterDb:afterDb,afterCr:afterCr, lrDb:lrDb,lrCr:lrCr, nrDb:nrDb,nrCr:nrCr,
+          preList:preList, mutList:b.mutList, adjList:b.adjList,
+          afterList:preList.concat(b.mutList, b.adjList)};
         rows.push(row); lastRows.push(row);
         ['preDb','preCr','mutDb','mutCr','adjDb','adjCr','afterDb','afterCr','lrDb','lrCr','nrDb','nrCr']
           .forEach(function(k){ totals[k]+=row[k]; });
@@ -4424,6 +4429,18 @@ function registerPages(){
       }
 
       function cell(v){ return v?num0(v):'<span class="faint-italic">0</span>'; }
+      // Every non-zero Db/Cr figure is clickable -- Saldo Awal/Mutasi/
+      // Jurnal Penyesuaian drill into exactly the postings that sum to it
+      // (plus a synthetic "Saldo Awal (Master COA)" line when the Db/Cr
+      // includes that), Saldo Setelah Adj/Laba Rugi/Neraca all drill into
+      // the same combined list (they're the same postings, just shown
+      // under a different column). rowIdx indexes lastRows, resolved by
+      // the click handler below.
+      function clickCell(v, rowIdx, list){
+        if(!v) return '<span class="faint-italic">0</span>';
+        if(!list || !list.length) return num0(v);
+        return '<button type="button" class="linklike" data-tb-idx="'+rowIdx+'" data-tb-list="'+list+'">'+num0(v)+'</button>';
+      }
       var html='<div class="panel"><div class="table-scroll"><table class="dtab" style="font-size:11.5px;"><thead>'+
         '<tr><th rowspan="2" class="nosort">Kode Akun</th><th rowspan="2" class="nosort">Nama Akun</th>'+
         ['Saldo Awal','Mutasi','Jurnal Penyesuaian','Saldo Setelah Adj','Laba Rugi','Neraca'].map(function(h){
@@ -4437,13 +4454,14 @@ function registerPages(){
             esc(r.kode)+' '+esc(r.nama)+'</td></tr>';
           return;
         }
+        var idx=lastRows.indexOf(r);
         html+='<tr><td class="mono">'+esc(r.kode)+'</td><td class="wrap" style="padding-left:24px;">'+esc(r.nama)+'</td>'+
-          '<td class="num">'+cell(r.preDb)+'</td><td class="num">'+cell(r.preCr)+'</td>'+
-          '<td class="num">'+cell(r.mutDb)+'</td><td class="num">'+cell(r.mutCr)+'</td>'+
-          '<td class="num">'+cell(r.adjDb)+'</td><td class="num">'+cell(r.adjCr)+'</td>'+
-          '<td class="num">'+cell(r.afterDb)+'</td><td class="num">'+cell(r.afterCr)+'</td>'+
-          '<td class="num">'+cell(r.lrDb)+'</td><td class="num">'+cell(r.lrCr)+'</td>'+
-          '<td class="num">'+cell(r.nrDb)+'</td><td class="num">'+cell(r.nrCr)+'</td></tr>';
+          '<td class="num">'+clickCell(r.preDb,idx,'pre')+'</td><td class="num">'+clickCell(r.preCr,idx,'pre')+'</td>'+
+          '<td class="num">'+clickCell(r.mutDb,idx,'mut')+'</td><td class="num">'+clickCell(r.mutCr,idx,'mut')+'</td>'+
+          '<td class="num">'+clickCell(r.adjDb,idx,'adj')+'</td><td class="num">'+clickCell(r.adjCr,idx,'adj')+'</td>'+
+          '<td class="num">'+clickCell(r.afterDb,idx,'after')+'</td><td class="num">'+clickCell(r.afterCr,idx,'after')+'</td>'+
+          '<td class="num">'+clickCell(r.lrDb,idx,'after')+'</td><td class="num">'+clickCell(r.lrCr,idx,'after')+'</td>'+
+          '<td class="num">'+clickCell(r.nrDb,idx,'after')+'</td><td class="num">'+clickCell(r.nrCr,idx,'after')+'</td></tr>';
       });
       var afterDiff=Math.abs(totals.afterDb-totals.afterCr);
       // SELISIH (sistem asli): NOT the combined double-entry check (that's
@@ -4468,6 +4486,17 @@ function registerPages(){
       document.getElementById('reportBody').innerHTML=
         (afterDiff<1?'':alertHTML('warn','⚠','Trial balance belum seimbang',
           'Selisih debet–kredit sebesar <b>'+rp(afterDiff)+'</b> pada Saldo Setelah Adj.'))+html;
+      document.querySelectorAll('#reportBody [data-tb-idx]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var row=lastRows[Number(btn.getAttribute('data-tb-idx'))];
+          if(!row) return;
+          var listKey=btn.getAttribute('data-tb-list');
+          var list=listKey==='pre'?row.preList:listKey==='mut'?row.mutList:listKey==='adj'?row.adjList:row.afterList;
+          var colLabel=listKey==='pre'?'Saldo Awal':listKey==='mut'?'Mutasi':listKey==='adj'?'Jurnal Penyesuaian':'Saldo Setelah Adj / Laba Rugi / Neraca';
+          showTxnDrilldown(row.kode+' — '+row.nama, colLabel+' · '+monthNames[bulan-1]+' '+tahun,
+            list.map(function(e){ return {tgl:e.tgl, ref:e.ref, ket:(e.ket||'')+(e.project?' — '+e.project:''), amount:e.debet-e.kredit}; }));
+        });
+      });
     }
     refresh();
     document.getElementById('btnFilter').onclick=refresh;
