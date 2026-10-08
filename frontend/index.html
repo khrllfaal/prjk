@@ -224,6 +224,17 @@ button,input,select,textarea{font-family:inherit;}
 .result-count{font-size:11px; color:var(--text-faint); margin-left:auto; font-family:var(--font-mono);}
 
 .table-scroll{overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--card);}
+/* Bounded-height variant: turns the panel into its own internally
+   scrolling viewport (both axes) instead of growing with the page.
+   Needed for a true frozen header+footer (Trial Balance's ~150 rows) --
+   a sticky thead/tfoot only has something to stick against when its
+   nearest scrolling ancestor actually scrolls internally; relying on
+   page-level scroll doesn't work here because overflow-x:auto on this
+   element already forces its own overflow-y to a non-visible value
+   (CSS Overflow spec: an element can't mix visible on one axis with
+   non-visible on the other), making it a scroll container whose own
+   scrollTop never otherwise moves when only the page scrolls. */
+.table-scroll-tall{max-height:72vh; overflow-y:auto;}
 table.dtab{width:100%; border-collapse:separate; border-spacing:0; font-size:var(--fs-base); min-width:640px;}
 table.dtab thead th{background:var(--navy); color:#fff; text-align:left; font-weight:600; font-size:var(--fs-xs);
   text-transform:uppercase; letter-spacing:.03em; padding:10px 12px; white-space:nowrap; cursor:pointer; user-select:none;}
@@ -249,11 +260,20 @@ table.dtab tfoot td.num{font-family:var(--font-mono); text-align:right;}
 /* Compact variant for very wide tables (Trial Balance's 14 columns being
    the main case) — tighter padding/font so the table reads as dense data,
    not an oversized grid. */
-table.dtab.dtab-compact{font-size:var(--fs-sm); min-width:0;}
-table.dtab.dtab-compact thead th{padding:7px 8px; font-size:9.5px;}
-table.dtab.dtab-compact tbody td{padding:5px 8px;}
-table.dtab.dtab-compact tfoot td{padding:6px 8px;}
-table.dtab.dtab-compact tr.row-group td{padding:5px 8px; font-size:var(--fs-xs);}
+table.dtab.dtab-compact{font-size:var(--fs-2xs); min-width:0;}
+table.dtab.dtab-compact thead th{padding:5px 7px; font-size:9px;}
+table.dtab.dtab-compact tbody td{padding:3px 7px;}
+table.dtab.dtab-compact tfoot td{padding:4px 7px;}
+table.dtab.dtab-compact tr.row-group td{padding:3px 7px; font-size:9.5px;}
+/* Pin the header to the top and TOTAL/SELISIH to the bottom of the
+   viewport while scrolling vertically through a long table like Trial
+   Balance's 150+ rows — the same idea as the left-column freeze above,
+   just on the other axis. Scoped to dtab-compact (not every table) since
+   this is specifically for the few very long/wide reports. */
+table.dtab.dtab-compact thead{position:sticky; top:0; z-index:4;}
+table.dtab.dtab-compact thead th.col-sticky{z-index:5;}
+table.dtab.dtab-compact tfoot{position:sticky; bottom:0; z-index:4; box-shadow:0 -2px 6px -3px rgba(15,23,42,.18);}
+table.dtab.dtab-compact tfoot td.col-sticky{z-index:5;}
 /* Frozen leading column(s) so the account's identity never scrolls out of
    view on a wide table (Trial Balance's 14 columns being the main case).
    Every row state (plain/hover/group-header/total/foot) needs its sticky
@@ -4482,7 +4502,7 @@ function registerPages(){
         if(!list || !list.length) return num0(v);
         return '<button type="button" class="linklike" data-tb-idx="'+rowIdx+'" data-tb-list="'+list+'">'+num0(v)+'</button>';
       }
-      var html='<div class="panel"><div class="table-scroll"><table class="dtab dtab-compact"><thead>'+
+      var html='<div class="panel"><div class="table-scroll table-scroll-tall"><table class="dtab dtab-compact"><thead>'+
         '<tr><th rowspan="2" class="nosort col-sticky col-sticky-1">Kode Akun</th><th rowspan="2" class="nosort col-sticky col-sticky-2">Nama Akun</th>'+
         ['Saldo Awal','Mutasi','Jurnal Penyesuaian','Saldo Setelah Adj','Laba Rugi','Neraca'].map(function(h){
           return '<th colspan="2" class="nosort" style="text-align:center;">'+h+'</th>';
@@ -4523,10 +4543,13 @@ function registerPages(){
       var lrGap=totals.lrCr-totals.lrDb, nrGap=totals.nrDb-totals.nrCr;
       var lrSelDb=lrGap>0?0:-lrGap, lrSelCr=lrGap>0?lrGap:0;
       var nrSelDb=nrGap>0?nrGap:0, nrSelCr=nrGap>0?0:-nrGap;
-      // Same rule as the row-group header above: no colspan on the sticky
-      // cells, so the frozen/scrolling boundary stays a clean column
-      // break instead of a mis-rendered sticky offset.
-      html+='<tr style="font-weight:700;background:var(--panel-alt);">'+
+      // TOTAL/SELISIH live in a real <tfoot> (not more <tbody> rows) so
+      // the stylesheet can pin the whole section to the bottom of the
+      // viewport while scrolling, the same way <thead> pins to the top —
+      // see table.dtab thead/tfoot sticky rules. No colspan on the sticky
+      // cells here either, same reason as the row-group header above.
+      html+='</tbody><tfoot>'+
+        '<tr style="font-weight:700;background:var(--panel-alt);">'+
         '<td class="col-sticky col-sticky-1" style="background:var(--panel-alt);">TOTAL</td>'+
         '<td class="col-sticky col-sticky-2" style="background:var(--panel-alt);"></td>'+
         ['preDb','preCr','mutDb','mutCr','adjDb','adjCr','afterDb','afterCr','lrDb','lrCr','nrDb','nrCr']
@@ -4537,7 +4560,7 @@ function registerPages(){
         '<td colspan="6"></td><td colspan="2"></td>'+
         '<td class="num">'+num0(lrSelDb)+'</td><td class="num">'+num0(lrSelCr)+'</td>'+
         '<td class="num">'+num0(nrSelDb)+'</td><td class="num">'+num0(nrSelCr)+'</td></tr>'+
-        '</tbody></table></div></div>';
+        '</tfoot></table></div></div>';
       document.getElementById('reportBody').innerHTML=
         (afterDiff<1?'':alertHTML('warn','⚠','Trial balance belum seimbang',
           'Selisih debet–kredit sebesar <b>'+rp(afterDiff)+'</b> pada Saldo Setelah Adj.'))+html;
