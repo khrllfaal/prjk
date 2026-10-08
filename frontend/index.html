@@ -4514,8 +4514,15 @@ function registerPages(){
         '</thead><tbody>';
       rows.forEach(function(r){
         if(r.header){
-          html+='<tr class="row-group"><td colspan="14" class="col-sticky col-sticky-1" style="padding-left:'+((r.kode.split('.').length-1)*16)+'px;min-width:0;box-shadow:none;">'+
-            esc(r.kode)+' '+esc(r.nama)+'</td></tr>';
+          // Two separate (non-colspan) sticky cells here, not one cell
+          // spanning all 14 columns — a sticky <td> that spans across the
+          // frozen/scrolling boundary via colspan renders its offset
+          // wrong in Chromium (the scrolled columns bleed through/overlap
+          // the frozen text instead of staying hidden behind it). Keeping
+          // the same cell-per-column shape as the data rows below avoids
+          // that entirely.
+          html+='<tr class="row-group"><td class="col-sticky col-sticky-1" style="padding-left:'+((r.kode.split('.').length-1)*16)+'px;">'+
+            esc(r.kode)+'</td><td class="col-sticky col-sticky-2">'+esc(r.nama)+'</td><td colspan="12"></td></tr>';
           return;
         }
         var idx=lastRows.indexOf(r);
@@ -4539,11 +4546,18 @@ function registerPages(){
       var lrGap=totals.lrCr-totals.lrDb, nrGap=totals.nrDb-totals.nrCr;
       var lrSelDb=lrGap>0?0:-lrGap, lrSelCr=lrGap>0?lrGap:0;
       var nrSelDb=nrGap>0?nrGap:0, nrSelCr=nrGap>0?0:-nrGap;
-      html+='<tr style="font-weight:700;background:var(--panel-alt);"><td colspan="2" class="col-sticky col-sticky-1" style="background:var(--panel-alt);min-width:0;">TOTAL</td>'+
+      // Same rule as the row-group header above: no colspan on the sticky
+      // cells, so the frozen/scrolling boundary stays a clean column
+      // break instead of a mis-rendered sticky offset.
+      html+='<tr style="font-weight:700;background:var(--panel-alt);">'+
+        '<td class="col-sticky col-sticky-1" style="background:var(--panel-alt);">TOTAL</td>'+
+        '<td class="col-sticky col-sticky-2" style="background:var(--panel-alt);"></td>'+
         ['preDb','preCr','mutDb','mutCr','adjDb','adjCr','afterDb','afterCr','lrDb','lrCr','nrDb','nrCr']
           .map(function(k){ return '<td class="num">'+num0(totals[k])+'</td>'; }).join('')+
         '</tr>'+
-        '<tr style="font-weight:700;"><td colspan="8"></td><td colspan="2"></td>'+
+        '<tr style="font-weight:700;">'+
+        '<td class="col-sticky col-sticky-1"></td><td class="col-sticky col-sticky-2"></td>'+
+        '<td colspan="6"></td><td colspan="2"></td>'+
         '<td class="num">'+num0(lrSelDb)+'</td><td class="num">'+num0(lrSelCr)+'</td>'+
         '<td class="num">'+num0(nrSelDb)+'</td><td class="num">'+num0(nrSelCr)+'</td></tr>'+
         '</tbody></table></div></div>';
