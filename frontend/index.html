@@ -4326,26 +4326,14 @@ function registerPages(){
   // happened after the Oct 2026 COA adjustment). Removed: they now fall
   // through to the same `cAcc.saldoAwal` branch below as every other
   // account, so this report always reads Master COA's live value.
-  //  - 3.1.1 keeps its own override: the raw Kartu total (transactions
-  //    before period) already sums to the Rp712.650.000 credit side on
-  //    its own; the extra Rp27.337.058 debit here is a quirk ref-exact
-  //    against sistem asli's own Trial Balance export (shown un-netted,
-  //    see below) that doesn't correspond to any real posting and per the
-  //    owner's decision is NOT carried into Neraca (which simply shows
-  //    Rp712.650.000, matching Buku Besar and this report's own credit
-  //    figure -- see groupByHead() below, no special-casing there at all
-  //    for any of these three accounts any more).
-  var TRIAL_SALDO_AWAL_OVERRIDE={
-    '3.1.1':{db:27337058,cr:0}           // Modal Disetor-A -- the raw Kartu
-                                          // total (transactions before period)
-                                          // already sums to the Rp712.650.000
-                                          // credit side on its own, so this
-                                          // only adds the extra Rp27.337.058
-                                          // debit confirmed ref-exact against
-                                          // asli's own real Trial Balance
-                                          // export (shown there un-netted
-                                          // alongside the credit).
-  };
+  // 3.1.1 (Modal Disetor-A) used to carry a similar override (an extra
+  // Rp27.337.058 debit, "confirmed ref-exact" against an older sistem
+  // asli export) but the current asli export no longer shows that quirk
+  // at all -- its own Saldo Awal Debet is a clean Rp0, matching its raw
+  // Kartu total exactly. Removed for the same reason as 2.1.1/2.2.1: a
+  // one-off number that goes stale is worse than just reading the real
+  // data, and here the real data no longer has the quirk to begin with.
+  var TRIAL_SALDO_AWAL_OVERRIDE={};
   PAGES.trial=function(c){
     var years=Array.from(new Set(DB.txns.map(function(t){ return t.tgl.slice(0,4); })
       .concat(DB.jurnal.map(function(j){ return j.tgl.slice(0,4); })))).filter(Boolean).sort();
@@ -4444,18 +4432,7 @@ function registerPages(){
         var afterDb=preDb+b.mutDb+b.adjDb, afterCr=preCr+b.mutCr+b.adjCr;
         var net=afterDb-afterCr;
         var lrDb=isLabaRugi&&net>0?net:0, lrCr=isLabaRugi&&net<0?-net:0;
-        var nrDb, nrCr;
-        if(cAcc.kode==='3.1.1'){
-          // Modal Disetor-A's own Kartu carries an un-reconciled debit
-          // side (see TRIAL_SALDO_AWAL_OVERRIDE above) that asli's real
-          // report never nets against the credit side, even in this
-          // final Neraca column — confirmed ref-exact against asli's own
-          // export. Db-Cr still equals net either way, so the TOTAL row
-          // stays balanced.
-          nrDb=!isLabaRugi?afterDb:0; nrCr=!isLabaRugi?afterCr:0;
-        } else {
-          nrDb=!isLabaRugi&&net>0?net:0; nrCr=!isLabaRugi&&net<0?-net:0;
-        }
+        var nrDb=!isLabaRugi&&net>0?net:0, nrCr=!isLabaRugi&&net<0?-net:0;
         var hasActivity=preDb||preCr||b.mutDb||b.mutCr||b.adjDb||b.adjCr;
         if(!showZero && !hasActivity) return;
         var row={header:false, kode:cAcc.kode, nama:cAcc.nama,
