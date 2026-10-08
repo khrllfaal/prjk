@@ -4561,9 +4561,7 @@ function registerPages(){
         '<td class="num">'+num0(lrSelDb)+'</td><td class="num">'+num0(lrSelCr)+'</td>'+
         '<td class="num">'+num0(nrSelDb)+'</td><td class="num">'+num0(nrSelCr)+'</td></tr>'+
         '</tfoot></table></div></div>';
-      document.getElementById('reportBody').innerHTML=
-        (afterDiff<1?'':alertHTML('warn','⚠','Trial balance belum seimbang',
-          'Selisih debet–kredit sebesar <b>'+rp(afterDiff)+'</b> pada Saldo Setelah Adj.'))+html;
+      document.getElementById('reportBody').innerHTML=html;
       document.querySelectorAll('#reportBody [data-tb-idx]').forEach(function(btn){
         btn.addEventListener('click', function(){
           var row=lastRows[Number(btn.getAttribute('data-tb-idx'))];
