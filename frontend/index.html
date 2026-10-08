@@ -4303,27 +4303,24 @@ function registerPages(){
      added together), then that net balance placed under Laba Rugi
      (heads 5-8) or Neraca (heads 1-3), whichever the account is. */
   // This report builds its own Saldo Awal from raw ledger postings dated
-  // before the picked month (byName's preDb/preCr below), THEN layers
-  // this override on top for 3 accounts whose pre-period Mutasi alone
-  // doesn't reconstruct the full picture sistem asli's own Trial Balance
-  // export shows:
-  //  - 2.1.1/2.2.1: the override's Rp42.080.520 / Rp425.539.546 equal
-  //    Master COA's own saldoAwal for these two exactly -- same number,
-  //    added here because this report is scoped to a single month (so
-  //    needs it reconstructed fresh each time) where Neraca (below) is a
-  //    point-in-time snapshot that already reads coa.saldoAwal directly.
-  //  - 3.1.1: the raw Kartu total (transactions before period) already
-  //    sums to the Rp712.650.000 credit side on its own; the extra
-  //    Rp27.337.058 debit here is a quirk ref-exact against sistem
-  //    asli's own Trial Balance export (shown un-netted, see below) that
-  //    doesn't correspond to any real posting and per the owner's
-  //    decision is NOT carried into Neraca (which simply shows
+  // before the picked month (byName's preDb/preCr below). 2.1.1 and 2.2.1
+  // used to need a hardcoded top-up here (their pre-period Mutasi alone
+  // didn't reconstruct Master COA's saldoAwal for them) but that number
+  // had to be kept in lockstep with Master COA by hand, and silently went
+  // stale the moment Master COA's saldoAwal was edited (exactly what
+  // happened after the Oct 2026 COA adjustment). Removed: they now fall
+  // through to the same `cAcc.saldoAwal` branch below as every other
+  // account, so this report always reads Master COA's live value.
+  //  - 3.1.1 keeps its own override: the raw Kartu total (transactions
+  //    before period) already sums to the Rp712.650.000 credit side on
+  //    its own; the extra Rp27.337.058 debit here is a quirk ref-exact
+  //    against sistem asli's own Trial Balance export (shown un-netted,
+  //    see below) that doesn't correspond to any real posting and per the
+  //    owner's decision is NOT carried into Neraca (which simply shows
   //    Rp712.650.000, matching Buku Besar and this report's own credit
   //    figure -- see groupByHead() below, no special-casing there at all
   //    for any of these three accounts any more).
   var TRIAL_SALDO_AWAL_OVERRIDE={
-    '2.1.1':{db:0,cr:42080520},          // Hutang Dagang
-    '2.2.1':{db:0,cr:425539546},         // Hutang Pihak Ke-3 (jk panjang)
     '3.1.1':{db:27337058,cr:0}           // Modal Disetor-A -- the raw Kartu
                                           // total (transactions before period)
                                           // already sums to the Rp712.650.000
