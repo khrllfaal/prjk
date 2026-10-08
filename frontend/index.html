@@ -265,15 +265,39 @@ table.dtab.dtab-compact thead th{padding:5px 7px; font-size:9px;}
 table.dtab.dtab-compact tbody td{padding:3px 7px;}
 table.dtab.dtab-compact tfoot td{padding:4px 7px;}
 table.dtab.dtab-compact tr.row-group td{padding:3px 7px; font-size:9.5px;}
-/* Pin the header to the top and TOTAL/SELISIH to the bottom of the
-   viewport while scrolling vertically through a long table like Trial
-   Balance's 150+ rows — the same idea as the left-column freeze above,
-   just on the other axis. Scoped to dtab-compact (not every table) since
-   this is specifically for the few very long/wide reports. */
+/* All-black figures read as flat/undifferentiated on a 12-number-column
+   report -- give the reader a visual hierarchy instead: raw inputs
+   (Saldo Awal/Mutasi/Jurnal Penyesuaian, columns 3-8) recede in muted
+   ink since they're intermediate values, while the three "answer"
+   columns get their own accent + weight so the eye lands on them first
+   -- Saldo Setelah Adj in steel (this report's own interactive-blue),
+   Laba Rugi in navy, Neraca in the same green used everywhere else in
+   the app for a settled/final figure. */
+/* Every non-zero figure here is also a drilldown button (.linklike),
+   which otherwise paints everything the same steel-blue regardless of
+   column -- so the column accent has to be targeted at the button
+   itself too, not just the td, to actually show. */
+table.dtab.dtab-compact td:nth-child(3),table.dtab.dtab-compact td:nth-child(4),
+table.dtab.dtab-compact td:nth-child(5),table.dtab.dtab-compact td:nth-child(6),
+table.dtab.dtab-compact td:nth-child(7),table.dtab.dtab-compact td:nth-child(8),
+table.dtab.dtab-compact td:nth-child(3) .linklike,table.dtab.dtab-compact td:nth-child(4) .linklike,
+table.dtab.dtab-compact td:nth-child(5) .linklike,table.dtab.dtab-compact td:nth-child(6) .linklike,
+table.dtab.dtab-compact td:nth-child(7) .linklike,table.dtab.dtab-compact td:nth-child(8) .linklike{color:var(--text-mute);}
+table.dtab.dtab-compact td:nth-child(9),table.dtab.dtab-compact td:nth-child(10),
+table.dtab.dtab-compact td:nth-child(9) .linklike,table.dtab.dtab-compact td:nth-child(10) .linklike{color:var(--steel); font-weight:700;}
+table.dtab.dtab-compact td:nth-child(11),table.dtab.dtab-compact td:nth-child(12),
+table.dtab.dtab-compact td:nth-child(11) .linklike,table.dtab.dtab-compact td:nth-child(12) .linklike{color:var(--navy); font-weight:700;}
+table.dtab.dtab-compact td:nth-child(13),table.dtab.dtab-compact td:nth-child(14),
+table.dtab.dtab-compact td:nth-child(13) .linklike,table.dtab.dtab-compact td:nth-child(14) .linklike{color:var(--safe); font-weight:700;}
+table.dtab.dtab-compact .faint-italic{color:var(--text-faint) !important; font-weight:400 !important;}
+/* Pin only the header row to the top while scrolling vertically through
+   a long table like Trial Balance's 150+ rows — TOTAL/SELISIH stay in
+   normal flow at the end (not pinned to the bottom), per owner's
+   explicit call: only the title row freezes. Scoped to dtab-compact
+   (not every table) since this is specifically for the few very long/
+   wide reports. */
 table.dtab.dtab-compact thead{position:sticky; top:0; z-index:4;}
 table.dtab.dtab-compact thead th.col-sticky{z-index:5;}
-table.dtab.dtab-compact tfoot{position:sticky; bottom:0; z-index:4; box-shadow:0 -2px 6px -3px rgba(15,23,42,.18);}
-table.dtab.dtab-compact tfoot td.col-sticky{z-index:5;}
 /* Frozen leading column(s) so the account's identity never scrolls out of
    view on a wide table (Trial Balance's 14 columns being the main case).
    Every row state (plain/hover/group-header/total/foot) needs its sticky
@@ -993,16 +1017,23 @@ var NON_OPERATING_KAS_MASUK_REFS={'ADJ-2026-0001':true};
    "2.1.3-Hutang Pihak Ke-3" (jk pendek) and "2.2.1-Hutang Pihak Ke-3"
    (jk panjang) exist, and a posted entry only ever names the account,
    never which specific leaf. Sistem asli's own Buku Besar for BOTH
-   leaves (Dari 01/01/2026) gave the exact split, ref by ref: these 12
-   — the KUR Yusri / KUR Fahri installments, plus the CC-Beat motor
-   cicilan — belong to the long-term leaf; every other posting to this
-   name stays short-term. Every report that needs to tell the two
-   apart (Neraca, Buku Besar, Trial Balance, and their drilldowns)
-   reads this one set, so they can never disagree with each other. */
+   leaves (Dari 01/01/2026) gave the exact split, ref by ref: these 16
+   — the KUR Yusri / KUR Fahri installments, the CC-Beat motor cicilan,
+   "cicilan hp", "bayar pinjaman ke namina", and "Cicilan Motor pak eri"
+   — belong to the long-term leaf; every other posting to this name
+   stays short-term. (The first 12 were confirmed Oct 7-8; the last 4 --
+   CO-2609-0256, CO-2609-0265, CO-2607-0998, CO-2609-0769 -- surfaced
+   Oct 9 when sistem asli's own Buku Besar export for 2.1.3/2.2.1 was
+   compared ref-by-ref against this report, closing an Rp53.152.302 gap
+   that had been silently misrouting those 4 to the short-term leaf.)
+   Every report that needs to tell the two apart (Neraca, Buku Besar,
+   Trial Balance, and their drilldowns) reads this one set, so they can
+   never disagree with each other. */
 var HPK3_LONGTERM_REFS={
   'CO-2609-0266':true,'CO-2609-0263':true,'CO-2609-0258':true,'CO-2606-0003':true,
   'CO-2606-0228':true,'CO-2606-0549':true,'CO-2606-0780':true,'CO-2607-0169':true,
-  'CO-2607-0464':true,'CO-2607-0944':true,'CO-2608-0742':true,'CO-2609-1040':true
+  'CO-2607-0464':true,'CO-2607-0944':true,'CO-2608-0742':true,'CO-2609-1040':true,
+  'CO-2609-0256':true,'CO-2609-0265':true,'CO-2607-0998':true,'CO-2609-0769':true
 };
 function isHpk3LongTermEntry(e){
   return akunNamaOnly(e.akun).toLowerCase()==='hutang pihak ke-3' && !!HPK3_LONGTERM_REFS[e.ref];
