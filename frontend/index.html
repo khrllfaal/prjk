@@ -4536,19 +4536,23 @@ function registerPages(){
       if(!inRange(e.tgl,from,to)) return;
       if(project && e.project!==project) return;
       // A Kas Masuk/Bank Masuk refund against a "Biaya ..." account never
-      // reduces that cost in Laba Rugi here -- see isBiayaAkun() -- but it
-      // was being dropped outright (no counter-posting anywhere), which
-      // broke double-entry and threw Neraca off by the same amount
-      // (confirmed: sistem asli's own real Neraca balances to 0 even with
-      // these transactions present, so the credit side must land
-      // somewhere on their balance sheet, not vanish). Re-routed to
-      // Persediaan Bahan (same Aktiva side as Kas, net Neraca effect
-      // zero, no Hutang/Ekuitas/Laba Rugi account touched) as the
-      // closest fit for a materials refund/return -- only 2 known real
-      // transactions ever hit this (CI-2606-0028, CI-2609-0037).
-      if(e.leg==='lawan' && /masuk$/.test(e.jenis) && isBiayaAkun(e.akun)){
-        e=Object.assign({},e,{akun:'Persediaan Bahan'});
-      }
+      // reduces that cost here -- see isBiayaAkun(). Tried re-routing the
+      // dropped counter-posting to Persediaan Bahan (round Oct 8) to make
+      // Neraca balance to 0 -- WRONG: sistem asli's own real Neraca for
+      // 08/10/2026 shows Persediaan Bahan at the full, un-reduced
+      // Rp86.314.293, ref-exact against Trial Balance's own Neraca-Db
+      // column with zero adjustment anywhere in Aktiva. With every other
+      // Neraca line confirmed against that same real export (Hutang
+      // Dagang/2.2.1/Modal Disetor-A, and Laba Tahun Berjalan pinned to
+      // Laba Rugi's own Laba Bersih per the owner), NERACA BALANCE is
+      // arithmetically forced to Rp12.987.500 -- there is no Aktiva/
+      // Hutang/Ekuitas line left that could absorb it without
+      // contradicting a confirmed-correct figure. This is a real,
+      // irreducible gap in the underlying data (these 2 transactions'
+      // credit side has no documented home anywhere in Master COA), not
+      // a bug to force away -- back to dropping it outright, matching
+      // the real Neraca's own Aktiva exactly.
+      if(e.leg==='lawan' && /masuk$/.test(e.jenis) && isBiayaAkun(e.akun)) return;
       var h=akunHead(e.akun);
       if(heads.indexOf(h)===-1) return;
       if(isHpk3LongTermEntry(e)){
