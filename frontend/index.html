@@ -242,22 +242,19 @@ table.dtab tbody td.wrap{min-width:140px;}
 table.dtab tbody td.nowrap{white-space:nowrap;}
 table.dtab tbody tr:hover{background:#F6F9FD;}
 table.dtab tbody tr:last-child td{border-bottom:none;}
-/* Frozen leading column(s) for a wide table (Trial Balance's 14 columns
-   being the main case) — stay put while the rest scrolls horizontally,
-   so the account's identity is never scrolled out of view. Needs an
-   opaque background per state (plain/hover/group-header/total) since a
-   sticky cell sits visually above whatever scrolls underneath it. */
-td.col-sticky,th.col-sticky{position:sticky; z-index:2; background:var(--card);}
-th.col-sticky{z-index:3; background:var(--navy);}
-tr.row-group td.col-sticky{background:var(--panel-alt);}
-tr:hover td.col-sticky{background:#F6F9FD;}
-table.dtab tfoot td.col-sticky{background:var(--paper);}
-.col-sticky-1{left:0; min-width:64px;}
-.col-sticky-2{left:64px; min-width:200px;}
 table.dtab tbody td .no{color:var(--text-faint); font-family:var(--font-mono); font-size:11px;}
 table.dtab tbody td .btn-row{flex-wrap:nowrap;}
 table.dtab tfoot td{padding:10px 12px; font-weight:700; background:var(--paper); border-top:2px solid var(--line); font-size:var(--fs-base);}
 table.dtab tfoot td.num{font-family:var(--font-mono); text-align:right;}
+/* Compact variant for very wide tables (Trial Balance's 14 columns being
+   the main case) — tighter padding/font so the table reads as dense data,
+   not an oversized grid, without resorting to frozen columns (which just
+   clash visually with the header's own sticky state on scroll). */
+table.dtab.dtab-compact{font-size:var(--fs-sm); min-width:0;}
+table.dtab.dtab-compact thead th{padding:7px 8px; font-size:9.5px;}
+table.dtab.dtab-compact tbody td{padding:5px 8px;}
+table.dtab.dtab-compact tfoot td{padding:6px 8px;}
+table.dtab.dtab-compact tr.row-group td{padding:5px 8px; font-size:var(--fs-xs);}
 .row-group td{background:#EAF0F9 !important; font-weight:700; color:var(--navy); font-size:11.5px; text-transform:uppercase; letter-spacing:.04em;}
 .row-sub td{background:#F5F8FC !important; font-weight:600;}
 .empty-row td{text-align:center; color:var(--text-faint); padding:28px;}
@@ -2328,19 +2325,11 @@ function DataTable(mountId, columns, rows, opts){
     if(state.page>pages) state.page=pages;
     var slice=opts.noPaging?list:list.slice((state.page-1)*state.perPage, state.page*state.perPage);
 
-    // A column with `sticky:1` or `sticky:2` freezes it at the left edge
-    // while the rest of a wide table scrolls horizontally underneath —
-    // see col-sticky/col-sticky-1/col-sticky-2 in the stylesheet. Opt-in
-    // per table (most tables aren't wide enough to need it), for the
-    // few with many columns (Dashboard Proyek's cost breakdown, etc.)
-    // where the identifying column(s) would otherwise scroll out of view.
-    function stickyCls(c){ return c.sticky?(' col-sticky col-sticky-'+c.sticky):''; }
-
     var head='<thead><tr>'+columns.map(function(c){
       var sortable=c.sort!==false;
       var sorted=state.sortKey===c.key;
       var arrow=sortable?('<span class="arrow">'+(sorted?(state.sortDir==='asc'?'&uarr;':'&darr;'):'&udarr;')+'</span>'):'';
-      return '<th class="'+(c.num?'num ':'')+(sortable?'':'nosort ')+(sorted?'sorted':'')+stickyCls(c)+'"'+
+      return '<th class="'+(c.num?'num ':'')+(sortable?'':'nosort ')+(sorted?'sorted':'')+'"'+
         (sortable?' data-key="'+c.key+'"':'')+'>'+esc(c.label)+arrow+'</th>';
     }).join('')+'</tr></thead>';
 
@@ -2349,7 +2338,7 @@ function DataTable(mountId, columns, rows, opts){
       return '<tr'+(rowCls?' class="'+rowCls+'"':'')+'>'+columns.map(function(c){
         var cls=typeof c.cls==='function'?c.cls(r):(c.cls||'');
         var idx=(state.page-1)*state.perPage+i;
-        return '<td class="'+(c.num?'num ':'')+cls+stickyCls(c)+'">'+c.render(r,idx)+'</td>';
+        return '<td class="'+(c.num?'num ':'')+cls+'">'+c.render(r,idx)+'</td>';
       }).join('')+'</tr>';
     }).join(''):'<tr class="empty-row"><td colspan="'+columns.length+'">'+
       esc(opts.emptyText||'Tidak ada data yang cocok.')+'</td></tr>')+'</tbody>';
@@ -2358,7 +2347,7 @@ function DataTable(mountId, columns, rows, opts){
     if(opts.showFoot && list.length){
       foot='<tfoot><tr>'+columns.map(function(c){
         var v=c.foot?c.foot(list):'';
-        return '<td class="'+(c.num?'num':'')+stickyCls(c)+'">'+v+'</td>';
+        return '<td class="'+(c.num?'num':'')+'">'+v+'</td>';
       }).join('')+'</tr></tfoot>';
     }
 
@@ -3238,8 +3227,8 @@ function registerPages(){
       var data=pemberi?progRows.filter(function(r){ return r.pemberiProyek===pemberi; }):progRows;
       function sumFoot(key){ return function(list){ return '<b>'+num0(list.reduce(function(a,b){ return a+b[key]; },0))+'</b>'; }; }
       progTbl=DataTable('tblProg',[
-        {key:'no',label:'No',sticky:1,sort:false,render:function(r,idx){ return '<span class="no">'+(idx+1)+'</span>'; }},
-        {key:'nama',label:'Nama Proyek',cls:'wrap',sticky:2,render:function(r){
+        {key:'no',label:'No',sort:false,render:function(r,idx){ return '<span class="no">'+(idx+1)+'</span>'; }},
+        {key:'nama',label:'Nama Proyek',cls:'wrap',render:function(r){
           return esc(r.nama)+'<div class="faint-italic" style="font-size:11px;">'+esc(r.pemberiProyek)+
             (r.linked?'':' · <span style="color:var(--danger);">⚠ belum tertaut ke transaksi — atur di Master Project</span>')+
             '</div>'; }, foot:function(){ return '<b>TOTAL</b>'; }},
@@ -4504,8 +4493,8 @@ function registerPages(){
         if(!list || !list.length) return num0(v);
         return '<button type="button" class="linklike" data-tb-idx="'+rowIdx+'" data-tb-list="'+list+'">'+num0(v)+'</button>';
       }
-      var html='<div class="panel"><div class="table-scroll"><table class="dtab" style="font-size:11.5px;"><thead>'+
-        '<tr><th rowspan="2" class="nosort col-sticky col-sticky-1">Kode Akun</th><th rowspan="2" class="nosort col-sticky col-sticky-2">Nama Akun</th>'+
+      var html='<div class="panel"><div class="table-scroll"><table class="dtab dtab-compact"><thead>'+
+        '<tr><th rowspan="2" class="nosort">Kode Akun</th><th rowspan="2" class="nosort">Nama Akun</th>'+
         ['Saldo Awal','Mutasi','Jurnal Penyesuaian','Saldo Setelah Adj','Laba Rugi','Neraca'].map(function(h){
           return '<th colspan="2" class="nosort" style="text-align:center;">'+h+'</th>';
         }).join('')+'</tr>'+
@@ -4513,12 +4502,12 @@ function registerPages(){
         '</thead><tbody>';
       rows.forEach(function(r){
         if(r.header){
-          html+='<tr class="row-group"><td colspan="14" class="col-sticky col-sticky-1" style="padding-left:'+((r.kode.split('.').length-1)*16)+'px;min-width:0;">'+
+          html+='<tr class="row-group"><td colspan="14" style="padding-left:'+((r.kode.split('.').length-1)*16)+'px;">'+
             esc(r.kode)+' '+esc(r.nama)+'</td></tr>';
           return;
         }
         var idx=lastRows.indexOf(r);
-        html+='<tr><td class="mono col-sticky col-sticky-1">'+esc(r.kode)+'</td><td class="wrap col-sticky col-sticky-2">'+esc(r.nama)+'</td>'+
+        html+='<tr><td class="mono">'+esc(r.kode)+'</td><td class="wrap">'+esc(r.nama)+'</td>'+
           '<td class="num">'+clickCell(r.preDb,idx,'pre')+'</td><td class="num">'+clickCell(r.preCr,idx,'pre')+'</td>'+
           '<td class="num">'+clickCell(r.mutDb,idx,'mut')+'</td><td class="num">'+clickCell(r.mutCr,idx,'mut')+'</td>'+
           '<td class="num">'+clickCell(r.adjDb,idx,'adj')+'</td><td class="num">'+clickCell(r.adjCr,idx,'adj')+'</td>'+
@@ -4538,7 +4527,7 @@ function registerPages(){
       var lrGap=totals.lrCr-totals.lrDb, nrGap=totals.nrDb-totals.nrCr;
       var lrSelDb=lrGap>0?0:-lrGap, lrSelCr=lrGap>0?lrGap:0;
       var nrSelDb=nrGap>0?nrGap:0, nrSelCr=nrGap>0?0:-nrGap;
-      html+='<tr style="font-weight:700;background:var(--panel-alt);"><td colspan="2" class="col-sticky col-sticky-1" style="background:var(--panel-alt);min-width:0;">TOTAL</td>'+
+      html+='<tr style="font-weight:700;background:var(--panel-alt);"><td colspan="2" style="background:var(--panel-alt);">TOTAL</td>'+
         ['preDb','preCr','mutDb','mutCr','adjDb','adjCr','afterDb','afterCr','lrDb','lrCr','nrDb','nrCr']
           .map(function(k){ return '<td class="num">'+num0(totals[k])+'</td>'; }).join('')+
         '</tr>'+
@@ -5525,8 +5514,8 @@ function registerPages(){
       function sumFoot(key){ return function(list){ return '<b>'+num0(list.reduce(function(a,b){ return a+b[key]; },0))+'</b>'; }; }
       sections.forEach(function(sec){
         var tbl=DataTable(sec.idp+'_tbl',[
-          {key:'no',label:'No',sticky:1,sort:false,render:function(r,idx){ return '<span class="no">'+(idx+1)+'</span>'; }},
-          {key:'nama',label:'Nama Proyek',cls:'wrap',sticky:2,render:function(r){
+          {key:'no',label:'No',sort:false,render:function(r,idx){ return '<span class="no">'+(idx+1)+'</span>'; }},
+          {key:'nama',label:'Nama Proyek',cls:'wrap',render:function(r){
             return esc(r.nama)+(r.linked?'':'<div class="faint-italic" style="font-size:11px;color:var(--danger);">⚠ belum tertaut ke transaksi — atur di Master Project</div>'); },
             foot:function(){ return '<b>TOTAL</b>'; }},
           {key:'kontrak',label:'Nilai Kontrak',num:true,render:function(r){ return num0(r.kontrak); }, foot:sumFoot('kontrak')},
@@ -5697,8 +5686,8 @@ function registerPages(){
         var showTotalPemasukan=akunList.length>1; // one account already IS the total — no need to repeat it
 
         var cols=[
-          {key:'no',label:'No',sticky:1,sort:false,render:function(r,idx){ return '<span class="no">'+(idx+1)+'</span>'; }},
-          {key:'nama',label:'Nama Proyek',cls:'wrap',sticky:2,render:function(r){
+          {key:'no',label:'No',sort:false,render:function(r,idx){ return '<span class="no">'+(idx+1)+'</span>'; }},
+          {key:'nama',label:'Nama Proyek',cls:'wrap',render:function(r){
             return esc(r.nama)+(r.linked?'':'<div class="faint-italic" style="font-size:11px;color:var(--danger);">⚠ belum tertaut ke transaksi — atur di Master Project</div>'); },
             foot:function(){ return '<b>TOTAL</b>'; }},
           {key:'pemberiProyek',label:'Pemberi Proyek',render:function(r){ return esc(r.pemberiProyek); }}
