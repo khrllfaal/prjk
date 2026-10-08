@@ -1354,8 +1354,10 @@ function showTxnDrilldown(title, subtitle, list, summary){
     }).join('')+'</div>':'';
   var body=summaryHtml+
     (subtitle?'<div class="panel-desc" style="margin-bottom:10px;">'+esc(subtitle)+'</div>':'')+
-    (list.length?'<input type="text" id="drillSearch" placeholder="Cari tanggal, ref, atau keterangan..." '+
-      'style="width:100%;box-sizing:border-box;padding:8px 10px;margin-bottom:10px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;">':'')+
+    (list.length?'<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">'+
+      '<input type="text" id="drillSearch" placeholder="Cari tanggal, ref, atau keterangan..." '+
+      'style="flex:1;min-width:0;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-size:var(--fs-base);">'+
+      exportBtns('drill')+'</div>':'')+
     '<div class="table-scroll"><table class="dtab" id="drillTable"><thead><tr>'+
     '<th>Tanggal</th><th>Ref No</th><th>Description</th>'+(hasStatus?'<th>Status</th>':'')+'<th style="text-align:right;">Amount</th>'+
     '</tr></thead><tbody>'+
@@ -1374,6 +1376,25 @@ function showTxnDrilldown(title, subtitle, list, summary){
   if(list.length){
     wireDrilldownSearch('drillSearch','drillTable','drillTotal');
     wireDrilldownGroupCards('drillTable','drillTotal');
+    // Exports exactly what's currently visible in the modal -- respects
+    // whatever search text or summary-card filter is active when
+    // clicked, same principle as every list page's own Excel/PDF button
+    // only ever exporting the filtered view, not silently the full set.
+    var headers=['Tanggal','Ref No','Description'].concat(hasStatus?['Status']:[]).concat(['Amount']);
+    bindExport('drill', (title||'Rincian').replace(/[^a-zA-Z0-9]+/g,'_'), headers, function(){
+      return Array.prototype.slice.call(document.querySelectorAll('#drillTable tbody tr[data-drill-row]'))
+        .filter(function(tr){ return tr.style.display!=='none'; })
+        .map(function(tr){
+          // Every column as plain text EXCEPT Amount, which reads the
+          // row's raw numeric value (data-drill-amt) instead of its
+          // "196.536.110"-formatted text -- keeps it a real number in
+          // the exported sheet (sums/formulas work) rather than text
+          // Excel can't compute on.
+          var cells=Array.prototype.slice.call(tr.children).map(function(td){ return td.textContent.trim(); });
+          cells[cells.length-1]=Number(tr.getAttribute('data-drill-amt'))||0;
+          return cells;
+        });
+    });
   }
 }
 
@@ -2907,10 +2928,10 @@ function financePage(jenis, title, sub){
           '<div id="f_akunKas_ssel"></div><input type="hidden" id="f_akunKas" value="'+esc(v('akunKas',''))+'"></div>'+
         '<div class="field"><label>Akun Lawan *</label>'+
           '<div id="f_akunLawan_ssel"></div><input type="hidden" id="f_akunLawan" value="'+esc(v('akunLawan',''))+'"></div>'+
-        '<div class="field"><label>Project</label>'+
-          '<div id="f_project_ssel"></div><input type="hidden" id="f_project" value="'+esc(v('project',''))+'"></div>'+
         '<div class="field"><label>'+relasiLabel+'</label>'+
           '<div id="f_relasi_ssel"></div><input type="hidden" id="f_relasi" value="'+esc(v('relasi',''))+'"></div>'+
+        '<div class="field"><label>Project</label>'+
+          '<div id="f_project_ssel"></div><input type="hidden" id="f_project" value="'+esc(v('project',''))+'"></div>'+
         '<div class="field"><label>Amount (Rp) *</label><input type="text" inputmode="numeric" id="f_amount" value="'+esc(amount)+'"></div>'+
         '<div class="field"><label>Description</label><input type="text" id="f_ket" value="'+esc(v('ket',''))+'"></div>'+
       '</div>';
@@ -3654,8 +3675,8 @@ function registerPages(){
           '<option value="posted"'+(statusAwal==='posted'?' selected':'')+'>Posted (sudah final, masuk laporan)</option>'+
           '<option value="draft"'+(statusAwal==='draft'?' selected':'')+'>Draft (belum final, belum masuk laporan)</option>'+
         '</select></div>'+
-        '<div class="field"><label>Project</label><div id="f_project_ssel"></div><input type="hidden" id="f_project" value="'+esc(head?head.project:'')+'"></div>'+
         '<div class="field"><label>Relasi (Customer/Vendor)</label><div id="f_relasi_ssel"></div><input type="hidden" id="f_relasi" value="'+esc(head?head.relasi:'')+'"></div>'+
+        '<div class="field"><label>Project</label><div id="f_project_ssel"></div><input type="hidden" id="f_project" value="'+esc(head?head.project:'')+'"></div>'+
         '<div class="field full"><label>Keterangan</label><input type="text" id="f_ket" value="'+esc(head?head.ket:'')+'"></div>'+
       '</div>'+
       '<div style="margin-top:10px;">'+
