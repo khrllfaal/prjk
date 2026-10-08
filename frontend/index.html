@@ -2626,9 +2626,9 @@ var NAV=[
     {id:'buku_besar', label:'Buku Besar', ic:'○'},
     {id:'trial', label:'Trial Balance', ic:'○'},
     {id:'cashflow', label:'Cash Flow', ic:'○'},
-    {id:'lap_kategori', label:'Laporan Kategori', ic:'○'},
     {id:'neraca', label:'Neraca', ic:'○'},
     {id:'laba_rugi', label:'Laba Rugi', ic:'○'},
+    {id:'lap_kategori', label:'Laporan Kategori', ic:'○'},
     {id:'analisa', label:'Analisa Forecasting', ic:'○'}
   ]}
 ];
@@ -2967,6 +2967,7 @@ function financePage(jenis, title, sub){
       // Lawan no longer carries its COA code into every list/report/export
       // that shows this field verbatim.
       var lawanOpts=DB.coa.filter(function(a){ return a.level>=3; })
+        .slice().sort(function(a,b){ return compareKode(a.kode,b.kode); })
         .map(function(a){ return {value:a.nama, label:a.kode+'-'+a.nama}; });
       var relasiList=isIn?DB.customers:DB.vendors;
       var relasiOpts=[''].concat(relasiList.map(function(r){ return r.nama; }));
@@ -3717,7 +3718,9 @@ function registerPages(){
       var head=lines?lines[0]:null;
       // Same convention as Akun Kas / Akun Lawan on the Kas/Bank forms:
       // dropdown LABEL shows "kode-nama", stored VALUE is the bare name.
-      var akunOpts=DB.coa.filter(function(a){ return a.level>=3; }).map(function(a){ return {value:a.nama, label:a.kode+'-'+a.nama}; });
+      var akunOpts=DB.coa.filter(function(a){ return a.level>=3; })
+        .slice().sort(function(a,b){ return compareKode(a.kode,b.kode); })
+        .map(function(a){ return {value:a.nama, label:a.kode+'-'+a.nama}; });
       var relasiOpts=DB.customers.concat(DB.vendors).map(function(r){ return r.nama; });
       var rowDefs=(lines||[null,null]).map(lineRowHtml);
 
@@ -3846,8 +3849,10 @@ function registerPages(){
   function relasiReport(cfg){
     return function(c){
       reportShell(c, cfg.title, cfg.sub,
-        '<div class="field grow"><label>'+cfg.filterLabel+'</label><select id="fRel"><option value="">Semua</option>'+
-        cfg.list().map(function(r){ return '<option>'+esc(r.nama)+'</option>'; }).join('')+'</select></div>');
+        '<div class="field grow"><label>'+cfg.filterLabel+'</label>'+
+        '<div id="fRel_ssel"></div><input type="hidden" id="fRel" value=""></div>');
+      searchableSelect('fRel_ssel','fRel',{options:cfg.list().map(function(r){ return {value:r.nama,label:r.nama}; }),
+        placeholder:'Cari / semua '+cfg.filterLabel.toLowerCase()+'…'});
 
       var tbl;
       function refresh(){
@@ -3962,8 +3967,8 @@ function registerPages(){
         '<div class="field"><label>Status</label><select id="fStatus"><option value="">Semua Status</option>'+
           '<option value="BELUM_BAYAR">Belum Dibayar</option><option value="SEBAGIAN">Dibayar Sebagian</option>'+
           '<option value="LUNAS">Lunas</option></select></div>'+
-        '<div class="field"><label>Vendor</label><select id="fVendor"><option value="">Semua Vendor</option>'+
-          vendorList.map(function(v){ return '<option>'+esc(v)+'</option>'; }).join('')+'</select></div>'+
+        '<div class="field grow"><label>Vendor</label>'+
+          '<div id="fVendor_ssel"></div><input type="hidden" id="fVendor" value=""></div>'+
         '<div class="field grow"><label>Project</label>'+
           '<div id="fProject_ssel"></div><input type="hidden" id="fProject" value=""></div>'+
         '<button class="btn btn-steel" id="btnFilter">Terapkan Filter</button>'+
@@ -4179,6 +4184,8 @@ function registerPages(){
         placeholder:'Cari akun kas…'});
       bindCurrencyInput('f_bayarJumlah');
     }
+    searchableSelect('fVendor_ssel','fVendor',{options:vendorList.map(function(v){ return {value:v,label:v}; }),
+      placeholder:'Cari / semua vendor…'});
     searchableSelect('fProject_ssel','fProject',{options:projectList.map(function(p){ return {value:p,label:p}; }),
       placeholder:'Cari / semua project…'});
     refresh();
