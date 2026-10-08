@@ -2890,9 +2890,8 @@ function financePage(jenis, title, sub){
       '<div class="filterbar">'+
         '<div class="field"><label>Dari Tanggal</label><input type="date" id="fFrom"></div>'+
         '<div class="field"><label>Sampai Tanggal</label><input type="date" id="fTo"></div>'+
-        '<div class="field"><label>Akun '+(isBank?'Bank':'Kas')+'</label><select id="fAkun">'+
-          '<option value="">Semua</option>'+kasAkun.map(function(a){ return '<option>'+esc(a)+'</option>'; }).join('')+
-        '</select></div>'+
+        '<div class="field"><label>Akun '+(isBank?'Bank':'Kas')+'</label>'+
+          '<div id="fAkun_ssel"></div><input type="hidden" id="fAkun" value=""></div>'+
         '<div class="field grow"><label>Project</label>'+
           '<div id="fProject_ssel"></div><input type="hidden" id="fProject" value=""></div>'+
         '<button class="btn btn-steel" id="btnFilter">Terapkan Filter</button>'+
@@ -3038,6 +3037,7 @@ function financePage(jenis, title, sub){
       });
     }
 
+    searchableSelect('fAkun_ssel','fAkun',{options:kasAkunOpts,placeholder:'Cari / semua akun '+(isBank?'bank':'kas')+'…'});
     searchableSelect('fProject_ssel','fProject',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
       placeholder:'Cari / semua project…'});
     refresh();
@@ -4275,10 +4275,12 @@ function registerPages(){
       .slice().sort(function(a,b){ return compareKode(a.kode,b.kode); });
 
     reportShell(c,'Buku Besar','Rincian mutasi dan saldo berjalan per akun',
-      '<div class="field grow"><label>Pilih Akun</label><select id="fAkun">'+
-      akunList.map(function(a,i){ return '<option value="'+esc(a.kode)+'"'+(i===0?' selected':'')+'>'+esc(a.kode)+' - '+esc(a.nama)+'</option>'; }).join('')+'</select></div>'+
+      '<div class="field grow"><label>Pilih Akun</label>'+
+      '<div id="fAkun_ssel"></div><input type="hidden" id="fAkun" value="'+(akunList[0]?esc(akunList[0].kode):'')+'"></div>'+
       '<div class="field grow"><label>Project</label>'+
       '<div id="fProject_ssel"></div><input type="hidden" id="fProject" value=""></div>');
+    searchableSelect('fAkun_ssel','fAkun',{options:akunList.map(function(a){ return {value:a.kode,label:a.kode+' - '+a.nama}; }),
+      placeholder:'Cari kode / nama akun…'});
 
     var tbl;
     function refresh(){
