@@ -119,10 +119,28 @@ function read_json_body(?array $override = null): array {
 }
 
 /** Returns the logged-in user's session row, or null. Never trusts the
- *  client for identity — always re-derived from the server-side session. */
+ *  client for identity — always re-derived from the server-side session.
+ *
+ *  PHP's default file-based session handler holds an exclusive lock on
+ *  the session file for as long as the session stays open — normally
+ *  that means the whole rest of the request. Every endpoint here calls
+ *  this (via require_login()) before doing any real work, so without
+ *  closing the session back up immediately, concurrent requests from
+ *  the SAME browser (e.g. the sync-status poll firing right after a
+ *  save, or opening a form that loads several resources) queue up and
+ *  wait for each other's lock instead of running in parallel — the
+ *  "respon lambat sampai beberapa detik setelah simpan" symptom. Caching
+ *  the result per-request and releasing the lock (session_write_close())
+ *  right after the one real read fixes that: nothing after this point
+ *  writes to $_SESSION, so there's nothing lost by closing it early. */
 function current_user(): ?array {
+    static $cached = null, $checked = false;
+    if ($checked) return $cached;
+    $checked = true;
     start_session();
-    return $_SESSION['user'] ?? null;
+    $cached = $_SESSION['user'] ?? null;
+    session_write_close();
+    return $cached;
 }
 
 function require_login(): array {
