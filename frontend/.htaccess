@@ -10,6 +10,22 @@
   # Ignored by browsers over plain HTTP, so this is safe on local/XAMPP
   # testing too — only takes effect once served over real HTTPS.
   Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+  # Content-Security-Policy — defense in depth against XSS and related
+  # injection attacks (the kind that plants hidden judol/gambling spam
+  # pages on a compromised site). script-src/style-src need
+  # 'unsafe-inline' because this app's whole frontend is one static
+  # index.html with its logic written as inline <script>/<style> blocks
+  # (no build step, no nonces) — a real limitation, but everything else
+  # here still blocks real attack paths: no script/stylesheet/font/image
+  # may load from a domain that isn't this site or Google Fonts, no
+  # fetch()/XHR may call anywhere but this site's own API (adjust
+  # connect-src here if backend-config.js points API_BASE_URL at a
+  # different domain), no <object>/<embed> plugin content, no <base>
+  # tag hijack of relative URLs, no form can submit anywhere but this
+  # site, and the page can never be embedded in someone else's iframe
+  # (clickjacking).
+  Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 </IfModule>
 
 Options -Indexes

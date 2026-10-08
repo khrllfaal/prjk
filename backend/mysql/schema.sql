@@ -167,3 +167,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
 -- existed (MariaDB 10.0.2+ / MySQL 8.0.29+ — Hostinger's stack qualifies).
 ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45) NULL AFTER detail;
 ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS user_agent VARCHAR(255) NULL AFTER ip_address;
+
+-- ---------------------------------------------------------------------
+-- 2FA (TOTP, RFC 6238 — Google Authenticator/Authy compatible, no SMS/
+-- email sending required). totp_secret is only ever set once a user
+-- finishes setup by confirming one real code (see auth_totp_enable.php)
+-- -- totp_enabled stays 0 until then, so a half-finished setup can never
+-- lock someone out. Safe to re-run against an existing database.
+-- ---------------------------------------------------------------------
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(32) NULL AFTER password_hash;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER totp_secret;

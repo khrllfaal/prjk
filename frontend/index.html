@@ -219,6 +219,17 @@ table.dtab tbody td.wrap{min-width:140px;}
 table.dtab tbody td.nowrap{white-space:nowrap;}
 table.dtab tbody tr:hover{background:#F6F9FD;}
 table.dtab tbody tr:last-child td{border-bottom:none;}
+/* Frozen leading column(s) for a wide table (Trial Balance's 14 columns
+   being the main case) — stay put while the rest scrolls horizontally,
+   so the account's identity is never scrolled out of view. Needs an
+   opaque background per state (plain/hover/group-header/total) since a
+   sticky cell sits visually above whatever scrolls underneath it. */
+td.tb-sticky,th.tb-sticky{position:sticky; z-index:2; background:var(--card);}
+th.tb-sticky{z-index:3; background:var(--navy);}
+tr.row-group td.tb-sticky{background:var(--panel-alt);}
+tr:hover td.tb-sticky{background:#F6F9FD;}
+.tb-sticky-1{left:0; min-width:64px;}
+.tb-sticky-2{left:64px; min-width:200px;}
 table.dtab tbody td .no{color:var(--text-faint); font-family:var(--font-mono); font-size:11px;}
 table.dtab tbody td .btn-row{flex-wrap:nowrap;}
 table.dtab tfoot td{padding:10px 12px; font-weight:700; background:var(--paper); border-top:2px solid var(--line); font-size:12.3px;}
@@ -4441,7 +4452,7 @@ function registerPages(){
         return '<button type="button" class="linklike" data-tb-idx="'+rowIdx+'" data-tb-list="'+list+'">'+num0(v)+'</button>';
       }
       var html='<div class="panel"><div class="table-scroll"><table class="dtab" style="font-size:11.5px;"><thead>'+
-        '<tr><th rowspan="2" class="nosort">Kode Akun</th><th rowspan="2" class="nosort">Nama Akun</th>'+
+        '<tr><th rowspan="2" class="nosort tb-sticky tb-sticky-1">Kode Akun</th><th rowspan="2" class="nosort tb-sticky tb-sticky-2">Nama Akun</th>'+
         ['Saldo Awal','Mutasi','Jurnal Penyesuaian','Saldo Setelah Adj','Laba Rugi','Neraca'].map(function(h){
           return '<th colspan="2" class="nosort" style="text-align:center;">'+h+'</th>';
         }).join('')+'</tr>'+
@@ -4449,12 +4460,12 @@ function registerPages(){
         '</thead><tbody>';
       rows.forEach(function(r){
         if(r.header){
-          html+='<tr class="row-group"><td colspan="14" style="padding-left:'+((r.kode.split('.').length-1)*16)+'px;">'+
+          html+='<tr class="row-group"><td colspan="14" class="tb-sticky tb-sticky-1" style="padding-left:'+((r.kode.split('.').length-1)*16)+'px;min-width:0;">'+
             esc(r.kode)+' '+esc(r.nama)+'</td></tr>';
           return;
         }
         var idx=lastRows.indexOf(r);
-        html+='<tr><td class="mono">'+esc(r.kode)+'</td><td class="wrap" style="padding-left:24px;">'+esc(r.nama)+'</td>'+
+        html+='<tr><td class="mono tb-sticky tb-sticky-1">'+esc(r.kode)+'</td><td class="wrap tb-sticky tb-sticky-2">'+esc(r.nama)+'</td>'+
           '<td class="num">'+clickCell(r.preDb,idx,'pre')+'</td><td class="num">'+clickCell(r.preCr,idx,'pre')+'</td>'+
           '<td class="num">'+clickCell(r.mutDb,idx,'mut')+'</td><td class="num">'+clickCell(r.mutCr,idx,'mut')+'</td>'+
           '<td class="num">'+clickCell(r.adjDb,idx,'adj')+'</td><td class="num">'+clickCell(r.adjCr,idx,'adj')+'</td>'+
@@ -4474,7 +4485,7 @@ function registerPages(){
       var lrGap=totals.lrCr-totals.lrDb, nrGap=totals.nrDb-totals.nrCr;
       var lrSelDb=lrGap>0?0:-lrGap, lrSelCr=lrGap>0?lrGap:0;
       var nrSelDb=nrGap>0?nrGap:0, nrSelCr=nrGap>0?0:-nrGap;
-      html+='<tr style="font-weight:700;background:var(--panel-alt);"><td colspan="2">TOTAL</td>'+
+      html+='<tr style="font-weight:700;background:var(--panel-alt);"><td colspan="2" class="tb-sticky tb-sticky-1" style="background:var(--panel-alt);min-width:0;">TOTAL</td>'+
         ['preDb','preCr','mutDb','mutCr','adjDb','adjCr','afterDb','afterCr','lrDb','lrCr','nrDb','nrCr']
           .map(function(k){ return '<td class="num">'+num0(totals[k])+'</td>'; }).join('')+
         '</tr>'+

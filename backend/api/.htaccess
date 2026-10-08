@@ -15,6 +15,9 @@ Options -Indexes
 <IfModule mod_headers.c>
     Header set X-Content-Type-Options "nosniff"
     Header set X-Frame-Options "DENY"
+    # JSON-only responses, so the strictest possible CSP: nothing here
+    # should ever execute as a script or render as a page.
+    Header set Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
     # Browsers ignore this header entirely when a response arrives over
     # plain HTTP (per the HSTS spec), so it's safe to send unconditionally
     # here even during local XAMPP/http testing — it only takes effect
