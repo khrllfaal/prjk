@@ -2851,6 +2851,23 @@ function masterPage(cfg){
   };
 }
 
+// Sorts COA kode segment-by-segment as numbers ("1.1.2" before "1.1.10"),
+// not as plain strings. Top-level (not nested in registerPages() below)
+// because financePage() -- defined right after this, also top-level --
+// needs it too; a function declared inside registerPages()'s own scope
+// is invisible to a sibling top-level function, even though both run
+// long after registerPages() itself has been called once at boot.
+function compareKode(ka,kb){
+  if(!ka && !kb) return 0;
+  if(!ka) return 1;
+  if(!kb) return -1;
+  var pa=ka.split('.').map(Number), pb=kb.split('.').map(Number);
+  for(var i=0;i<Math.max(pa.length,pb.length);i++){
+    var x=pa[i]||0, y=pb[i]||0;
+    if(x!==y) return x-y;
+  }
+  return 0;
+}
 /* ------------------------------------------------------------
    FINANCE TRANSACTION PAGE (kas/bank masuk/keluar)
    ------------------------------------------------------------ */
@@ -4628,17 +4645,6 @@ function registerPages(){
   };
 
   /* ---------------- grouped statement helper ---------------- */
-  function compareKode(ka,kb){
-    if(!ka && !kb) return 0;
-    if(!ka) return 1;
-    if(!kb) return -1;
-    var pa=ka.split('.').map(Number), pb=kb.split('.').map(Number);
-    for(var i=0;i<Math.max(pa.length,pb.length);i++){
-      var x=pa[i]||0, y=pb[i]||0;
-      if(x!==y) return x-y;
-    }
-    return 0;
-  }
   /* A proper statement (Neraca/Laba Rugi) lists every account in the
      group, not just the ones with activity this period — a zero-balance
      line is still meaningful (it says "nothing moved here"), and
