@@ -2559,6 +2559,29 @@ function inRange(tgl, from, to){
   if(to && tgl>to) return false;
   return true;
 }
+/* Shared by Trial Balance and Neraca so "Laba Tahun Berjalan" can never
+   disagree between the two -- sums every Laba Rugi account's (heads
+   4-8) real postings up to and including `asOf`, straight off
+   allEntries() with NO isBiayaAkun() exclusion. That exclusion exists
+   for Laporan Laba Rugi's own display (sistem asli keeps the full
+   gross cost on a Biaya line even after a Kas/Bank Masuk refund against
+   it, so groupByHead() drops those refunds there -- see isBiayaAkun()
+   above), but Trial Balance's own Mutasi columns have always included
+   them (its own comment: excluding them "would only make the Mutasi
+   columns miss real activity"). Owner's call: Neraca now reads this
+   traceable, refund-inclusive total -- the same one Trial Balance's own
+   Laba Rugi/Neraca columns already show -- instead of independently
+   recomputing via groupByHead(), which is exactly why the two could
+   disagree before. */
+function labaTahunBerjalanAt(asOf){
+  var net=0;
+  allEntries().forEach(function(e){
+    if(asOf && e.tgl>asOf) return;
+    if(!/^[45678]$/.test(akunHead(e.akun))) return;
+    net+=e.kredit-e.debet;
+  });
+  return net;
+}
 /* Coded jurnal entries ("6.2.99-Biaya lain-lain", from manual entry via
    the app's own form) carry their kode as a literal prefix — extract it
    directly. Bulk report imports post plain names with no prefix at all
@@ -4973,21 +4996,17 @@ function registerPages(){
 
       var totalAktiva=aktiva.reduce(function(a,r){ return a+(r.debet-r.kredit); },0);
       var totalHutang=kewajiban.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
-      // "Laba Tahun Berjalan" (current, not-yet-closed period earnings) is
-      // summed directly from every Pendapatan/Beban account (heads 4-8),
-      // cumulative up to the same cutoff date as the rest of this report —
-      // the exact same total Laporan Laba Rugi shows as LABA BERSIH for
-      // "Semua Bulan" of the current year. Owner's explicit call: Laba
-      // Rugi's number is authoritative, Neraca must match it. Previously
-      // this was a balancing plug (Aktiva minus Hutang minus Ekuitas
-      // lainnya) instead, which forced NERACA BALANCE to zero but could
-      // silently disagree with Laba Rugi — a handful of kas_masuk refunds
-      // against a Biaya account (see isBiayaAkun() in groupByHead()) post
-      // their Kas leg normally but never reduce that Biaya in Laba Rugi
-      // (matching sistem asli's own treatment), so NERACA BALANCE below
-      // may now show that same small gap instead of a plug hiding it.
-      var pl=groupByHead(null,to,['4','5','6','7','8']);
-      var labaTahunBerjalan=pl.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
+      // "Laba Tahun Berjalan" (current, not-yet-closed period earnings)
+      // now reads labaTahunBerjalanAt() — the same refund-inclusive,
+      // traceable total Trial Balance's own Laba Rugi/Neraca columns
+      // already show for this cutoff date — instead of independently
+      // recomputing it via groupByHead(), which drops a handful of
+      // Kas/Bank Masuk refunds against a Biaya account (isBiayaAkun())
+      // that Trial Balance's own Mutasi always counts. That mismatch is
+      // exactly why this figure could disagree with Trial Balance
+      // before; reading the same source as Trial Balance is what
+      // guarantees it can't.
+      var labaTahunBerjalan=labaTahunBerjalanAt(to);
       var isLabaTahunBerjalan=function(r){ return akunNamaOnly(r.akun)==='Laba Tahun Berjalan'; };
       var totalEkuitasLain=ekuitas.reduce(function(a,r){
         return isLabaTahunBerjalan(r)?a:a+(r.kredit-r.debet);
@@ -5031,10 +5050,21 @@ function registerPages(){
         b.onclick=function(){
           var info=rowClickInfo[Number(b.getAttribute('data-neraca-idx'))];
           if(info.isLaba){
-            var isPend=function(r){ return r.kode.split('.')[0]==='4' || r.kode.indexOf('7.1')===0; };
-            var totPend=pl.filter(isPend).reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
-            var totBeban=pl.filter(function(r){ return !isPend(r); }).reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
-            showTxnDrilldown(info.r.akun, 'Sama seperti LABA BERSIH di Laporan Laba Rugi untuk "Semua Bulan" tahun ini (Total Pendapatan dikurangi Total Beban, kumulatif sampai tanggal di atas)', [
+            // Same allEntries() pass labaTahunBerjalanAt() itself sums,
+            // split Pendapatan/Beban -- so these two always add up to
+            // exactly the figure shown above, never a different number
+            // than what's displayed (unlike groupByHead(), which would
+            // drop a handful of Kas/Bank Masuk refunds against a Biaya
+            // account here and quietly stop matching).
+            var totPend=0, totBeban=0;
+            allEntries().forEach(function(e){
+              if(to && e.tgl>to) return;
+              var head=akunHead(e.akun);
+              if(!/^[45678]$/.test(head)) return;
+              var isPend=head==='4' || akunKode(e.akun).indexOf('7.1')===0;
+              if(isPend) totPend+=e.kredit-e.debet; else totBeban+=e.kredit-e.debet;
+            });
+            showTxnDrilldown(info.r.akun, 'Sama seperti Trial Balance — Total Pendapatan dikurangi Total Beban, kumulatif sampai tanggal di atas', [
               {tgl:to, ref:'', ket:'Total Pendapatan', amount:totPend},
               {tgl:to, ref:'', ket:'Total Beban', amount:totBeban}
             ]);
