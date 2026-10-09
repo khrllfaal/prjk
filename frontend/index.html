@@ -192,6 +192,13 @@ button,input,select,textarea{font-family:inherit;}
 .btn-ghost:hover{border-color:var(--steel); color:var(--text);}
 .btn-sm{padding:5px 10px; font-size:11.5px; border-radius:6px;}
 .btn-row{display:flex; gap:8px; flex-wrap:wrap;}
+/* Compact icon-only variant for the repeated Edit/Hapus pair in a table
+   row — the "Aksi" column was the widest column in several lists
+   (two text buttons side by side) and forced horizontal scrolling just
+   to reach it. Square icon buttons with a title tooltip keep the same
+   click targets and colors but take roughly a third of the width. */
+.btn-icon{gap:0; padding:5px 7px; min-width:26px; justify-content:center;}
+.btn-row.btn-row-tight{gap:5px;}
 /* Row actions (Edit/Hapus repeated down every row of a list) read as
    noise when they're solid-filled like a real call-to-action — a table
    of 50 rows shouldn't have 100 loud orange/red blocks competing with
@@ -325,6 +332,10 @@ th.col-sticky-2{box-shadow:3px 0 6px -3px rgba(15,23,42,.35);}
 .pager button.on{background:var(--navy); border-color:var(--navy); color:#fff;}
 .pager button:disabled{opacity:.4; cursor:not-allowed;}
 .pager .pinfo{font-size:11.5px; color:var(--text-faint); margin-right:auto; font-family:var(--font-mono);}
+.pager-size{display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--text-mute);}
+.pager-size select{border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:6px;
+  padding:3px 6px; font-size:11.5px; font-family:inherit; cursor:pointer;}
+.pager-size select:hover{border-color:var(--steel);}
 
 /* ============ CHIPS / STATUS ============ */
 .chip{display:inline-flex; align-items:center; gap:5px; padding:3.5px 9px; border-radius:100px; font-size:11px; font-weight:600; border:1px solid; white-space:nowrap;}
@@ -850,47 +861,58 @@ var EXCLUDED_JURNAL_REFS={};
 function postedJurnal(){
   return DB.jurnal.filter(function(j){ return j.status!=='draft' && !EXCLUDED_JURNAL_REFS[j.ref]; });
 }
+// Sums one project's Bahan/Upah/Akomodasi/Cost Center/Adm Fee from
+// DB.txns + postedJurnal() over an optional [from,to] window (either
+// bound omit-able for an open-ended/all-time sum). Shared by
+// computeProjectProgressRows() below for both the period-filtered
+// figures shown in the table and the cumulative-since-start figures
+// Status RAP is judged against (see the statusRap comment there).
+function sumProjectCosts(ledger, from, to){
+  var bahan=0, upah=0, akomodasi=0, admFee=0, costCenter=0;
+  DB.txns.forEach(function(t){
+    if(t.project!==ledger || !/keluar$/.test(t.jenis)) return;
+    if(from && t.tgl<from) return;
+    if(to && t.tgl>to) return;
+    // Only Kas/Bank Keluar postings count toward Biaya Bahan/Upah/
+    // Akomodasi/Adm Fee here -- a Kas/Bank Masuk refund against one of
+    // these never nets against it on a project's own cost breakdown
+    // (unrelated to the Laba Rugi/Trial Balance refund-inclusion
+    // question groupByHead() now applies uniformly).
+    if(matchesPlainCost(t.akunLawan,'bahan')) bahan+=t.kredit;
+    else if(matchesPlainCost(t.akunLawan,'upah')) upah+=t.kredit;
+    else if(matchesPlainCost(t.akunLawan,'akomodasi')) akomodasi+=t.kredit;
+    else if(matchesPlainCost(t.akunLawan,'admFee')) admFee+=t.kredit;
+    // Cost Center is a residual "other project cost" bucket — an
+    // internal Kas<->Bank transfer ("Ayat Silang...") or a
+    // Hutang/Piutang/Prive/fixed-asset posting isn't a cost either way;
+    // isCostAkun() already excludes all of those by COA head (only
+    // heads 5-8 pass), same as Laba Rugi — so whatever's left here is a
+    // real P&L expense regardless of whether it was paid via Kas or
+    // Bank Keluar. Previously restricted to kas_keluar only, which
+    // silently dropped real bank-paid project costs (confirmed: Rp2.5
+    // miliar of Biaya Bunga & Administrasi Bank and similar accounts
+    // paid via Bank Keluar were missing from Total Pengeluaran here
+    // while Laba Rugi's Total Beban correctly included them).
+    else if(isCostAkun(t.akunLawan)) costCenter+=t.kredit;
+  });
+  postedJurnal().forEach(function(j){
+    if(j.project!==ledger) return;
+    if(from && j.tgl<from) return;
+    if(to && j.tgl>to) return;
+    // Same net-against-refund treatment as above, for a jurnal_umum
+    // credit-note-style entry against a cost account.
+    if(matchesRapCost(j.akun,'bahan')) bahan+=(j.debet-j.kredit);
+    else if(matchesRapCost(j.akun,'upah')) upah+=(j.debet-j.kredit);
+    else if(matchesRapCost(j.akun,'akomodasi')) akomodasi+=(j.debet-j.kredit);
+    else if(isCostAkun(j.akun)) costCenter+=j.debet;
+  });
+  return {bahan:bahan, upah:upah, akomodasi:akomodasi, admFee:admFee, costCenter:costCenter};
+}
 function computeProjectProgressRows(from, to){
   return DB.projects.map(function(p, i){
     var ledger=p.ledgerName||p.nama;
-    var bahan=0, upah=0, akomodasi=0, admFee=0, costCenter=0;
-    DB.txns.forEach(function(t){
-      if(t.project!==ledger || !/keluar$/.test(t.jenis)) return;
-      if(from && t.tgl<from) return;
-      if(to && t.tgl>to) return;
-      // Only Kas/Bank Keluar postings count toward Biaya Bahan/Upah/
-      // Akomodasi/Adm Fee here -- a Kas/Bank Masuk refund against one of
-      // these never nets against it on a project's own cost breakdown
-      // (unrelated to the Laba Rugi/Trial Balance refund-inclusion
-      // question groupByHead() now applies uniformly).
-      if(matchesPlainCost(t.akunLawan,'bahan')) bahan+=t.kredit;
-      else if(matchesPlainCost(t.akunLawan,'upah')) upah+=t.kredit;
-      else if(matchesPlainCost(t.akunLawan,'akomodasi')) akomodasi+=t.kredit;
-      else if(matchesPlainCost(t.akunLawan,'admFee')) admFee+=t.kredit;
-      // Cost Center is a residual "other project cost" bucket — an
-      // internal Kas<->Bank transfer ("Ayat Silang...") or a
-      // Hutang/Piutang/Prive/fixed-asset posting isn't a cost either way;
-      // isCostAkun() already excludes all of those by COA head (only
-      // heads 5-8 pass), same as Laba Rugi — so whatever's left here is a
-      // real P&L expense regardless of whether it was paid via Kas or
-      // Bank Keluar. Previously restricted to kas_keluar only, which
-      // silently dropped real bank-paid project costs (confirmed: Rp2.5
-      // miliar of Biaya Bunga & Administrasi Bank and similar accounts
-      // paid via Bank Keluar were missing from Total Pengeluaran here
-      // while Laba Rugi's Total Beban correctly included them).
-      else if(isCostAkun(t.akunLawan)) costCenter+=t.kredit;
-    });
-    postedJurnal().forEach(function(j){
-      if(j.project!==ledger) return;
-      if(from && j.tgl<from) return;
-      if(to && j.tgl>to) return;
-      // Same net-against-refund treatment as above, for a jurnal_umum
-      // credit-note-style entry against a cost account.
-      if(matchesRapCost(j.akun,'bahan')) bahan+=(j.debet-j.kredit);
-      else if(matchesRapCost(j.akun,'upah')) upah+=(j.debet-j.kredit);
-      else if(matchesRapCost(j.akun,'akomodasi')) akomodasi+=(j.debet-j.kredit);
-      else if(isCostAkun(j.akun)) costCenter+=j.debet;
-    });
+    var c=sumProjectCosts(ledger, from, to);
+    var bahan=c.bahan, upah=c.upah, akomodasi=c.akomodasi, admFee=c.admFee, costCenter=c.costCenter;
     var totalRap=bahan+upah+akomodasi;
     // Nilai RAP is always 65% of Nilai Kontrak — computed directly here
     // rather than read from a separately-maintained project.rap field,
@@ -899,7 +921,24 @@ function computeProjectProgressRows(from, to){
     var rapValue=(p.kontrak||0)*0.65;
     var sisaRap=rapValue-totalRap;
     var ratio=rapValue?totalRap/rapValue:null;
-    var statusRap=ratio===null?'':(ratio>1?'MELEBIHI':(ratio>0.9?'HAMPIR':'AMAN'));
+    // Status RAP judges whether a project is nearing/over its RAP
+    // budget, a cumulative-since-groundbreaking question — it must NOT
+    // be computed off the period-filtered totalRap above. Nilai Kontrak
+    // and Nilai RAP are already always the project's full lifetime
+    // figures (never windowed), so comparing them against a single
+    // month's spending made Status RAP read "AMAN" for nearly every
+    // project the moment any Dari/Sampai Tanggal filter narrower than
+    // "sejak awal" was applied — the filtered month's cost is always
+    // small next to the whole-project RAP budget, regardless of how
+    // close to (or over) budget the project really is to date. Always
+    // sum from the project's true start (no lower bound) through the
+    // filter's upper bound (or today, unfiltered) for this judgment,
+    // so Status RAP reflects real cumulative progress even while the
+    // table itself is filtered to show just one period's cost detail.
+    var cCum=from?sumProjectCosts(ledger, null, to):c;
+    var totalRapCum=cCum.bahan+cCum.upah+cCum.akomodasi;
+    var ratioCum=rapValue?totalRapCum/rapValue:null;
+    var statusRap=ratioCum===null?'':(ratioCum>1?'MELEBIHI':(ratioCum>0.9?'HAMPIR':'AMAN'));
     var totalPengeluaran=totalRap+costCenter+admFee;
     var hasilUsaha=(p.kontrak||0)-totalPengeluaran;
     return {
@@ -2399,18 +2438,28 @@ function DataTable(mountId, columns, rows, opts){
     }
 
     var pager='';
-    if(!opts.noPaging && total>state.perPage){
-      var btns='';
-      var from=Math.max(1,state.page-2), to=Math.min(pages,from+4);
-      from=Math.max(1,to-4);
-      if(from>1) btns+='<button data-pg="1">1</button>'+(from>2?'<span style="color:var(--text-faint)">…</span>':'');
-      for(var p=from;p<=to;p++) btns+='<button data-pg="'+p+'" class="'+(p===state.page?'on':'')+'">'+p+'</button>';
-      if(to<pages) btns+=(to<pages-1?'<span style="color:var(--text-faint)">…</span>':'')+'<button data-pg="'+pages+'">'+pages+'</button>';
-      pager='<div class="pager"><span class="pinfo">'+
+    if(!opts.noPaging && total>0){
+      var sizeOpts=[15,30,50,100];
+      if(sizeOpts.indexOf(state.perPage)===-1) sizeOpts.push(state.perPage);
+      var sizeSel='<label class="pager-size">Tampilkan <select data-pgsize>'+
+        sizeOpts.sort(function(a,b){return a-b;}).map(function(n){
+          return '<option value="'+n+'"'+(n===state.perPage?' selected':'')+'>'+n+'</option>';
+        }).join('')+'</select> data</label>';
+      var navBtns='';
+      if(total>state.perPage){
+        var btns='';
+        var from=Math.max(1,state.page-2), to=Math.min(pages,from+4);
+        from=Math.max(1,to-4);
+        if(from>1) btns+='<button data-pg="1">1</button>'+(from>2?'<span style="color:var(--text-faint)">…</span>':'');
+        for(var p=from;p<=to;p++) btns+='<button data-pg="'+p+'" class="'+(p===state.page?'on':'')+'">'+p+'</button>';
+        if(to<pages) btns+=(to<pages-1?'<span style="color:var(--text-faint)">…</span>':'')+'<button data-pg="'+pages+'">'+pages+'</button>';
+        navBtns='<button data-pg="'+(state.page-1)+'" '+(state.page===1?'disabled':'')+'>&lsaquo;</button>'+
+          btns+
+          '<button data-pg="'+(state.page+1)+'" '+(state.page===pages?'disabled':'')+'>&rsaquo;</button>';
+      }
+      pager='<div class="pager">'+sizeSel+'<span class="pinfo">'+
         ((state.page-1)*state.perPage+1)+'–'+Math.min(state.page*state.perPage,total)+' dari '+total+'</span>'+
-        '<button data-pg="'+(state.page-1)+'" '+(state.page===1?'disabled':'')+'>&lsaquo;</button>'+
-        btns+
-        '<button data-pg="'+(state.page+1)+'" '+(state.page===pages?'disabled':'')+'>&rsaquo;</button></div>';
+        navBtns+'</div>';
     }
 
     mount.innerHTML='<div class="table-scroll"><table class="dtab">'+head+body+foot+'</table></div>'+pager;
@@ -2426,6 +2475,12 @@ function DataTable(mountId, columns, rows, opts){
     mount.querySelectorAll('.pager button[data-pg]').forEach(function(b){
       b.onclick=function(){ state.page=parseInt(b.getAttribute('data-pg')); render(); };
     });
+    var pgSizeSel=mount.querySelector('.pager select[data-pgsize]');
+    if(pgSizeSel) pgSizeSel.onchange=function(){
+      state.perPage=parseInt(pgSizeSel.value)||state.perPage;
+      state.page=1;
+      render();
+    };
     if(opts.countId){
       var ce=document.getElementById(opts.countId);
       if(ce) ce.textContent=total+' dari '+rows.length+' data';
@@ -2766,9 +2821,9 @@ function masterPage(cfg){
     var cols=[{key:'_no', label:'No', sort:false, render:function(r,i){ return '<span class="no">'+(i+1)+'</span>'; }}]
       .concat(cfg.columns)
       .concat([{key:'_act', label:'Aksi', sort:false, render:function(r){
-        return '<div class="btn-row">'+
-          '<button class="btn btn-warn btn-sm" data-edit="'+r.id+'">Edit</button>'+
-          '<button class="btn btn-danger btn-sm" data-del="'+r.id+'">Hapus</button></div>';
+        return '<div class="btn-row btn-row-tight">'+
+          '<button class="btn btn-warn btn-sm btn-icon" title="Edit" aria-label="Edit" data-edit="'+r.id+'">✎</button>'+
+          '<button class="btn btn-danger btn-sm btn-icon" title="Hapus" aria-label="Hapus" data-del="'+r.id+'">🗑</button></div>';
       }}]);
 
     var tbl;
@@ -2939,8 +2994,8 @@ function financePage(jenis, title, sub){
        foot:function(list){ return '<b>'+num0(list.reduce(function(a,b){ return a+(isIn?b.debet:(NON_CASH_KAS_KELUAR_REFS[b.ref]?0:b.kredit)); },0))+'</b>'; }},
       {key:'ket', label:'Description', cls:'wrap', render:function(r){ return esc(r.ket||'–'); }},
       {key:'_act', label:'Action', sort:false, render:function(r){
-        return '<div class="btn-row"><button class="btn btn-warn btn-sm" data-edit="'+r.id+'">Edit</button>'+
-          '<button class="btn btn-danger btn-sm" data-del="'+r.id+'">Hapus</button></div>';
+        return '<div class="btn-row btn-row-tight"><button class="btn btn-warn btn-sm btn-icon" title="Edit" aria-label="Edit" data-edit="'+r.id+'">✎</button>'+
+          '<button class="btn btn-danger btn-sm btn-icon" title="Hapus" aria-label="Hapus" data-del="'+r.id+'">🗑</button></div>';
       }}
     ];
 
@@ -3554,8 +3609,8 @@ function registerPages(){
           '<span class="kode">'+esc(a.kode)+'</span>'+
           '<span class="nm">'+esc(a.nama)+' <span class="tipe">('+esc(a.tipe)+')</span></span>'+
           (a.saldoAwal?'<span class="mono" style="font-size:12px;margin-right:10px;">'+num0(a.saldoAwal)+'</span>':'')+
-          '<span class="acts"><button class="btn btn-warn btn-sm" data-edit="'+a.id+'">Edit</button>'+
-          '<button class="btn btn-danger btn-sm" data-del="'+a.id+'">Hapus</button></span></div>';
+          '<span class="acts"><button class="btn btn-warn btn-sm btn-icon" title="Edit" aria-label="Edit" data-edit="'+a.id+'">✎</button>'+
+          '<button class="btn btn-danger btn-sm btn-icon" title="Hapus" aria-label="Hapus" data-del="'+a.id+'">🗑</button></span></div>';
       }).join('');
       document.getElementById('coaList').innerHTML=html;
 
@@ -3697,8 +3752,8 @@ function registerPages(){
         {key:'kredit',label:'Total Kredit',num:true,render:function(r){ return num0(r.kredit); },
          foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+b.kredit;},0))+'</b>'; }},
         {key:'_act',label:'Aksi',sort:false,render:function(r){
-          return '<div class="btn-row"><button class="btn btn-warn btn-sm" data-edit="'+esc(r.ref)+'">Edit</button>'+
-            '<button class="btn btn-danger btn-sm" data-del="'+esc(r.ref)+'">Hapus</button></div>';
+          return '<div class="btn-row btn-row-tight"><button class="btn btn-warn btn-sm btn-icon" title="Edit" aria-label="Edit" data-edit="'+esc(r.ref)+'">✎</button>'+
+            '<button class="btn btn-danger btn-sm btn-icon" title="Hapus" aria-label="Hapus" data-del="'+esc(r.ref)+'">🗑</button></div>';
         }}
       ], rows, {defaultSort:'tgl',defaultDir:'desc',perPage:15,showFoot:true,countId:'cnt',
         searchFn:function(r){ return [r.ket,r.project,r.relasi,r.noFaktur,r.ref].concat(r.lines.map(function(l){ return l.akun; })).join(' '); },
