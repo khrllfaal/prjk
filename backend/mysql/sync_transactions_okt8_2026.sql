@@ -82,6 +82,15 @@ INSERT IGNORE INTO `transactions` (`id`, `jenis`, `tgl`, `ref`, `akun_kas`, `aku
 ('tbi26100006bg', 'bank_masuk', '2026-10-08', 'BI-2610-0006', 'Bank BNI PT', 'Pendapatan Jasa Giro', 'Cost Center - Pendanaan Uang', '', NULL, NULL, 'bunga giro', 877988.0, 0.0, NULL, NOW(), NOW()),
 ('tbo26100011bg', 'bank_keluar', '2026-10-08', 'BO-2610-0011', 'Bank BNI PT', 'Biaya Bunga & Administrasi Bank', 'Cost Center - Pendanaan Uang', '', NULL, NULL, 'biaya adm bank', 0.0, 195598.0, NULL, NOW(), NOW());
 
+-- Kalau Bapak SUDAH pernah menjalankan versi file ini sebelumnya (saat
+-- CO-2610-0389/0390/0396/0404 masih relasi kosong), INSERT IGNORE di
+-- atas tidak akan memperbaikinya -- baris itu sudah ada (dilewati), jadi
+-- perlu di-UPDATE langsung. Aman dijalankan kapan pun, termasuk kalau
+-- baris ini baru saja di-INSERT dengan relasi yang sudah benar di atas
+-- (UPDATE-nya jadi tidak mengubah apa-apa, bukan error).
+UPDATE `transactions` SET `relasi`='Pr-K' WHERE `ref` IN ('CO-2610-0389','CO-2610-0390') AND `tgl`='2026-10-08';
+UPDATE `transactions` SET `relasi`='V-HU-Berkat' WHERE `ref` IN ('CO-2610-0396','CO-2610-0404') AND `tgl`='2026-10-08';
+
 -- Cek hasilnya:
 SELECT COUNT(*) AS total_setelah_insert FROM `transactions`;
 -- Harus 5305 + 43 + 2 = 5350
