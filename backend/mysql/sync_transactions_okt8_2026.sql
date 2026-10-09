@@ -58,6 +58,14 @@ INSERT INTO `transactions` (`id`, `jenis`, `tgl`, `ref`, `akun_kas`, `akun_lawan
 ('t9f41ff0c6610', 'kas_keluar', '2026-10-08', 'CO-2610-0422', 'Kas Besar', 'Hutang Bank Jk.Pendek PT', 'Cost Center - Pendanaan Uang', '', NULL, NULL, 'Bayar kelayakan SBSN', 0.0, 1095304433.0, NULL, NOW(), NOW()),
 ('t50737856d9f6', 'kas_keluar', '2026-10-08', 'CO-2610-0423', 'Kas Besar', 'Atensi', 'ZIDAM', '', NULL, NULL, 'bayaran pesantren parigi', 0.0, 2320000.0, NULL, NOW(), NOW());
 
+-- 1 transaksi Bank In tambahan (8 Oktober) yang belum sempat masuk ke
+-- file Report bank_in_33.xls saat diexport, ketahuan dari perbandingan
+-- Dashboard Cash Flow sistem asli (Kas Masuk lebih tinggi Rp877.988
+-- dari hasil sync 43 baris di atas) -- Bapak kirim datanya langsung
+-- dari layar Data Bank In sistem asli.
+INSERT INTO `transactions` (`id`, `jenis`, `tgl`, `ref`, `akun_kas`, `akun_lawan`, `project`, `relasi`, `customer_id`, `vendor_id`, `ket`, `debet`, `kredit`, `created_by`, `created_at`, `updated_at`) VALUES
+('tbi26100006bg', 'bank_masuk', '2026-10-08', 'BI-2610-0006', 'Bank BNI PT', 'Pendapatan Jasa Giro', 'Cost Center - Pendanaan Uang', '', NULL, NULL, 'bunga giro', 877988.0, 0.0, NULL, NOW(), NOW());
+
 -- Cek hasilnya:
 SELECT COUNT(*) AS total_setelah_insert FROM `transactions`;
--- Harus 5305 + 43 = 5348
+-- Harus 5305 + 43 + 1 = 5349
