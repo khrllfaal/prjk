@@ -192,13 +192,14 @@ button,input,select,textarea{font-family:inherit;}
 .btn-ghost:hover{border-color:var(--steel); color:var(--text);}
 .btn-sm{padding:5px 10px; font-size:11.5px; border-radius:6px;}
 .btn-row{display:flex; gap:8px; flex-wrap:wrap;}
-/* Compact icon-only variant for the repeated Edit/Hapus pair in a table
-   row — the "Aksi" column was the widest column in several lists
-   (two text buttons side by side) and forced horizontal scrolling just
-   to reach it. Square icon buttons with a title tooltip keep the same
-   click targets and colors but take roughly a third of the width. */
-.btn-icon{gap:0; padding:5px 7px; min-width:26px; justify-content:center;}
-.btn-row.btn-row-tight{gap:5px;}
+/* Extra-compact text variant for the repeated Edit/Hapus pair in a
+   table row — the "Aksi" column was the widest column in several
+   lists (two btn-sm buttons side by side) and forced horizontal
+   scrolling just to reach it. Keeps the "Edit"/"Hapus" labels but
+   trims padding/font/gap further than .btn-sm so the pair fits in
+   roughly two-thirds the space. */
+.btn-xs{padding:4px 8px; font-size:10.5px; border-radius:5px;}
+.btn-row.btn-row-tight{gap:4px; flex-wrap:nowrap;}
 /* Row actions (Edit/Hapus repeated down every row of a list) read as
    noise when they're solid-filled like a real call-to-action — a table
    of 50 rows shouldn't have 100 loud orange/red blocks competing with
@@ -2822,8 +2823,8 @@ function masterPage(cfg){
       .concat(cfg.columns)
       .concat([{key:'_act', label:'Aksi', sort:false, render:function(r){
         return '<div class="btn-row btn-row-tight">'+
-          '<button class="btn btn-warn btn-sm btn-icon" title="Edit" aria-label="Edit" data-edit="'+r.id+'">✎</button>'+
-          '<button class="btn btn-danger btn-sm btn-icon" title="Hapus" aria-label="Hapus" data-del="'+r.id+'">🗑</button></div>';
+          '<button class="btn btn-warn btn-xs" data-edit="'+r.id+'">Edit</button>'+
+          '<button class="btn btn-danger btn-xs" data-del="'+r.id+'">Hapus</button></div>';
       }}]);
 
     var tbl;
@@ -2994,8 +2995,8 @@ function financePage(jenis, title, sub){
        foot:function(list){ return '<b>'+num0(list.reduce(function(a,b){ return a+(isIn?b.debet:(NON_CASH_KAS_KELUAR_REFS[b.ref]?0:b.kredit)); },0))+'</b>'; }},
       {key:'ket', label:'Description', cls:'wrap', render:function(r){ return esc(r.ket||'–'); }},
       {key:'_act', label:'Action', sort:false, render:function(r){
-        return '<div class="btn-row btn-row-tight"><button class="btn btn-warn btn-sm btn-icon" title="Edit" aria-label="Edit" data-edit="'+r.id+'">✎</button>'+
-          '<button class="btn btn-danger btn-sm btn-icon" title="Hapus" aria-label="Hapus" data-del="'+r.id+'">🗑</button></div>';
+        return '<div class="btn-row btn-row-tight"><button class="btn btn-warn btn-xs" data-edit="'+r.id+'">Edit</button>'+
+          '<button class="btn btn-danger btn-xs" data-del="'+r.id+'">Hapus</button></div>';
       }}
     ];
 
@@ -3609,8 +3610,8 @@ function registerPages(){
           '<span class="kode">'+esc(a.kode)+'</span>'+
           '<span class="nm">'+esc(a.nama)+' <span class="tipe">('+esc(a.tipe)+')</span></span>'+
           (a.saldoAwal?'<span class="mono" style="font-size:12px;margin-right:10px;">'+num0(a.saldoAwal)+'</span>':'')+
-          '<span class="acts"><button class="btn btn-warn btn-sm btn-icon" title="Edit" aria-label="Edit" data-edit="'+a.id+'">✎</button>'+
-          '<button class="btn btn-danger btn-sm btn-icon" title="Hapus" aria-label="Hapus" data-del="'+a.id+'">🗑</button></span></div>';
+          '<span class="acts"><button class="btn btn-warn btn-xs" data-edit="'+a.id+'">Edit</button>'+
+          '<button class="btn btn-danger btn-xs" data-del="'+a.id+'">Hapus</button></span></div>';
       }).join('');
       document.getElementById('coaList').innerHTML=html;
 
@@ -3752,8 +3753,8 @@ function registerPages(){
         {key:'kredit',label:'Total Kredit',num:true,render:function(r){ return num0(r.kredit); },
          foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+b.kredit;},0))+'</b>'; }},
         {key:'_act',label:'Aksi',sort:false,render:function(r){
-          return '<div class="btn-row btn-row-tight"><button class="btn btn-warn btn-sm btn-icon" title="Edit" aria-label="Edit" data-edit="'+esc(r.ref)+'">✎</button>'+
-            '<button class="btn btn-danger btn-sm btn-icon" title="Hapus" aria-label="Hapus" data-del="'+esc(r.ref)+'">🗑</button></div>';
+          return '<div class="btn-row btn-row-tight"><button class="btn btn-warn btn-xs" data-edit="'+esc(r.ref)+'">Edit</button>'+
+            '<button class="btn btn-danger btn-xs" data-del="'+esc(r.ref)+'">Hapus</button></div>';
         }}
       ], rows, {defaultSort:'tgl',defaultDir:'desc',perPage:15,showFoot:true,countId:'cnt',
         searchFn:function(r){ return [r.ket,r.project,r.relasi,r.noFaktur,r.ref].concat(r.lines.map(function(l){ return l.akun; })).join(' '); },
