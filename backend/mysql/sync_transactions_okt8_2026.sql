@@ -12,6 +12,16 @@
 -- INSERT IGNORE di semua baris di bawah -- aman dijalankan ulang kalau
 -- sebelumnya sempat berhenti di tengah jalan (baris yang sudah masuk
 -- cuma dilewati, bukan error "Duplicate entry").
+--
+-- Kolom `relasi` (vendor/pemilik) tidak ada di file Report export ini,
+-- jadi awalnya dikosongkan -- lalu ketahuan dari Laporan Hutang/Prive
+-- sistem asli ada 2 vendor/pemilik yang jumlahnya beda dari sistem
+-- buatan: V-HU-Berkat (asli lebih rendah Rp153.977.930) dan Pr-K (asli
+-- lebih tinggi Rp1.710.000). Dicocokkan ke pola `ket` transaksi lain
+-- yang sudah ada relasinya di database ("pak ei" -> selalu Pr-K, nota
+-- "berkat" -> selalu V-HU-Berkat), dan sudah dikonfirmasi lewat
+-- perhitungan ulang: isi relasi di bawah membuat kedua total itu cocok
+-- 100% dengan sistem asli (158.060.291 dan 246.964.844).
 
 INSERT IGNORE INTO `projects` (`id`, `nama`, `ledger_name`, `kontrak`, `rap`, `progress`, `pemberi_proyek`, `cost_center`, `adm_fee`, `updated_at`)
 VALUES ('p_bjb_riau', 'BJB Riau', 'BJB Riau', 0.00, 0.00, NULL, '', 0.00, 0.00, NOW());
@@ -26,14 +36,14 @@ INSERT IGNORE INTO `transactions` (`id`, `jenis`, `tgl`, `ref`, `akun_kas`, `aku
 ('t45cfe6e2b872', 'kas_masuk', '2026-10-08', 'CI-2610-0012', 'Kas Besar', 'Ayat Silang Kas Besar Kas-Bank', 'Cost Center - Pendanaan Uang', '', NULL, NULL, 'penarikan 8 oktober', 472440100.0, 0.0, NULL, NOW(), NOW()),
 ('t39b36127949b', 'kas_keluar', '2026-10-08', 'CO-2610-0386', 'Kas Besar', 'Biaya Panen', 'Farm Cibeureum periode 5', '', NULL, NULL, 'jatah panen warga cibeureum', 0.0, 400000.0, NULL, NOW(), NOW()),
 ('t83c2d8c62343', 'kas_keluar', '2026-10-08', 'CO-2610-0387', 'Kas Besar', 'Biaya Pemeliharaan Kendaraan Kantor', 'Cost Center', '', NULL, NULL, 'bayar servis motor 7/10', 0.0, 150000.0, NULL, NOW(), NOW()),
-('t23f48f734e62', 'kas_keluar', '2026-10-08', 'CO-2610-0389', 'Kas Besar', 'Prive', 'Prive', '', NULL, NULL, 'pak ei (jas)', 0.0, 1600000.0, NULL, NOW(), NOW()),
-('tf471154ebecf', 'kas_keluar', '2026-10-08', 'CO-2610-0390', 'Kas Besar', 'Prive', 'Prive', '', NULL, NULL, 'teh ai (pak ei)', 0.0, 110000.0, NULL, NOW(), NOW()),
+('t23f48f734e62', 'kas_keluar', '2026-10-08', 'CO-2610-0389', 'Kas Besar', 'Prive', 'Prive', 'Pr-K', NULL, NULL, 'pak ei (jas)', 0.0, 1600000.0, NULL, NOW(), NOW()),
+('tf471154ebecf', 'kas_keluar', '2026-10-08', 'CO-2610-0390', 'Kas Besar', 'Prive', 'Prive', 'Pr-K', NULL, NULL, 'teh ai (pak ei)', 0.0, 110000.0, NULL, NOW(), NOW()),
 ('t5f6d55bcd8be', 'kas_keluar', '2026-10-08', 'CO-2610-0391', 'Kas Besar', 'Biaya ADM', 'ZIDAM', '', NULL, NULL, 'sumbangan HUT TNI', 0.0, 25002500.0, NULL, NOW(), NOW()),
 ('t39ae479f3075', 'kas_keluar', '2026-10-08', 'CO-2610-0392', 'Kas Besar', 'Biaya Bahan', 'RS Guntur Gudang Farmasi', '', NULL, NULL, 'kaso 7/10', 0.0, 5002500.0, NULL, NOW(), NOW()),
 ('td5401febf3f8', 'kas_keluar', '2026-10-08', 'CO-2610-0393', 'Kas Besar', 'Biaya Bahan', 'RS Guntur Gudang Farmasi', '', NULL, NULL, 'sewa scafolding', 0.0, 10564667.0, NULL, NOW(), NOW()),
 ('t4fe158b27f73', 'kas_keluar', '2026-10-08', 'CO-2610-0394', 'Kas Besar', 'Biaya Bahan', 'RS Guntur Gudang Farmasi', '', NULL, NULL, 'nota TB utama sudirman', 0.0, 4306500.0, NULL, NOW(), NOW()),
 ('t530da7bcf2e3', 'kas_keluar', '2026-10-08', 'CO-2610-0395', 'Kas Besar', 'Biaya Dibayar Dimuka', 'RS Guntur Belanja Dapur', '', NULL, NULL, 'belanja tgl 8', 0.0, 9500000.0, NULL, NOW(), NOW()),
-('t57767500a0bd', 'kas_keluar', '2026-10-08', 'CO-2610-0396', 'Kas Besar', 'Hutang Dagang', 'Bina Marga Kodim Bangun Jalan Cibalong', '', NULL, NULL, 'nota berkat cibalong 4/8 (besi 25)', 0.0, 106400000.0, NULL, NOW(), NOW()),
+('t57767500a0bd', 'kas_keluar', '2026-10-08', 'CO-2610-0396', 'Kas Besar', 'Hutang Dagang', 'Bina Marga Kodim Bangun Jalan Cibalong', 'V-HU-Berkat', NULL, NULL, 'nota berkat cibalong 4/8 (besi 25)', 0.0, 106400000.0, NULL, NOW(), NOW()),
 ('tb9eca3df01c0', 'kas_keluar', '2026-10-08', 'CO-2610-0397', 'Kas Besar', 'Biaya Bahan', 'Proyek Antapani', '', NULL, NULL, 'terpal, kaso, thinner, belmas', 0.0, 1094000.0, NULL, NOW(), NOW()),
 ('t60df44b9bad6', 'kas_keluar', '2026-10-08', 'CO-2610-0398', 'Kas Besar', 'Biaya Bahan', 'RS Dustira Bangunan Heritage', '', NULL, NULL, 'cat gardex, kuas roll', 0.0, 3071000.0, NULL, NOW(), NOW()),
 ('tb5cf52cdf97c', 'kas_keluar', '2026-10-08', 'CO-2610-0399', 'Kas Besar', 'Biaya Bahan', 'Kemhan Bangun Rumdis Cimahi', '', NULL, NULL, 'kabel, inbow dus, steker arde, stopkontak, flood light 7/10', 0.0, 2966000.0, NULL, NOW(), NOW()),
@@ -41,7 +51,7 @@ INSERT IGNORE INTO `transactions` (`id`, `jenis`, `tgl`, `ref`, `akun_kas`, `aku
 ('tdd338272e586', 'kas_keluar', '2026-10-08', 'CO-2610-0401', 'Kas Besar', 'Biaya Bahan', 'Bina Marga Rehab Jembatan Provinsi', '', NULL, NULL, 'kompresor, jack hammer, operator', 0.0, 1450000.0, NULL, NOW(), NOW()),
 ('tea23fa532ed6', 'kas_keluar', '2026-10-08', 'CO-2610-0402', 'Kas Besar', 'Biaya Bahan', 'Bina Marga Rehab Jembatan Provinsi', '', NULL, NULL, 'solar alat', 0.0, 350000.0, NULL, NOW(), NOW()),
 ('ta67e0953a57d', 'kas_keluar', '2026-10-08', 'CO-2610-0403', 'Kas Besar', 'Biaya Bahan', 'Bina Marga Rehab Jembatan Provinsi', '', NULL, NULL, 'palu, pilox, multi, kasom paku, slepan, dll', 0.0, 3785000.0, NULL, NOW(), NOW()),
-('t672ba6b6f63c', 'kas_keluar', '2026-10-08', 'CO-2610-0404', 'Kas Besar', 'Hutang Dagang', 'Bina Marga Rehab Jembatan Provinsi', '', NULL, NULL, 'nota berkat 19/8 besi ulir 13, 16, 19', 0.0, 47577930.0, NULL, NOW(), NOW()),
+('t672ba6b6f63c', 'kas_keluar', '2026-10-08', 'CO-2610-0404', 'Kas Besar', 'Hutang Dagang', 'Bina Marga Rehab Jembatan Provinsi', 'V-HU-Berkat', NULL, NULL, 'nota berkat 19/8 besi ulir 13, 16, 19', 0.0, 47577930.0, NULL, NOW(), NOW()),
 ('t39476a64b676', 'kas_keluar', '2026-10-08', 'CO-2610-0405', 'Kas Besar', 'Biaya Bahan', 'Kemhan 2 Gudang Selatan', '', NULL, NULL, 'banner', 0.0, 910000.0, NULL, NOW(), NOW()),
 ('t503a90e08c2a', 'kas_keluar', '2026-10-08', 'CO-2610-0406', 'Kas Besar', 'Biaya Bahan', 'Kemhan 2 Gudang Selatan', '', NULL, NULL, 'rompi proyek', 0.0, 550000.0, NULL, NOW(), NOW()),
 ('t9f8fabcbbf08', 'kas_keluar', '2026-10-08', 'CO-2610-0407', 'Kas Besar', 'Biaya Bahan', 'Kemhan 2 Gudang Selatan', '', NULL, NULL, 'kloset', 0.0, 1400000.0, NULL, NOW(), NOW()),
