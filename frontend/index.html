@@ -778,26 +778,6 @@ function isCostAkun(akunLawan){
   var head=akunHead(akunLawan);
   return head===''||head==='5'||head==='6'||head==='7'||head==='8';
 }
-// A Kas Masuk/Bank Masuk posted against a "Biaya ..." account (a refund
-// or returned-goods credit against a cost already booked) does NOT
-// reduce that cost in the reference system — confirmed on two separate
-// cases (Rumah Dirtek Bekasi's "retur barang", Kemhan Bangun Rumdis
-// Korem Cirebon's "pengembalian bahan alumunium") where the reference
-// Laba Rugi kept the full gross cost regardless of the refund. Standard
-// double-entry bookkeeping WOULD net this, but that's not how this
-// company's own reports treat it — only Kas Keluar/Bank Keluar/Jurnal
-// Umum postings ever count toward a Biaya line; see groupByHead() and
-// computeProjectProgressRows().
-function isBiayaAkun(nama){
-  if(akunNamaOnly(nama).indexOf('Biaya ')!==0) return false;
-  // "1.1.24-Biaya Dibayar Dimuka" is a Neraca asset despite the name
-  // starting with "Biaya " — the no-netting rule above is only about
-  // Laba Rugi cost/expense accounts (heads 5-8); a Neraca account
-  // (heads 1-3) never qualifies, so a Kas Masuk/Bank Masuk refund
-  // against it (e.g. a returned prepayment) reduces it normally.
-  var h=akunHead(nama);
-  return h!=='1' && h!=='2' && h!=='3';
-}
 
 /* Kelompok Kebutuhan (business-need category) per akun, powering
    Laporan Kategori — adapted from the owner's own manual rekap
@@ -878,10 +858,11 @@ function computeProjectProgressRows(from, to){
       if(t.project!==ledger || !/keluar$/.test(t.jenis)) return;
       if(from && t.tgl<from) return;
       if(to && t.tgl>to) return;
-      // A Kas Masuk/Bank Masuk refund against a cost account (a returned
-      // purchase) does NOT reduce that cost here, matching the reference
-      // system exactly — see isBiayaAkun(). Only Kas/Bank Keluar postings
-      // ever count toward Biaya Bahan/Upah/Akomodasi/Adm Fee.
+      // Only Kas/Bank Keluar postings count toward Biaya Bahan/Upah/
+      // Akomodasi/Adm Fee here -- a Kas/Bank Masuk refund against one of
+      // these never nets against it on a project's own cost breakdown
+      // (unrelated to the Laba Rugi/Trial Balance refund-inclusion
+      // question groupByHead() now applies uniformly).
       if(matchesPlainCost(t.akunLawan,'bahan')) bahan+=t.kredit;
       else if(matchesPlainCost(t.akunLawan,'upah')) upah+=t.kredit;
       else if(matchesPlainCost(t.akunLawan,'akomodasi')) akomodasi+=t.kredit;
@@ -2562,17 +2543,16 @@ function inRange(tgl, from, to){
 /* Shared by Trial Balance and Neraca so "Laba Tahun Berjalan" can never
    disagree between the two -- sums every Laba Rugi account's (heads
    4-8) real postings up to and including `asOf`, straight off
-   allEntries() with NO isBiayaAkun() exclusion. That exclusion exists
-   for Laporan Laba Rugi's own display (sistem asli keeps the full
-   gross cost on a Biaya line even after a Kas/Bank Masuk refund against
-   it, so groupByHead() drops those refunds there -- see isBiayaAkun()
-   above), but Trial Balance's own Mutasi columns have always included
-   them (its own comment: excluding them "would only make the Mutasi
-   columns miss real activity"). Owner's call: Neraca now reads this
-   traceable, refund-inclusive total -- the same one Trial Balance's own
-   Laba Rugi/Neraca columns already show -- instead of independently
-   recomputing via groupByHead(), which is exactly why the two could
-   disagree before. */
+   allEntries(). Trial Balance's own Mutasi columns have always counted
+   every posting including a Kas/Bank Masuk refund against a Biaya
+   account (its own comment: excluding them "would only make the Mutasi
+   columns miss real activity") -- groupByHead() used to drop those same
+   refunds for Laporan Laba Rugi's own display, which was exactly why
+   Neraca's own groupByHead()-based figure could silently disagree with
+   Trial Balance. Owner's call (confirmed Oct 9, after checking with an
+   accountant): that exclusion was wrong and is now gone from
+   groupByHead() too, so Laba Rugi, Neraca and Trial Balance all agree
+   by construction -- this helper just reuses the same traceable total. */
 function labaTahunBerjalanAt(asOf){
   var net=0;
   allEntries().forEach(function(e){
@@ -4449,13 +4429,10 @@ function registerPages(){
 
       // One pass over every posting, bucketed by account name into
       // pre-period / this-month-Mutasi / this-month-Jurnal-Penyesuaian.
-      // Unlike groupByHead() (Neraca/Laba Rugi), this report keeps every
-      // posting including a Kas/Bank Masuk refund against a Biaya akun
-      // (isBiayaAkun()) — sistem asli's own Trial Balance shows such a
-      // refund as real Mutasi Kredit on that expense account, and this
-      // report's own final Db-minus-Cr netting (afterDb/afterCr below)
-      // already folds it in correctly, so excluding it here would only
-      // make the Mutasi columns miss real activity.
+      // Every posting counts here, including a Kas/Bank Masuk refund
+      // against a Biaya akun -- sistem asli's own Trial Balance shows
+      // such a refund as real Mutasi Kredit on that expense account, and
+      // groupByHead() (Neraca/Laba Rugi) now counts it the same way too.
       var byName={};
       allEntries().forEach(function(e){
         var key=akunNamaOnly(e.akun).toLowerCase();
@@ -4694,24 +4671,19 @@ function registerPages(){
     allEntries().forEach(function(e){
       if(!inRange(e.tgl,from,to)) return;
       if(project && e.project!==project) return;
-      // A Kas Masuk/Bank Masuk refund against a "Biaya ..." account never
-      // reduces that cost here -- see isBiayaAkun(). Tried re-routing the
-      // dropped counter-posting to Persediaan Bahan (round Oct 8) to make
-      // Neraca balance to 0 -- WRONG: sistem asli's own real Neraca for
-      // 08/10/2026 shows Persediaan Bahan at the full, un-reduced
-      // Rp86.314.293, ref-exact against Trial Balance's own Neraca-Db
-      // column with zero adjustment anywhere in Aktiva. With every other
-      // Neraca line confirmed against that same real export (Hutang
-      // Dagang/2.2.1/Modal Disetor-A, and Laba Tahun Berjalan pinned to
-      // Laba Rugi's own Laba Bersih per the owner), NERACA BALANCE is
-      // arithmetically forced to Rp12.987.500 -- there is no Aktiva/
-      // Hutang/Ekuitas line left that could absorb it without
-      // contradicting a confirmed-correct figure. This is a real,
-      // irreducible gap in the underlying data (these 2 transactions'
-      // credit side has no documented home anywhere in Master COA), not
-      // a bug to force away -- back to dropping it outright, matching
-      // the real Neraca's own Aktiva exactly.
-      if(e.leg==='lawan' && /masuk$/.test(e.jenis) && isBiayaAkun(e.akun)) return;
+      // A Kas Masuk/Bank Masuk refund against a "Biaya ..." account used
+      // to be dropped outright here (never reducing that cost), matching
+      // Laporan Laba Rugi's own old behavior but NOT Trial Balance's own
+      // Mutasi columns, which have always counted it -- that mismatch
+      // was the entire reason Laba Rugi's LABA BERSIH could disagree
+      // with Trial Balance (by exactly the excluded refunds' total,
+      // Rp12.987.500 as of Oct 2026: CI-2606-0028 and CI-2609-0037,
+      // both refunds against Biaya Bahan). Owner's decision Oct 9, after
+      // checking with an accountant: the exclusion was wrong: standard
+      // double-entry bookkeeping nets a refund against the cost it
+      // refunds, so it's removed. Every report (Buku Besar, Trial
+      // Balance, Laba Rugi, Neraca) now counts every posting the same
+      // way and can never disagree over this again.
       var h=akunHead(e.akun);
       if(heads.indexOf(h)===-1) return;
       if(isHpk3LongTermEntry(e)){
@@ -4997,15 +4969,12 @@ function registerPages(){
       var totalAktiva=aktiva.reduce(function(a,r){ return a+(r.debet-r.kredit); },0);
       var totalHutang=kewajiban.reduce(function(a,r){ return a+(r.kredit-r.debet); },0);
       // "Laba Tahun Berjalan" (current, not-yet-closed period earnings)
-      // now reads labaTahunBerjalanAt() — the same refund-inclusive,
-      // traceable total Trial Balance's own Laba Rugi/Neraca columns
-      // already show for this cutoff date — instead of independently
-      // recomputing it via groupByHead(), which drops a handful of
-      // Kas/Bank Masuk refunds against a Biaya account (isBiayaAkun())
-      // that Trial Balance's own Mutasi always counts. That mismatch is
-      // exactly why this figure could disagree with Trial Balance
-      // before; reading the same source as Trial Balance is what
-      // guarantees it can't.
+      // reads labaTahunBerjalanAt() — the same traceable total Trial
+      // Balance's own Laba Rugi/Neraca columns show for this cutoff
+      // date — rather than independently recomputing via groupByHead(),
+      // so the two can never disagree (groupByHead() itself is now
+      // refund-inclusive too, same as Trial Balance; see its own
+      // comment for why that used to not be the case).
       var labaTahunBerjalan=labaTahunBerjalanAt(to);
       var isLabaTahunBerjalan=function(r){ return akunNamaOnly(r.akun)==='Laba Tahun Berjalan'; };
       var totalEkuitasLain=ekuitas.reduce(function(a,r){
