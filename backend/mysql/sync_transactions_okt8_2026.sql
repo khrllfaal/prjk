@@ -2,18 +2,22 @@
 -- ke database. Dibandingkan ref-by-ref terhadap seluruh isi tabel
 -- `transactions` (5.305 baris): 5.305 baris existing semuanya cocok
 -- 100% (tanggal, akun kas, akun lawan, project, jumlah) -- tidak ada
--- satupun yang perlu di-UPDATE. Hanya ditemukan 43 baris BARU, semuanya
+-- satupun yang perlu di-UPDATE. Hanya ditemukan baris BARU, semuanya
 -- bertanggal 8 Oktober 2026 -- transaksi hari terakhir yang belum
 -- masuk database. Satu di antaranya ("BJB Riau") memakai nama project
 -- yang belum ada di Master Project, jadi dibuatkan dulu baris minimal
 -- (sama seperti project baru lain yang sudah ada -- edit/lengkapi lagi
 -- lewat Master Project di aplikasi kalau perlu).
+--
+-- INSERT IGNORE di semua baris di bawah -- aman dijalankan ulang kalau
+-- sebelumnya sempat berhenti di tengah jalan (baris yang sudah masuk
+-- cuma dilewati, bukan error "Duplicate entry").
 
-INSERT INTO `projects` (`id`, `nama`, `ledger_name`, `kontrak`, `rap`, `progress`, `pemberi_proyek`, `cost_center`, `adm_fee`, `updated_at`)
+INSERT IGNORE INTO `projects` (`id`, `nama`, `ledger_name`, `kontrak`, `rap`, `progress`, `pemberi_proyek`, `cost_center`, `adm_fee`, `updated_at`)
 VALUES ('p_bjb_riau', 'BJB Riau', 'BJB Riau', 0.00, 0.00, NULL, '', 0.00, 0.00, NOW());
 
 -- 43 transaksi baru (8 Oktober 2026)
-INSERT INTO `transactions` (`id`, `jenis`, `tgl`, `ref`, `akun_kas`, `akun_lawan`, `project`, `relasi`, `customer_id`, `vendor_id`, `ket`, `debet`, `kredit`, `created_by`, `created_at`, `updated_at`) VALUES
+INSERT IGNORE INTO `transactions` (`id`, `jenis`, `tgl`, `ref`, `akun_kas`, `akun_lawan`, `project`, `relasi`, `customer_id`, `vendor_id`, `ket`, `debet`, `kredit`, `created_by`, `created_at`, `updated_at`) VALUES
 ('t9acb7882bf64', 'bank_masuk', '2026-10-08', 'BI-2610-0004', 'Bank BJB RC Prakasa', 'Pendapatan Proyek', 'RS Dustira Bangun Ruang Kenanga', '', NULL, NULL, 'Termen dustira ke 2', 808992493.0, 0.0, NULL, NOW(), NOW()),
 ('tdf84e4a41ff2', 'bank_masuk', '2026-10-08', 'BI-2610-0005', 'Bank BJB CV Purbayanti', 'Pendapatan Proyek', 'RS Dustira Pengecatan Paving, Genteng, Kolam & Lai', '', NULL, NULL, 'termen PL pengecatan', 192042308.0, 0.0, NULL, NOW(), NOW()),
 ('tdd54b5d020ed', 'bank_keluar', '2026-10-08', 'BO-2610-0009', 'Bank BJB RC PT', 'Biaya Bunga & Administrasi Bank', 'Cost Center', '', NULL, NULL, 'biaya pembuatan cek RC PT BJB (dari rek RC BJB PT)', 0.0, 275000.0, NULL, NOW(), NOW()),
@@ -58,14 +62,16 @@ INSERT INTO `transactions` (`id`, `jenis`, `tgl`, `ref`, `akun_kas`, `akun_lawan
 ('t9f41ff0c6610', 'kas_keluar', '2026-10-08', 'CO-2610-0422', 'Kas Besar', 'Hutang Bank Jk.Pendek PT', 'Cost Center - Pendanaan Uang', '', NULL, NULL, 'Bayar kelayakan SBSN', 0.0, 1095304433.0, NULL, NOW(), NOW()),
 ('t50737856d9f6', 'kas_keluar', '2026-10-08', 'CO-2610-0423', 'Kas Besar', 'Atensi', 'ZIDAM', '', NULL, NULL, 'bayaran pesantren parigi', 0.0, 2320000.0, NULL, NOW(), NOW());
 
--- 1 transaksi Bank In tambahan (8 Oktober) yang belum sempat masuk ke
--- file Report bank_in_33.xls saat diexport, ketahuan dari perbandingan
--- Dashboard Cash Flow sistem asli (Kas Masuk lebih tinggi Rp877.988
--- dari hasil sync 43 baris di atas) -- Bapak kirim datanya langsung
--- dari layar Data Bank In sistem asli.
-INSERT INTO `transactions` (`id`, `jenis`, `tgl`, `ref`, `akun_kas`, `akun_lawan`, `project`, `relasi`, `customer_id`, `vendor_id`, `ket`, `debet`, `kredit`, `created_by`, `created_at`, `updated_at`) VALUES
-('tbi26100006bg', 'bank_masuk', '2026-10-08', 'BI-2610-0006', 'Bank BNI PT', 'Pendapatan Jasa Giro', 'Cost Center - Pendanaan Uang', '', NULL, NULL, 'bunga giro', 877988.0, 0.0, NULL, NOW(), NOW());
+-- 2 transaksi Bank In/Out tambahan (8 Oktober) yang belum sempat masuk
+-- ke file Report saat diexport, ketahuan dari perbandingan Dashboard
+-- Cash Flow sistem asli -- Bapak kirim datanya langsung dari layar
+-- Data Bank In/Out sistem asli:
+--  - BI-2610-0006: selisih Kas Masuk Rp877.988
+--  - BO-2610-0011: selisih Kas Keluar Rp195.598
+INSERT IGNORE INTO `transactions` (`id`, `jenis`, `tgl`, `ref`, `akun_kas`, `akun_lawan`, `project`, `relasi`, `customer_id`, `vendor_id`, `ket`, `debet`, `kredit`, `created_by`, `created_at`, `updated_at`) VALUES
+('tbi26100006bg', 'bank_masuk', '2026-10-08', 'BI-2610-0006', 'Bank BNI PT', 'Pendapatan Jasa Giro', 'Cost Center - Pendanaan Uang', '', NULL, NULL, 'bunga giro', 877988.0, 0.0, NULL, NOW(), NOW()),
+('tbo26100011bg', 'bank_keluar', '2026-10-08', 'BO-2610-0011', 'Bank BNI PT', 'Biaya Bunga & Administrasi Bank', 'Cost Center - Pendanaan Uang', '', NULL, NULL, 'biaya adm bank', 0.0, 195598.0, NULL, NOW(), NOW());
 
 -- Cek hasilnya:
 SELECT COUNT(*) AS total_setelah_insert FROM `transactions`;
--- Harus 5305 + 43 + 1 = 5349
+-- Harus 5305 + 43 + 2 = 5350
