@@ -3245,7 +3245,9 @@ function registerPages(){
       '<div class="period-bar"><span class="plabel">Periode</span>'+
         '<div class="segmented" id="periodSel"></div><span class="period-note" id="periodNote"></span></div>'+
       '<div class="kpi-grid" id="kpiKas"></div>'+
-      '<div class="panel tick posisi-hutang-panel" style="margin-top:14px;"><h3>Posisi Hutang</h3>'+
+      '<div class="panel tick posisi-hutang-panel" style="margin-top:14px;">'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">'+
+          '<h3 style="margin:0;">Posisi Hutang</h3><div class="btn-row">'+exportBtns('ph')+'</div></div>'+
         '<div class="panel-desc">Plafond per akun (diisi manual) dibandingkan dengan Saldo akun tersebut di Neraca — klik Saldo/Hutang untuk lihat riwayat transaksi</div>'+
         '<div id="posisiHutangWrap"></div></div>'+
       '<div class="panel tick" style="margin-top:14px;"><h3>Komposisi Uang Masuk</h3>'+
@@ -3387,9 +3389,19 @@ function registerPages(){
       list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
       showTxnDrilldown(row.kode+'-'+row.nama, 'Riwayat transaksi di balik Saldo akun ini (sama seperti Laporan Neraca)', list);
     }
+    function posisiHutangExportRows(phRows){
+      var rows=phRows.map(function(r,i){ return [i+1, r.kode+'-'+r.nama, r.plafond, r.saldo, r.plafond-r.saldo]; });
+      rows.push(['','TOTAL',
+        phRows.reduce(function(a,r){ return a+r.plafond; },0),
+        phRows.reduce(function(a,r){ return a+r.saldo; },0),
+        phRows.reduce(function(a,r){ return a+(r.plafond-r.saldo); },0)]);
+      return rows;
+    }
     function drawPosisiHutang(){
       var phRows=computePosisiHutangRows();
       var wrap=document.getElementById('posisiHutangWrap');
+      bindExport('ph', 'Posisi_Hutang', ['No','Nama Akun','Plafond','Saldo','Hutang'],
+        function(){ return posisiHutangExportRows(phRows); });
       if(!phRows.length){
         wrap.innerHTML='<div class="na-box">Belum ada akun dengan saldo pada daftar Posisi Hutang.</div>';
         return;
