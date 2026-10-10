@@ -2726,7 +2726,11 @@ var NAV=[
   ]},
   {sec:'Laporan', items:[
     {id:'lap_hutang', label:'Laporan Hutang', ic:'○'},
-    {id:'trial_hutang', label:'Trial Hutang', ic:'○'},
+    // Trial Hutang sementara disembunyikan dari menu (bukan dihapus --
+    // PAGES.trial_hutang di bawah masih utuh) atas permintaan owner:
+    // isinya dianggap masih berantakan. Kembalikan baris di bawah untuk
+    // menampilkannya lagi kalau datanya sudah dirapikan.
+    // {id:'trial_hutang', label:'Trial Hutang', ic:'○'},
     {id:'lap_piutang', label:'Laporan Piutang', ic:'○'},
     {id:'lap_prive', label:'Laporan Prive', ic:'○'},
     {id:'mutasi', label:'Mutasi Kas / Bank', ic:'○'},
