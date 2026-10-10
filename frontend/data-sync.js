@@ -50,8 +50,8 @@ function txnToDb(obj){
     ket:obj.ket||'', debet:obj.debet||0, kredit:obj.kredit||0,
     _expected_updated_at: obj.updatedAt||null};
 }
-function coaFromDb(r){ return {id:r.id, kode:r.kode, nama:r.nama, level:r.level, tipe:r.tipe, saldoAwal:Number(r.saldo_awal)||0, updatedAt:r.updated_at||null}; }
-function coaToDb(obj){ return {id:obj.id, kode:obj.kode, nama:obj.nama, level:obj.level, tipe:obj.tipe, saldo_awal:obj.saldoAwal||0, _expected_updated_at:obj.updatedAt||null}; }
+function coaFromDb(r){ return {id:r.id, kode:r.kode, nama:r.nama, level:r.level, tipe:r.tipe, saldoAwal:Number(r.saldo_awal)||0, plafond:Number(r.plafond)||0, updatedAt:r.updated_at||null}; }
+function coaToDb(obj){ return {id:obj.id, kode:obj.kode, nama:obj.nama, level:obj.level, tipe:obj.tipe, saldo_awal:obj.saldoAwal||0, plafond:obj.plafond||0, _expected_updated_at:obj.updatedAt||null}; }
 
 function relasiFromDb(r){ return {id:r.id, kode:r.kode, nama:r.nama, alamat:r.alamat||'', telp:r.telp||'', email:r.email||'', updatedAt:r.updated_at||null}; }
 function relasiToDb(obj){ return {id:obj.id, kode:obj.kode, nama:obj.nama, alamat:obj.alamat||'', telp:obj.telp||'', email:obj.email||'', _expected_updated_at:obj.updatedAt||null}; }

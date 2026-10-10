@@ -338,6 +338,17 @@ th.col-sticky-2{box-shadow:3px 0 6px -3px rgba(15,23,42,.35);}
   padding:3px 6px; font-size:11.5px; font-family:inherit; cursor:pointer;}
 .pager-size select:hover{border-color:var(--steel);}
 
+/* Posisi Hutang (Dashboard): the Plafond cell is the one editable
+   column in an otherwise read-only table — a clear input box (not a
+   bare borderless field) so it reads as "type here", comfortably sized
+   for a currency figure, and highlights on focus like every other form
+   field in the app. */
+.ph-plafond-input{width:140px; max-width:100%; text-align:right; font-family:var(--font-mono);
+  border:1px solid var(--line); border-radius:6px; padding:6px 9px; font-size:var(--fs-base); background:var(--card); color:var(--text);}
+.ph-plafond-input:hover{border-color:var(--steel);}
+.ph-plafond-input:focus{outline:none; border-color:var(--steel); box-shadow:0 0 0 3px rgba(67,120,181,.15);}
+table.posisi-hutang-tbl tbody td{vertical-align:middle;}
+
 /* ============ CHIPS / STATUS ============ */
 .chip{display:inline-flex; align-items:center; gap:5px; padding:3.5px 9px; border-radius:100px; font-size:11px; font-weight:600; border:1px solid; white-space:nowrap;}
 .chip .sig{width:6px;height:6px;border-radius:50%;flex:none;}
@@ -683,7 +694,7 @@ function seedDB(){
   knownLedgerNames.forEach(function(nm){ pushProject(nm, 0, 0, null); });
 
   var coa=SEED.coa.map(function(c,i){
-    return {id:'a'+(i+1), kode:c.kode, nama:c.nama, level:c.level, tipe:coaTipe(c.kode), saldoAwal:c.saldoAwal||0};
+    return {id:'a'+(i+1), kode:c.kode, nama:c.nama, level:c.level, tipe:coaTipe(c.kode), saldoAwal:c.saldoAwal||0, plafond:c.plafond||0};
   });
 
   // transactions: give each an id + ref no
@@ -871,30 +882,34 @@ function postedJurnal(){
 function sumProjectCosts(ledger, from, to){
   var bahan=0, upah=0, akomodasi=0, admFee=0, costCenter=0;
   DB.txns.forEach(function(t){
-    if(t.project!==ledger || !/keluar$/.test(t.jenis)) return;
+    if(t.project!==ledger) return;
     if(from && t.tgl<from) return;
     if(to && t.tgl>to) return;
-    // Only Kas/Bank Keluar postings count toward Biaya Bahan/Upah/
-    // Akomodasi/Adm Fee here -- a Kas/Bank Masuk refund against one of
-    // these never nets against it on a project's own cost breakdown
-    // (unrelated to the Laba Rugi/Trial Balance refund-inclusion
-    // question groupByHead() now applies uniformly).
-    if(matchesPlainCost(t.akunLawan,'bahan')) bahan+=t.kredit;
-    else if(matchesPlainCost(t.akunLawan,'upah')) upah+=t.kredit;
-    else if(matchesPlainCost(t.akunLawan,'akomodasi')) akomodasi+=t.kredit;
-    else if(matchesPlainCost(t.akunLawan,'admFee')) admFee+=t.kredit;
+    // Every Kas/Bank posting against a cost account counts here, Masuk
+    // and Keluar alike, netted (kredit-debet) exactly like Laba Rugi's
+    // groupByHead() -- a Kas/Bank Masuk refund against "Biaya Bahan"
+    // etc. reduces that cost instead of being ignored. Until Oct 9 this
+    // only read Kas/Bank Keluar's kredit, so a project's cost breakdown
+    // here could disagree with Laba Rugi's own account totals by
+    // exactly the excluded refunds (confirmed via the real ledger:
+    // Rp3.138.247.403 of Biaya Bahan refunds and Rp14.593.000 of Biaya
+    // Akomodasi refunds were missing from Total Pengeluaran here while
+    // Laba Rugi correctly netted them) -- owner's Oct 9 decision to net
+    // every refund against its cost (see groupByHead()) applies the
+    // same way to every report, this one included.
+    var net=t.kredit-t.debet;
+    if(matchesPlainCost(t.akunLawan,'bahan')) bahan+=net;
+    else if(matchesPlainCost(t.akunLawan,'upah')) upah+=net;
+    else if(matchesPlainCost(t.akunLawan,'akomodasi')) akomodasi+=net;
+    else if(matchesPlainCost(t.akunLawan,'admFee')) admFee+=net;
     // Cost Center is a residual "other project cost" bucket — an
     // internal Kas<->Bank transfer ("Ayat Silang...") or a
     // Hutang/Piutang/Prive/fixed-asset posting isn't a cost either way;
     // isCostAkun() already excludes all of those by COA head (only
     // heads 5-8 pass), same as Laba Rugi — so whatever's left here is a
     // real P&L expense regardless of whether it was paid via Kas or
-    // Bank Keluar. Previously restricted to kas_keluar only, which
-    // silently dropped real bank-paid project costs (confirmed: Rp2.5
-    // miliar of Biaya Bunga & Administrasi Bank and similar accounts
-    // paid via Bank Keluar were missing from Total Pengeluaran here
-    // while Laba Rugi's Total Beban correctly included them).
-    else if(isCostAkun(t.akunLawan)) costCenter+=t.kredit;
+    // Bank Keluar, or refunded via Kas or Bank Masuk.
+    else if(isCostAkun(t.akunLawan)) costCenter+=net;
   });
   postedJurnal().forEach(function(j){
     if(j.project!==ledger) return;
@@ -1350,6 +1365,25 @@ function computeHutangDagangRows(){
     return {id:j.id, tgl:j.tgl, ref:j.ref, noFaktur:j.noFaktur||'', vendor:j.relasi||'(Tanpa Vendor)', project:j.project||'',
       ket:j.ket, amount:j.kredit, paid:0, direct:0};
   }).sort(function(a,b){ return a.tgl<b.tgl?-1:1; });
+  // Master COA's Saldo Awal for Hutang Dagang (debt already owed before
+  // this ledger's first jurnal entry) is otherwise invisible here --
+  // every other nota comes from a Jurnal Umum posting, but an opening
+  // balance never has one, so Trial Hutang's own total silently excluded
+  // it while Neraca's Hutang Dagang balance (saldo awal + every posting)
+  // correctly includes it -- confirmed against real data: Trial Hutang's
+  // sisa totalled Rp96.849.371 against Neraca's Rp603.411.355, a gap of
+  // exactly the account's saldo awal (Rp506.561.984). Folding it in here
+  // as one synthetic nota (no vendor, so it only ever gets settled by a
+  // payment with no vendor tag or vendor-pool leftover -- the correct
+  // "oldest unidentified debt first" fallback, same as any other
+  // no-vendor nota) makes Trial Hutang's total agree with Neraca again,
+  // same principle as labaTahunBerjalanAt() for Laba Tahun Berjalan.
+  var hdCoa=DB.coa.find(function(c){ return c.kode===HUTANG_DAGANG_CODE; });
+  if(hdCoa && hdCoa.saldoAwal>0){
+    notas.unshift({id:'saldo_awal_'+HUTANG_DAGANG_CODE, tgl:'', ref:'', noFaktur:'',
+      vendor:'(Saldo Awal)', project:'', ket:'Saldo Awal Hutang Dagang (Master COA, sebelum jurnal pertama)',
+      amount:hdCoa.saldoAwal, paid:0, direct:0});
+  }
   var byRef={}; notas.forEach(function(n){ byRef[n.ref]=n; });
 
   // A payment whose description carries "(Nota:<ref>)" — always added by
@@ -3197,6 +3231,9 @@ function registerPages(){
       '<div class="period-bar"><span class="plabel">Periode</span>'+
         '<div class="segmented" id="periodSel"></div><span class="period-note" id="periodNote"></span></div>'+
       '<div class="kpi-grid" id="kpiKas"></div>'+
+      '<div class="panel tick posisi-hutang-panel" style="margin-top:14px;"><h3>Posisi Hutang</h3>'+
+        '<div class="panel-desc">Plafond per akun (diisi manual) dibandingkan dengan Saldo akun tersebut di Neraca — klik Saldo/Hutang untuk lihat riwayat transaksi</div>'+
+        '<div id="posisiHutangWrap"></div></div>'+
       '<div class="panel tick" style="margin-top:14px;"><h3>Komposisi Uang Masuk</h3>'+
         '<div class="panel-desc" id="kompDesc"></div><div id="kompKas"></div></div>'+
       '<div class="panel tick"><h3>Rincian per Proyek — Periode Terpilih</h3>'+
@@ -3218,9 +3255,6 @@ function registerPages(){
         '<div class="panel tick"><h3>Pelaporan Progress Lapangan</h3><div class="panel-desc">Sudah lapor vs belum lapor</div>'+
           '<div id="donutLapor" class="donut-wrap"></div></div>'+
       '</div>'+
-      '<div class="section-head"><h2><span class="icon-chip">⇕</span>Progress Keuangan vs Lapangan</h2>'+
-        '<span class="desc">Hanya proyek yang sudah dilaporkan admin</span></div>'+
-      '<div class="panel tick" id="dualWrap"></div>'+
       '<div class="section-head"><h2><span class="icon-chip">☰</span>Rincian Progress per Proyek</h2>'+
         '<span class="desc">Klik header kolom untuk mengurutkan</span></div>'+
       '<div class="panel"><div class="toolbar">'+
@@ -3232,7 +3266,10 @@ function registerPages(){
         exportBtns('prog')+
         '<span class="result-count" id="cntProg"></span></div>'+
         '<div class="panel-desc" id="progPeriodDesc" style="padding:0 16px 8px;"></div>'+
-        '<div class="table-scroll"><div id="tblProg"></div></div></div>';
+        '<div class="table-scroll"><div id="tblProg"></div></div></div>'+
+      '<div class="section-head"><h2><span class="icon-chip">⇕</span>Progress Keuangan vs Lapangan</h2>'+
+        '<span class="desc">Hanya proyek yang sudah dilaporkan admin</span></div>'+
+      '<div class="panel tick" id="dualWrap"></div>';
 
     /* --- period logic --- */
     var cashPeriods, curId; // assigned fresh on every refreshDashboardData() call below
@@ -3318,6 +3355,108 @@ function registerPages(){
       ], p.projects, {defaultSort:'keluar',defaultDir:'desc',perPage:12,showFoot:true,
         searchFn:function(r){ return r.nama; }, countId:'cntKas'});
       bindSearch('qKas', kasTbl);
+    }
+
+    /* "Posisi Hutang" — a fixed watchlist of Neraca accounts (4 bank
+       accounts used as credit facilities, plus every Kewajiban Lancar/
+       Tidak Lancar account) compared against a manually-entered Plafond
+       (credit ceiling) per account. Saldo is read straight off
+       groupByHead() — the exact same computation Laporan Neraca itself
+       uses for these accounts — so this table can never disagree with
+       Neraca. Hutang = Plafond - Saldo (how much of the ceiling is
+       still unused/owed), per the owner's own spec. Only an account
+       whose Saldo is actually non-zero is shown (a brand-new liability
+       with nothing posted yet stays hidden until it has real activity,
+       per the owner's own "akun yang belum ada nilai jangan ditampilkan"
+       instruction). */
+    var POSISI_HUTANG_KODES=['1.1.06','1.1.07','1.1.08','1.1.09',
+      '2.1.1','2.1.2','2.1.3','2.1.4','2.1.5','2.1.6','2.1.7','2.1.8','2.1.9','2.1.10','2.1.11',
+      '2.1.12','2.1.13','2.1.14','2.1.15','2.1.16','2.1.17','2.1.99',
+      '2.2.1','2.2.2','2.2.3','2.2.4'];
+    function computePosisiHutangRows(){
+      var to=todayISO();
+      var byKode={};
+      groupByHead(null,to,['1','2']).forEach(function(r){ if(r.kode) byKode[r.kode]=r; });
+      var out=[];
+      POSISI_HUTANG_KODES.forEach(function(kode){
+        var r=byKode[kode];
+        if(!r) return;
+        var sign=kode.charAt(0)==='1'?1:-1;
+        var saldo=sign*(r.debet-r.kredit);
+        if(Math.abs(saldo)<0.5) return;
+        var coaRow=DB.coa.find(function(c){ return c.kode===kode; });
+        out.push({kode:kode, nama:akunNamaOnly(r.akun), saldo:saldo, plafond:(coaRow&&coaRow.plafond)||0,
+          coaId:coaRow?coaRow.id:null, r:r, sign:sign});
+      });
+      return out;
+    }
+    function posisiHutangDrilldown(row){
+      var to=todayISO();
+      var list=labaRugiAccountTxns(row.nama, null, to, null, row.kode).map(function(e){
+        return {tgl:e.tgl, ref:e.ref, ket:e.ket, amount:row.sign*(e.debet-e.kredit)};
+      });
+      var coaRow=DB.coa.find(function(c){ return c.kode===row.kode; });
+      // Matches groupByHead()'s/Neraca's own treatment exactly — a
+      // positive Saldo Awal always moves the row's displayed value in
+      // the same +1 direction regardless of head, so no sign branching.
+      if(coaRow && coaRow.saldoAwal){
+        list.push({tgl:to, ref:'', ket:'Saldo Awal (Master COA)', amount:coaRow.saldoAwal});
+      }
+      list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+      showTxnDrilldown(row.kode+'-'+row.nama, 'Riwayat transaksi di balik Saldo akun ini (sama seperti Laporan Neraca)', list);
+    }
+    function drawPosisiHutang(){
+      var phRows=computePosisiHutangRows();
+      var wrap=document.getElementById('posisiHutangWrap');
+      if(!phRows.length){
+        wrap.innerHTML='<div class="na-box">Belum ada akun dengan saldo pada daftar Posisi Hutang.</div>';
+        return;
+      }
+      var totalPlafond=phRows.reduce(function(a,r){ return a+r.plafond; },0);
+      var totalSaldo=phRows.reduce(function(a,r){ return a+r.saldo; },0);
+      var totalHutang=phRows.reduce(function(a,r){ return a+(r.plafond-r.saldo); },0);
+      var html='<div class="table-scroll"><table class="dtab posisi-hutang-tbl"><thead><tr>'+
+        '<th>No</th><th>Nama Akun</th><th class="num">Plafond</th><th class="num">Saldo</th><th class="num">Hutang</th>'+
+        '</tr></thead><tbody>'+
+        phRows.map(function(r,i){
+          var hutang=r.plafond-r.saldo;
+          return '<tr>'+
+            '<td><span class="no">'+(i+1)+'</span></td>'+
+            '<td class="wrap">'+esc(r.kode)+'-'+esc(r.nama)+'</td>'+
+            '<td class="num"><input type="text" inputmode="numeric" class="ph-plafond-input" '+
+              'id="phPlafond_'+r.kode.replace(/\./g,'_')+'" data-kode="'+esc(r.kode)+'" '+
+              'value="'+(r.plafond?num0(r.plafond):'')+'" placeholder="0"></td>'+
+            '<td class="num"><button type="button" class="linklike" data-ph-drill="'+i+'">'+numSigned(r.saldo)+'</button></td>'+
+            '<td class="num"><button type="button" class="linklike" data-ph-drill="'+i+'"><b class="'+(hutang>0?'neg':'pos')+'">'+numSigned(hutang)+'</b></button></td>'+
+            '</tr>';
+        }).join('')+
+        '</tbody><tfoot><tr><td colspan="2"><b>TOTAL</b></td>'+
+        '<td class="num"><b>'+num0(totalPlafond)+'</b></td>'+
+        '<td class="num"><b>'+num0(totalSaldo)+'</b></td>'+
+        '<td class="num"><b>'+num0(totalHutang)+'</b></td></tr></tfoot>'+
+        '</table></div>';
+      wrap.innerHTML=html;
+      wrap.querySelectorAll('[data-ph-drill]').forEach(function(b){
+        b.onclick=function(){ posisiHutangDrilldown(phRows[Number(b.getAttribute('data-ph-drill'))]); };
+      });
+      wrap.querySelectorAll('.ph-plafond-input').forEach(function(inp){
+        bindCurrencyInput(inp.id);
+        inp.addEventListener('change',function(){
+          var kode=inp.getAttribute('data-kode');
+          var val=fnumC(inp.id);
+          var coaRow=DB.coa.find(function(c){ return c.kode===kode; });
+          if(!coaRow) return;
+          coaRow.plafond=val;
+          saveDB(); syncUpsert('coa', coaRow);
+          // Rebuilding the table's innerHTML synchronously from inside
+          // this very input's own 'change' handler removes the input
+          // node while the browser is still mid-dispatch on it (blur ->
+          // change), which throws a NotFoundError in some browsers —
+          // deferring one tick lets that dispatch finish first.
+          setTimeout(drawPosisiHutang, 0);
+          toast('Plafond '+kode+' disimpan.','success');
+        });
+      });
     }
 
     function drawKum(){
@@ -3471,7 +3610,7 @@ function registerPages(){
       // boundary appearing doesn't yank the user back to the default.
       cashPeriods=computeCashPeriods();
       if(curId===undefined || !cashPeriods.list.some(function(p){ return p.id===curId; })) curId=cashPeriods.defaultId;
-      drawPeriodSel(); drawKas(); drawKum();
+      drawPeriodSel(); drawKas(); drawKum(); drawPosisiHutang();
 
       counts={AMAN:0,HAMPIR:0,MELEBIHI:0,LAIN:0};
       rows.forEach(function(r){

@@ -69,6 +69,12 @@ CREATE TABLE IF NOT EXISTS coa (
   level       TINYINT NOT NULL,
   tipe        VARCHAR(20) NOT NULL,
   saldo_awal  DECIMAL(18,2) NOT NULL DEFAULT 0,
+  -- Credit/facility ceiling the owner tracks against this account's own
+  -- Neraca balance on the Dashboard's "Posisi Hutang" table (plafond -
+  -- saldo = hutang masih bisa ditarik/belum terpakai) -- entered
+  -- directly in that table, not part of the account's own accounting
+  -- balance, so it defaults to 0 (no ceiling tracked) for every account.
+  plafond     DECIMAL(18,2) NOT NULL DEFAULT 0,
   updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
