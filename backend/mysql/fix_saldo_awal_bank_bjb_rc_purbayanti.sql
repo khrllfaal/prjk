@@ -1,0 +1,19 @@
+-- Master COA: "1.1.08 Bank BJB RC Purbayanti" Saldo Awal was 0 -- confirmed
+-- wrong against the owner's own buku besar detail for this account
+-- (Saldo Awal 207.000.000, then -200.000.000 via BO-2610-0014,
+-- -7.000.000 via BO-2607-0005, +192.042.308 via BI-2610-0005, landing
+-- on 192.042.308 -- exactly the account's already-correct current
+-- Neraca/Trial Balance/Posisi Hutang figure, which only comes out
+-- right with this opening balance in place).
+--
+-- This also explains the Dashboard's Rp200.000.000 Saldo Akhir gap
+-- against sistem asli's own Dashboard Cash Flow (Uang Masuk/Keluar
+-- already matched exactly -- only Saldo Akhir was short, by this
+-- same amount): DASHBOARD_OPENING_AKUN in index.html was watching
+-- "Bank BJB CV Purbayanti" (a different, essentially unused COA leaf,
+-- saldo_awal Rp7.000.000) instead of "Bank BJB RC Purbayanti" where
+-- BO-2607-0005 actually posts per sistem asli's own Report export
+-- (see sync_transactions_okt12_2026.sql's akun_kas correction for
+-- that ref) -- fixed in that same index.html delivery to watch the
+-- RC leaf instead of CV.
+UPDATE `coa` SET `saldo_awal` = 207000000.00 WHERE `kode` = '1.1.08';

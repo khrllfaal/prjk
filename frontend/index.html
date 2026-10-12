@@ -1103,8 +1103,18 @@ function isHpk3LongTermEntry(e){
    ADJ-2026-0001, since removed) to a real coa.saldoAwal field, matching
    sistem asli's own Master COA — leaving it out of this list after that
    change silently dropped it from every cash-position report (Dashboard,
-   Cash Flow) even though Neraca/Buku Besar picked it up correctly. */
-var DASHBOARD_OPENING_AKUN=['Bank BNI PT','Bank BNI Prakasa','Bank BJB PT','Bank BJB CV Purbayanti','Kas Kecil'];
+   Cash Flow) even though Neraca/Buku Besar picked it up correctly.
+   "Bank BJB CV Purbayanti" was watching the wrong one of two similarly
+   named leaves: sistem asli's own Report export (Oct 12) posts
+   BO-2607-0005 to "Bank BJB RC Purbayanti" (kode 1.1.08, saldo awal
+   Rp207.000.000 per the owner's own buku besar for that account) —
+   "CV Purbayanti" (kode 1.1.38, saldo awal Rp7.000.000) never actually
+   receives that posting, so counting it here instead of RC understated
+   Dashboard's own "Saldo Awal" KPI by exactly the gap it had against
+   sistem asli's Dashboard Cash Flow (Rp200.000.000, confirmed via the
+   owner's own buku besar — Uang Masuk/Keluar already matched exactly,
+   only Saldo Akhir was short, by this same amount). */
+var DASHBOARD_OPENING_AKUN=['Bank BNI PT','Bank BNI Prakasa','Bank BJB PT','Bank BJB RC Purbayanti','Kas Kecil'];
 function dashboardOpeningBalance(){
   return (DB.coa||[]).filter(function(c){
     return DASHBOARD_OPENING_AKUN.indexOf(String(c.nama||'').trim())>-1;
