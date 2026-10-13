@@ -192,13 +192,17 @@ button,input,select,textarea{font-family:inherit;}
 .kpi-dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--text-faint);}
 .kpi-value{font-family:var(--font-mono); font-size:23px; font-weight:700; color:var(--ink); letter-spacing:-.01em;}
 .kpi-sub{font-size:var(--fs-sm); color:var(--text-faint); margin-top:6px;}
-/* Flat white cards with a small colored status dot (not a solid
-   gradient block) -- matches the owner's other in-house system
-   (Material & Stok) and reads calmer across a whole KPI row than four
-   solid color blocks fighting for attention. */
+/* Each variant is tinted with its own soft background/border (the
+   same -bg/-line tokens the chip/alert components use elsewhere) so
+   the card's color communicates its meaning at a glance, instead of
+   every KPI sitting on the same flat white plate. */
+.kpi-card.accent{background:var(--brand-indigo-bg); border-color:var(--brand-indigo-line);}
 .kpi-card.accent .kpi-dot{background:var(--brand-indigo);}
+.kpi-card.accent .kpi-value{color:var(--brand-indigo-dark);}
+.kpi-card.danger-solid{background:var(--danger-bg); border-color:var(--danger-line);}
 .kpi-card.danger-solid .kpi-dot{background:var(--danger);}
 .kpi-card.danger-solid .kpi-value{color:var(--danger);}
+.kpi-card.safe-solid{background:var(--safe-bg); border-color:var(--safe-line);}
 .kpi-card.safe-solid .kpi-dot{background:var(--safe);}
 .kpi-card.safe-solid .kpi-value{color:var(--safe);}
 
