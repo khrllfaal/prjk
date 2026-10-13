@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Prakasa Group — Sistem Akuntansi</title>
-<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
-<link rel="icon" type="image/png" sizes="64x64" href="assets/favicon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Non-blocking: on a slow/blocked connection to Google Fonts (a
@@ -565,7 +565,7 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 
 <div id="loginScreen">
   <div class="login-card">
-    <div class="sb-mark"><img src="assets/logo.png" alt="Prakasa Group"></div>
+    <div class="sb-mark"><img src="logo.png" alt="Prakasa Group"></div>
     <h1>Prakasa Group — ACC v2</h1>
     <div class="sub">Masuk dengan akun admin atau owner untuk melanjutkan.</div>
     <form id="loginForm">
@@ -588,7 +588,7 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 <div class="app pre-auth" id="appRoot">
   <aside class="sidebar" id="sidebar">
     <div class="sb-brand">
-      <div class="sb-mark"><img src="assets/logo.png" alt="Prakasa Group"></div>
+      <div class="sb-mark"><img src="logo.png" alt="Prakasa Group"></div>
       <div>
         <div class="t1">Prakasa Group</div>
         <div class="t2">Sistem Akuntansi</div>
@@ -3087,7 +3087,7 @@ function financePage(jenis, title, sub){
       {key:'project', label:'Project', render:function(r){ return esc(r.project||'–'); }},
       {key:'relasi', label:'Relasi', render:function(r){ return r.relasi?esc(r.relasi):'<span class="faint-italic">–</span>'; }},
       {key:'amount', label:'Amount', num:true, sortVal:function(r){ return isIn?r.debet:r.kredit; },
-       render:function(r){ return '<b class="'+(isIn?'pos':'')+'">'+num0(isIn?r.debet:r.kredit)+'</b>'; },
+       render:function(r){ return num0(isIn?r.debet:r.kredit); },
        foot:function(list){ return '<b>'+num0(list.reduce(function(a,b){ return a+(isIn?b.debet:(NON_CASH_KAS_KELUAR_REFS[b.ref]?0:b.kredit)); },0))+'</b>'; }},
       {key:'ket', label:'Description', cls:'wrap', render:function(r){ return esc(r.ket||'–'); }},
       {key:'_act', label:'Action', sort:false, render:function(r){
