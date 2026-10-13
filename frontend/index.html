@@ -186,12 +186,12 @@ button,input,select,textarea{font-family:inherit;}
 
 /* ============ KPI ============ */
 .kpi-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px;}
-.kpi-card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px; box-shadow:var(--shadow-card); transition:box-shadow .15s ease, transform .15s ease;}
+.kpi-card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:12px 16px; box-shadow:var(--shadow-card); transition:box-shadow .15s ease, transform .15s ease;}
 .kpi-card:hover{box-shadow:var(--shadow-card-hover); transform:translateY(-1px);}
-.kpi-label{display:flex; align-items:center; gap:7px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-mute); font-weight:700; margin-bottom:10px;}
+.kpi-label{display:flex; align-items:center; gap:7px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-mute); font-weight:700; margin-bottom:6px;}
 .kpi-dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--text-faint);}
-.kpi-value{font-family:var(--font-mono); font-size:23px; font-weight:700; color:var(--ink); letter-spacing:-.01em;}
-.kpi-sub{font-size:var(--fs-sm); color:var(--text-faint); margin-top:6px;}
+.kpi-value{font-family:var(--font-mono); font-size:20px; font-weight:700; color:var(--ink); letter-spacing:-.01em;}
+.kpi-sub{font-size:var(--fs-sm); color:var(--text-faint); margin-top:4px;}
 /* Each variant is tinted with its own soft background/border (the
    same -bg/-line tokens the chip/alert components use elsewhere) so
    the card's color communicates its meaning at a glance, instead of
@@ -497,6 +497,11 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
   .sidebar.open{transform:none;}
   .main{margin-left:0;}
   .hamburger{display:block;}
+  /* On a narrow/split laptop window the summary cards on the 5 fast-entry
+     pages (Kas/Bank Masuk/Keluar, Jurnal Umum) push the data table below
+     the fold -- hide them here so the table a user is there to fill in
+     stays in view; every other page's KPI cards are unaffected. */
+  #kpi,#kpiJurnal{display:none;}
 }
 @media (max-width:640px){
   .topbar{padding:0 14px;} .content{padding:16px 14px 44px 14px;}
@@ -1769,13 +1774,13 @@ function showSaldoAwalDrilldown(p){
   var b=saldoAwalBreakdown(p.from);
   var body='<div class="kpi-grid" style="margin-bottom:14px;">'+
     kpiCard('Saldo Awal Master COA', rp(b.coaAwal), 'Bank BNI PT/Prakasa + Bank BJB PT/CV Purbayanti','accent')+
-    kpiCard('Kumulatif Uang Masuk', '+ '+rp(b.totalMasuk), 'Sebelum '+fmtDate(p.from),'accent')+
-    kpiCard('Kumulatif Uang Keluar', '− '+rp(b.totalKeluar), 'Sebelum '+fmtDate(p.from),'accent')+
+    kpiCard('Kumulatif Uang Masuk', '+ '+rp(b.totalMasuk), 'Sebelum '+fmtDate(p.from),'safe')+
+    kpiCard('Kumulatif Uang Keluar', '− '+rp(b.totalKeluar), 'Sebelum '+fmtDate(p.from),'danger')+
     kpiCard('= Saldo Awal '+esc(p.label), rp(b.saldoAwal), 'Posisi kas tepat sebelum '+fmtDate(p.from),'safe')+
     '</div>'+
     (b.bySrc.length?'<div class="panel-desc" style="margin-bottom:6px;">Dari menu mana asalnya (sejak transaksi pertama, sebelum '+fmtDate(p.from)+'):</div>'+
       '<div class="kpi-grid" style="margin-bottom:14px;">'+
-      b.bySrc.map(function(s){ return kpiCard(s.src, numSigned(s.value), s.count+' transaksi','accent'); }).join('')+
+      b.bySrc.map(function(s){ return kpiCard(s.src, numSigned(s.value), s.count+' transaksi',/Keluar/.test(s.src)?'danger':'safe'); }).join('')+
       '</div>':'')+
     '<div class="panel-desc" style="margin-bottom:8px;">Rincian per bulan, sejak transaksi pertama sampai sebelum '+fmtDate(p.from)+
     '. Klik Uang Masuk/Keluar di kartu Posisi Kas untuk rincian per transaksi pada periode yang sedang ditampilkan.</div>'+
@@ -1799,13 +1804,13 @@ function showSaldoAkhirDrilldown(p){
   var bySrc=sourceSummary(list);
   var body='<div class="kpi-grid" style="margin-bottom:14px;">'+
     kpiCard('Saldo Awal', rp(p.saldo_awal), 'Posisi awal periode','accent')+
-    kpiCard('Uang Masuk', '+ '+rp(p.uang_masuk), '', 'accent')+
-    kpiCard('Uang Keluar', '− '+rp(p.uang_keluar), '', 'accent')+
+    kpiCard('Uang Masuk', '+ '+rp(p.uang_masuk), '', 'safe')+
+    kpiCard('Uang Keluar', '− '+rp(p.uang_keluar), '', 'danger')+
     kpiCard('Saldo Akhir', rp(p.saldo_akhir), 'Saldo Awal + Masuk − Keluar', p.saldo_akhir<0?'danger':'safe')+
     '</div>'+
     (bySrc.length?'<div class="panel-desc" style="margin-bottom:6px;">Dari menu mana asalnya:</div>'+
       '<div class="kpi-grid" style="margin-bottom:14px;">'+
-      bySrc.map(function(s){ return kpiCard(s.src, numSigned(s.value), s.count+' transaksi','accent'); }).join('')+
+      bySrc.map(function(s){ return kpiCard(s.src, numSigned(s.value), s.count+' transaksi',/Keluar/.test(s.src)?'danger':'safe'); }).join('')+
       '</div>':'')+
     '<div class="panel-desc" style="margin-bottom:8px;">Seluruh transaksi Kas &amp; Bank Masuk/Keluar pada '+esc(p.label)+
     ', diurutkan dari yang terbaru.</div>'+
@@ -3110,7 +3115,7 @@ function financePage(jenis, title, sub){
       var projSet={}; rows.forEach(function(r){ if(r.project) projSet[r.project]=1; });
       document.getElementById('kpi').innerHTML=[
         kpiCard('Jumlah Transaksi', num0(rows.length), 'Sesuai filter aktif', 'accent'),
-        kpiCard('Total '+(isIn?'Pemasukan':'Pengeluaran'), rp(total), 'Sesuai filter aktif', isIn?'safe':'accent'),
+        kpiCard('Total '+(isIn?'Pemasukan':'Pengeluaran'), rp(total), 'Sesuai filter aktif', isIn?'safe':'danger'),
         kpiCard('Project Terlibat', num0(Object.keys(projSet).length), 'Project berbeda', 'accent')
       ].join('');
 
@@ -3356,9 +3361,9 @@ function registerPages(){
       var hasSaldoAwal=!!p.saldo_awal;
       if(hasSaldoAwal) cards.push(kpiCard('Saldo Awal / Dana Tersedia', rp(p.saldo_awal),'Posisi kas di awal periode · klik untuk rincian','accent'));
       cards.push(kpiCard('Uang Masuk', rp(p.uang_masuk),
-        (p.banding?bandingText(p.uang_masuk,p.banding.masukLalu):p.label)+' · klik untuk rincian','accent'));
+        (p.banding?bandingText(p.uang_masuk,p.banding.masukLalu):p.label)+' · klik untuk rincian','safe'));
       cards.push(kpiCard('Uang Keluar', rp(p.uang_keluar),
-        (p.banding?bandingText(p.uang_keluar,p.banding.keluarLalu):p.label)+' · klik untuk rincian','accent'));
+        (p.banding?bandingText(p.uang_keluar,p.banding.keluarLalu):p.label)+' · klik untuk rincian','danger'));
       cards.push(kpiCard('Saldo Akhir', rp(p.saldo_akhir),
         (p.saldo_akhir<0?'Defisit — uang keluar melebihi masuk':'Surplus periode ini')+' · klik untuk rincian',
         p.saldo_akhir<0?'danger':'safe'));
@@ -4479,8 +4484,8 @@ function registerPages(){
       var totKeluar=rows.reduce(function(a,b){return a+b.keluar;},0);
       document.getElementById('reportBody').innerHTML=
         '<div class="kpi-grid" style="margin-bottom:14px;">'+
-          kpiCard('Total Masuk',rp(totMasuk),'Semua akun','accent')+
-          kpiCard('Total Keluar',rp(totKeluar),'Semua akun','accent')+
+          kpiCard('Total Masuk',rp(totMasuk),'Semua akun','safe')+
+          kpiCard('Total Keluar',rp(totKeluar),'Semua akun','danger')+
           kpiCard('Selisih',rp(totMasuk-totKeluar),totMasuk-totKeluar<0?'Defisit':'Surplus',
             totMasuk-totKeluar<0?'danger':'safe')+
         '</div><div class="panel"><div id="tbl"></div></div>';
@@ -6210,9 +6215,9 @@ function registerPages(){
       var projKpiHtml = proj.cukup
         ? '<div class="kpi-grid" style="margin-bottom:14px;">'+
             kpiCard('Proyeksi Pemasukan Bulan Depan', rp(proj.masukAvg),
-              'Rentang '+rpShort(proj.masukMin)+' – '+rpShort(proj.masukMax)+' · rata-rata '+proj.n+' bulan terakhir','accent')+
+              'Rentang '+rpShort(proj.masukMin)+' – '+rpShort(proj.masukMax)+' · rata-rata '+proj.n+' bulan terakhir','safe')+
             kpiCard('Proyeksi Pengeluaran Bulan Depan', rp(proj.keluarAvg),
-              'Rentang '+rpShort(proj.keluarMin)+' – '+rpShort(proj.keluarMax)+' · rata-rata '+proj.n+' bulan terakhir','accent')+
+              'Rentang '+rpShort(proj.keluarMin)+' – '+rpShort(proj.keluarMax)+' · rata-rata '+proj.n+' bulan terakhir','danger')+
             kpiCard('Proyeksi Net Bulan Depan', numSigned(proj.masukAvg-proj.keluarAvg),
               'Selisih rata-rata Pemasukan − Pengeluaran', (proj.masukAvg-proj.keluarAvg)>=0?'safe':'danger')+
           '</div>'
