@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Prakasa Group — Sistem Akuntansi</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="assets/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Non-blocking: on a slow/blocked connection to Google Fonts (a
@@ -19,6 +21,15 @@
 /* ============ TOKENS ============ */
 :root{
   --ink:#0B1D33; --navy:#1F3864; --navy-2:#2E5395; --steel:#3D6FB4; --steel-soft:#AFC6E8;
+  /* Brand accent, straight off the logo mark (near-black ring + cyan
+     dot) -- kept for the logo badge itself. The UI's own interactive
+     accent (active nav, primary highlights) uses --brand-indigo
+     instead, matching the owner's other in-house system (Material &
+     Stok) so the whole product family reads as one design language —
+     every number/figure in the app still stays on navy/steel, a
+     financial ledger shouldn't look playful where it shows money. */
+  --brand-cyan:#25BDEE; --brand-cyan-dark:#0E8FBD; --brand-ink:#060A0D;
+  --brand-indigo:#6C5CE7; --brand-indigo-dark:#5842D6; --brand-indigo-bg:#EFECFC; --brand-indigo-line:#D7CFF7;
   --paper:#EEF2F8; --card:#FFFFFF; --line:#DEE5F0;
   --text:#16233D; --text-mute:#5B6B85; --text-faint:#8996AC;
 
@@ -29,6 +40,8 @@
   --neutral:#5B6B85; --neutral-bg:#EAEDF3; --neutral-line:#D5DCE8;
 
   --radius:10px;
+  --shadow-card:0 1px 2px rgba(16,30,54,.04), 0 6px 16px -4px rgba(16,30,54,.08);
+  --shadow-card-hover:0 2px 4px rgba(16,30,54,.05), 0 10px 24px -6px rgba(16,30,54,.12);
   --font-display:'Space Grotesk','Inter',ui-sans-serif,system-ui,sans-serif;
   --font-body:'Inter',ui-sans-serif,system-ui,sans-serif;
   --font-mono:'IBM Plex Mono',ui-monospace,Consolas,monospace;
@@ -37,19 +50,23 @@
   /* Type scale -- every font-size in the app should be one of these,
      not a one-off value. Keeps every page reading at the same rhythm
      instead of drifting by fractions of a pixel between pages that
-     were written at different times. */
-  --fs-2xs:9.5px;    /* micro labels: donut-chart captions, tiny badges */
-  --fs-xs:10.5px;    /* table header labels, field labels (uppercase) */
-  --fs-sm:11.5px;    /* secondary text, descriptions, sub-labels */
-  --fs-base:12.5px;  /* default UI text: inputs, table cells, buttons */
-  --fs-md:14px;      /* body base size, sidebar brand */
-  --fs-lg:16px;      /* section/card headings */
-  --fs-xl:20px;      /* page titles */
-  --fs-2xl:25px;     /* big KPI numbers */
+     were written at different times. Bumped up a notch across the
+     board (owner: text was reading cramped/"generic dashboard
+     template" small) -- dense tables (Trial Balance's own
+     .dtab-compact) use their own fixed, smaller sizes already and are
+     unaffected. */
+  --fs-2xs:10px;     /* micro labels: donut-chart captions, tiny badges */
+  --fs-xs:11px;      /* table header labels, field labels (uppercase) */
+  --fs-sm:12px;      /* secondary text, descriptions, sub-labels */
+  --fs-base:13.5px;  /* default UI text: inputs, table cells, buttons */
+  --fs-md:15px;      /* body base size, sidebar brand */
+  --fs-lg:17px;      /* section/card headings */
+  --fs-xl:22px;      /* page titles */
+  --fs-2xl:27px;     /* big KPI numbers */
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;height:100%;}
-body{background:var(--paper); color:var(--text); font-family:var(--font-body); font-size:14px; line-height:1.45; -webkit-font-smoothing:antialiased;}
+body{background:var(--paper); color:var(--text); font-family:var(--font-body); font-size:14.5px; line-height:1.5; -webkit-font-smoothing:antialiased;}
 h1,h2,h3,h4{font-family:var(--font-display); margin:0; letter-spacing:-0.01em;}
 .mono{font-family:var(--font-mono); font-variant-numeric:tabular-nums;}
 .linklike{background:none; border:none; padding:0; margin:0; color:var(--steel); font:inherit;
@@ -98,9 +115,10 @@ button,input,select,textarea{font-family:inherit;}
   transition:transform .22s ease;
 }
 .sb-brand{display:flex; align-items:center; gap:11px; padding:18px 18px 16px 18px; border-bottom:1px solid rgba(255,255,255,.1);}
-.sb-mark{width:38px;height:38px;border-radius:9px; background:linear-gradient(135deg,var(--steel),var(--navy-2));
-  display:flex;align-items:center;justify-content:center; font-family:var(--font-display); font-weight:700; font-size:15px;
-  border:1px solid rgba(255,255,255,.25); flex:none;}
+.sb-mark{width:40px;height:40px;border-radius:11px; background:#fff;
+  display:flex;align-items:center;justify-content:center; flex:none; padding:5px;
+  box-shadow:0 2px 10px rgba(0,0,0,.25);}
+.sb-mark img{width:100%; height:100%; object-fit:contain; display:block;}
 .sb-brand .t1{font-size:var(--fs-md); font-weight:700; font-family:var(--font-display); line-height:1.2;}
 .sb-brand .t2{font-size:10px; color:var(--steel-soft); letter-spacing:.12em; text-transform:uppercase; margin-top:2px;}
 
@@ -120,7 +138,7 @@ button,input,select,textarea{font-family:inherit;}
   transition:background .12s ease,color .12s ease;
 }
 .sb-link:hover{background:rgba(255,255,255,.08); color:#fff;}
-.sb-link.on{background:var(--steel); color:#fff; font-weight:600;}
+.sb-link.on{background:var(--brand-indigo); color:#fff; font-weight:700; box-shadow:0 2px 8px -2px rgba(108,92,231,.5);}
 .sb-link .ic{width:17px; text-align:center; font-size:13px; flex:none; opacity:.9;}
 .sb-link.hidden{display:none;}
 
@@ -152,7 +170,7 @@ button,input,select,textarea{font-family:inherit;}
 .page-head .sub{font-size:12.5px; color:var(--text-mute); margin-top:3px;}
 
 /* ============ CARDS / PANELS ============ */
-.panel{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px;}
+.panel{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px; box-shadow:var(--shadow-card);}
 .panel + .panel{margin-top:14px;}
 .panel h3{font-size:13px; font-weight:700; color:var(--ink); margin-bottom:3px;}
 .panel .panel-desc{font-size:11.5px; color:var(--text-mute); margin-bottom:13px;}
@@ -162,22 +180,27 @@ button,input,select,textarea{font-family:inherit;}
 
 /* corner ticks */
 .tick{position:relative;}
-.tick::before,.tick::after{content:"";position:absolute;width:9px;height:9px;border-color:var(--steel-soft);border-style:solid;border-width:0;pointer-events:none;}
+.tick::before,.tick::after{content:"";position:absolute;width:9px;height:9px;border-color:var(--brand-indigo);border-style:solid;border-width:0;pointer-events:none;opacity:.45;}
 .tick::before{top:-1px;left:-1px;border-top-width:2px;border-left-width:2px;border-top-left-radius:3px;}
 .tick::after{bottom:-1px;right:-1px;border-bottom-width:2px;border-right-width:2px;border-bottom-right-radius:3px;}
 
 /* ============ KPI ============ */
 .kpi-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px;}
-.kpi-card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px;}
-.kpi-label{font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-mute); font-weight:600; margin-bottom:8px;}
-.kpi-value{font-family:var(--font-mono); font-size:21px; font-weight:600; color:var(--ink);}
-.kpi-sub{font-size:11.5px; color:var(--text-faint); margin-top:5px;}
-.kpi-card.accent{background:linear-gradient(155deg,var(--navy),var(--navy-2)); border-color:var(--navy);}
-.kpi-card.accent .kpi-label{color:#C7D5EC;} .kpi-card.accent .kpi-value{color:#fff;} .kpi-card.accent .kpi-sub{color:#AFC0DE;}
-.kpi-card.danger-solid{background:linear-gradient(155deg,#C0392B,#9E2F21); border-color:#9E2F21;}
-.kpi-card.danger-solid .kpi-label{color:#FBD9D4;} .kpi-card.danger-solid .kpi-value{color:#fff; font-size:25px;} .kpi-card.danger-solid .kpi-sub{color:#F4C2BB;}
-.kpi-card.safe-solid{background:linear-gradient(155deg,#1E8E5A,#166B44); border-color:#166B44;}
-.kpi-card.safe-solid .kpi-label{color:#D3F0E1;} .kpi-card.safe-solid .kpi-value{color:#fff; font-size:25px;} .kpi-card.safe-solid .kpi-sub{color:#BFE7D3;}
+.kpi-card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px; box-shadow:var(--shadow-card); transition:box-shadow .15s ease, transform .15s ease;}
+.kpi-card:hover{box-shadow:var(--shadow-card-hover); transform:translateY(-1px);}
+.kpi-label{display:flex; align-items:center; gap:7px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-mute); font-weight:700; margin-bottom:10px;}
+.kpi-dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--text-faint);}
+.kpi-value{font-family:var(--font-mono); font-size:23px; font-weight:700; color:var(--ink); letter-spacing:-.01em;}
+.kpi-sub{font-size:var(--fs-sm); color:var(--text-faint); margin-top:6px;}
+/* Flat white cards with a small colored status dot (not a solid
+   gradient block) -- matches the owner's other in-house system
+   (Material & Stok) and reads calmer across a whole KPI row than four
+   solid color blocks fighting for attention. */
+.kpi-card.accent .kpi-dot{background:var(--brand-indigo);}
+.kpi-card.danger-solid .kpi-dot{background:var(--danger);}
+.kpi-card.danger-solid .kpi-value{color:var(--danger);}
+.kpi-card.safe-solid .kpi-dot{background:var(--safe);}
+.kpi-card.safe-solid .kpi-value{color:var(--safe);}
 
 /* ============ BUTTONS ============ */
 .btn{display:inline-flex; align-items:center; gap:7px; padding:8px 14px; border-radius:8px; border:1px solid transparent;
@@ -249,8 +272,10 @@ button,input,select,textarea{font-family:inherit;}
    scrollTop never otherwise moves when only the page scrolls. */
 .table-scroll-tall{max-height:72vh; overflow-y:auto;}
 table.dtab{width:100%; border-collapse:separate; border-spacing:0; font-size:var(--fs-base); min-width:640px;}
-table.dtab thead th{background:var(--navy); color:#fff; text-align:left; font-weight:600; font-size:var(--fs-xs);
-  text-transform:uppercase; letter-spacing:.03em; padding:10px 12px; white-space:nowrap; cursor:pointer; user-select:none;}
+table.dtab thead th{background:var(--paper); color:var(--text-mute); text-align:left; font-weight:700; font-size:var(--fs-xs);
+  text-transform:uppercase; letter-spacing:.04em; padding:11px 12px; white-space:nowrap; cursor:pointer; user-select:none;
+  border-bottom:2px solid var(--line);}
+table.dtab thead th:hover{color:var(--ink);}
 table.dtab thead th.num, table.dtab td.num{text-align:right;}
 table.dtab thead th.nosort{cursor:default;}
 table.dtab thead th .arrow{opacity:.45; font-size:9px; margin-left:3px;}
@@ -504,9 +529,9 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
   background:linear-gradient(160deg,var(--ink),#14294a 55%,var(--navy)); padding:20px;}
 .login-card{width:100%; max-width:380px; background:var(--card); border-radius:14px; padding:32px 28px;
   box-shadow:0 20px 60px rgba(0,0,0,.35);}
-.login-card .sb-mark{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,var(--steel),var(--navy-2));
-  display:flex;align-items:center;justify-content:center;color:#fff;font-family:var(--font-display);font-weight:700;
-  font-size:16px;margin-bottom:14px;}
+.login-card .sb-mark{width:52px;height:52px;border-radius:13px;background:var(--card);
+  display:flex;align-items:center;justify-content:center;margin-bottom:14px;padding:4px;
+  box-shadow:0 1px 3px rgba(11,29,51,.12); border:1px solid var(--line);}
 .login-card h1{font-size:19px;margin-bottom:2px;}
 .login-card .sub{color:var(--text-mute); font-size:12.5px; margin-bottom:20px;}
 .login-card label{display:block; font-size:12px; font-weight:600; color:var(--text-mute); margin:14px 0 5px;}
@@ -531,7 +556,7 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 
 <div id="loginScreen">
   <div class="login-card">
-    <div class="sb-mark">PG</div>
+    <div class="sb-mark"><img src="assets/logo.png" alt="Prakasa Group"></div>
     <h1>Prakasa Group — ACC v2</h1>
     <div class="sub">Masuk dengan akun admin atau owner untuk melanjutkan.</div>
     <form id="loginForm">
@@ -554,7 +579,7 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 <div class="app pre-auth" id="appRoot">
   <aside class="sidebar" id="sidebar">
     <div class="sb-brand">
-      <div class="sb-mark">PG</div>
+      <div class="sb-mark"><img src="assets/logo.png" alt="Prakasa Group"></div>
       <div>
         <div class="t1">Prakasa Group</div>
         <div class="t2">Sistem Akuntansi</div>
@@ -2591,7 +2616,7 @@ function renderDonut(el, items, opts){
 }
 function kpiCard(label,value,sub,variant){
   var c=variant==='accent'?' accent':variant==='danger'?' danger-solid':variant==='safe'?' safe-solid':'';
-  return '<div class="kpi-card'+c+'"><div class="kpi-label">'+esc(label)+'</div>'+
+  return '<div class="kpi-card'+c+'"><div class="kpi-label"><span class="kpi-dot"></span>'+esc(label)+'</div>'+
     '<div class="kpi-value">'+value+'</div>'+(sub?'<div class="kpi-sub">'+sub+'</div>':'')+'</div>';
 }
 function alertHTML(type,icon,title,body){
