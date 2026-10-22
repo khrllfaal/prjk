@@ -11,8 +11,12 @@ sendiri sebelum ke Hostinger, mulai dari
 
 ## Yang Anda butuhkan
 
-- Paket hosting Hostinger dengan PHP 8.1+ dan 1 database MySQL (semua
-  paket shared Hostinger sudah termasuk ini).
+- Paket hosting Hostinger dengan PHP dan 1 database MySQL (semua paket
+  shared Hostinger sudah termasuk ini). Gunakan versi PHP **terbaru yang
+  tersedia** di hPanel (bukan sekadar "8.1+") — PHP rutin merilis patch
+  keamanan untuk versi minor yang didukung, jadi versi lama yang sudah
+  tidak dipatch adalah risiko nyata. Cek/ubah di **hPanel → Advanced →
+  PHP Configuration**, dan cek ulang setiap beberapa bulan.
 - Akses **hPanel**. Akses **SSH** mempercepat beberapa langkah (tersedia
   mulai paket Premium/Business) tapi tidak wajib — setiap langkah yang
   butuh SSH punya alternatif lewat hPanel di bawah.
@@ -78,6 +82,13 @@ kalau belum ada.
 langkah tambahan, tapi boleh dicek dengan membuka
 `https://domainanda.com/api/config.php` di browser dan memastikan hasilnya
 403 Forbidden, bukan isi file.
+
+File `api/.user.ini` juga ikut ter-upload — ini mematikan `file_uploads`
+(API ini memang tidak punya fitur upload file) dan beberapa fungsi PHP
+berbahaya (`exec`, `shell_exec`, dll, yang juga tidak dipakai di mana
+pun di codebase ini). Hostinger membaca `.user.ini` otomatis tanpa
+perlu restart apa pun — tidak perlu langkah tambahan, cukup pastikan
+filenya ikut terupload ke folder `api/`.
 
 ## 4. Konfigurasi frontend (`backend-config.js`)
 

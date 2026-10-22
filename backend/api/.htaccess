@@ -1,5 +1,5 @@
 # Block direct access to anything that isn't a PHP entry point.
-<FilesMatch "\.(sql|md|sample)$">
+<FilesMatch "\.(sql|md|sample|ini)$">
     Require all denied
 </FilesMatch>
 <Files "config.php">
