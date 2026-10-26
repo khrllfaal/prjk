@@ -215,6 +215,7 @@ button,input,select,textarea{font-family:inherit;}
 .btn-success{background:var(--safe); color:#fff;}
 .btn-danger{background:var(--danger); color:#fff;}
 .btn-warn{background:#D89A00; color:#fff;}
+.btn-indigo{background:var(--brand-indigo); color:#fff;}
 .btn-ghost{background:var(--card); color:var(--text-mute); border-color:var(--line);}
 .btn-ghost:hover{border-color:var(--steel); color:var(--text);}
 .btn-sm{padding:5px 10px; font-size:11.5px; border-radius:6px;}
@@ -412,6 +413,13 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 /* ============ MODAL ============ */
 .modal-back{position:fixed; inset:0; background:rgba(11,29,51,.55); z-index:100; display:none; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto;}
 .modal-back.on{display:flex;}
+/* A second, independent modal layer stacked above the first — used by
+   pickers (like "Isi dari Riwayat Jurnal Umum") launched from inside an
+   already-open Tambah/Edit modal. This app's main modal is a single
+   shared instance (#modalBack/#modalBody), so opening a second one
+   through the same openModal()/closeModal() would overwrite the form
+   still underneath it instead of layering over it. */
+.overlay-back{z-index:150;}
 .modal{background:var(--card); border-radius:12px; width:100%; max-width:600px; box-shadow:0 18px 50px rgba(11,29,51,.3); animation:pop .18s ease;}
 .modal.wide{max-width:860px;}
 @keyframes pop{from{opacity:0;transform:translateY(-10px) scale(.98);}to{opacity:1;transform:none;}}
@@ -424,6 +432,39 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 .form-grid{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
 .form-grid .full{grid-column:1/-1;}
 @media (max-width:600px){.form-grid{grid-template-columns:1fr;}}
+
+/* ============ EXPORT PICKER (project checklist before download) ============ */
+.exp-picker-top{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px;}
+.exp-picker-all{display:flex; align-items:center; gap:8px; font-size:var(--fs-base); font-weight:700; color:var(--text); cursor:pointer; user-select:none;}
+.exp-picker-all input{width:17px; height:17px; accent-color:var(--brand-indigo); cursor:pointer;}
+.exp-picker-count{font-size:var(--fs-sm); color:var(--text-mute);}
+.exp-picker-search{margin-bottom:10px;}
+.exp-picker-search input{width:100%; padding:9px 12px; border:1px solid var(--line); border-radius:8px; font-size:var(--fs-base); font-family:inherit;}
+.exp-picker-list{max-height:380px; overflow-y:auto; border:1px solid var(--line); border-radius:10px;}
+.exp-picker-row{display:flex; align-items:center; gap:11px; padding:10px 14px; border-bottom:1px solid var(--line); font-size:var(--fs-base); cursor:pointer;}
+.exp-picker-row:last-child{border-bottom:none;}
+.exp-picker-row:hover{background:var(--paper);}
+.exp-picker-row input{width:17px; height:17px; flex:none; accent-color:var(--brand-indigo); cursor:pointer;}
+.exp-picker-row span{flex:1; line-height:1.4;}
+.exp-picker-empty{padding:20px; text-align:center; color:var(--text-faint); font-size:var(--fs-base);}
+
+/* ============ JURNAL UMUM HISTORY PICKER (Kas/Bank Keluar -> relasi ke Hutang Dagang) ============ */
+.jh-pick-hint{grid-column:1/-1; display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  background:var(--brand-indigo-bg); border:1px solid var(--brand-indigo-line); border-radius:10px; padding:10px 14px; margin-bottom:2px;}
+.jh-pick-hint span{font-size:var(--fs-sm); color:var(--text-mute); line-height:1.5;}
+.jh-picker-search{margin-bottom:10px;}
+.jh-picker-search input{width:100%; padding:9px 12px; border:1px solid var(--line); border-radius:8px; font-size:var(--fs-base); font-family:inherit;}
+.jh-picker-list{max-height:420px; overflow-y:auto; border:1px solid var(--line); border-radius:10px;}
+.jh-picker-row{display:flex; align-items:center; justify-content:space-between; gap:14px; width:100%;
+  padding:11px 14px; border-bottom:1px solid var(--line); background:none; border-left:0; border-right:0; border-top:0;
+  text-align:left; cursor:pointer; font-family:inherit;}
+.jh-picker-row:last-child{border-bottom:none;}
+.jh-picker-row:hover{background:var(--brand-indigo-bg);}
+.jh-picker-main{min-width:0;}
+.jh-picker-vendor{font-weight:700; font-size:var(--fs-base); color:var(--text);}
+.jh-picker-meta{font-size:var(--fs-sm); color:var(--text-mute); margin-top:2px;}
+.jh-picker-ket{font-size:var(--fs-sm); color:var(--text-faint); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:420px;}
+.jh-picker-amt{flex:none; font-weight:700; font-size:var(--fs-base); color:var(--danger); font-variant-numeric:tabular-nums; white-space:nowrap;}
 
 /* ============ TOAST ============ */
 .toast-wrap{position:fixed; bottom:22px; right:22px; z-index:200; display:flex; flex-direction:column; gap:9px;}
@@ -2868,6 +2909,142 @@ function bindExport(idPrefix, filename, headers, rowsFn, opts){
   if(p) p.onclick=function(){ exportPdf(filename, headers, rowsFn(), opts); };
 }
 
+/* A checklist of project names (search box, "Pilih Semua", a live
+   N-dari-M count) shown before an export actually downloads — lets a
+   report with many projects be filtered down to just the ones wanted
+   without first going back to change the page's own filters. names
+   must already be de-duplicated by the caller; onConfirm(selectedNames)
+   fires only once at least one project is still checked. */
+function openExportProjectPicker(names, onConfirm){
+  var checked={}; names.forEach(function(n){ checked[n]=true; });
+  function rowsHtml(filter){
+    var f=(filter||'').toLowerCase();
+    var shown=f?names.filter(function(n){ return n.toLowerCase().indexOf(f)>-1; }):names;
+    if(!shown.length) return '<div class="exp-picker-empty">Tidak ada proyek yang cocok.</div>';
+    return shown.map(function(n){
+      return '<label class="exp-picker-row"><input type="checkbox" class="exp-chk" data-proj="'+esc(n)+'"'+
+        (checked[n]?' checked':'')+'><span>'+esc(n)+'</span></label>';
+    }).join('');
+  }
+  function updateCount(){
+    var n=names.filter(function(x){ return checked[x]; }).length;
+    document.getElementById('expPickCount').textContent=n+' dari '+names.length+' proyek dipilih';
+    document.getElementById('expPickAll').checked=(n===names.length);
+  }
+  function wireRows(){
+    document.querySelectorAll('.exp-chk').forEach(function(el){
+      el.onchange=function(){ checked[el.getAttribute('data-proj')]=el.checked; updateCount(); };
+    });
+  }
+  var html=
+    '<div class="exp-picker-search"><input type="text" id="expPickSearch" placeholder="Cari proyek…"></div>'+
+    '<div class="exp-picker-top">'+
+      '<label class="exp-picker-all"><input type="checkbox" id="expPickAll" checked> Pilih Semua</label>'+
+      '<span class="exp-picker-count" id="expPickCount"></span>'+
+    '</div>'+
+    '<div class="exp-picker-list" id="expPickList">'+rowsHtml('')+'</div>';
+  openModal('Pilih Proyek untuk Diunduh', html, {wide:true, saveLabel:'Download', onSave:function(){
+    var selected=names.filter(function(n){ return checked[n]; });
+    if(!selected.length){ toast('Pilih minimal 1 proyek.','danger'); return; }
+    closeModal();
+    onConfirm(selected);
+  }});
+  wireRows(); updateCount();
+  document.getElementById('expPickAll').onchange=function(e){
+    names.forEach(function(n){ checked[n]=e.target.checked; });
+    document.getElementById('expPickList').innerHTML=rowsHtml(fv('expPickSearch'));
+    wireRows(); updateCount();
+  };
+  document.getElementById('expPickSearch').addEventListener('input', function(){
+    document.getElementById('expPickList').innerHTML=rowsHtml(this.value);
+    wireRows();
+  });
+}
+
+/* Lazily-created second modal layer, independent of openModal()/
+   closeModal()'s single shared instance — see .overlay-back's comment.
+   No footer/save button: every picker built on this closes itself the
+   moment something is picked, there's no separate "confirm" step. */
+function ensureOverlay(){
+  if(document.getElementById('ovBack')) return;
+  var div=document.createElement('div');
+  div.className='modal-back overlay-back';
+  div.id='ovBack';
+  div.innerHTML='<div class="modal wide" id="ovBox">'+
+    '<div class="modal-head"><h3 id="ovTitle"></h3><button class="modal-close" id="ovClose">&times;</button></div>'+
+    '<div class="modal-body" id="ovBody"></div>'+
+  '</div>';
+  document.body.appendChild(div);
+  document.getElementById('ovClose').onclick=closeOverlay;
+  div.addEventListener('click', function(e){ if(e.target===div) closeOverlay(); });
+}
+function openOverlay(title, bodyHTML){
+  ensureOverlay();
+  document.getElementById('ovTitle').textContent=title;
+  document.getElementById('ovBody').innerHTML=bodyHTML;
+  document.getElementById('ovBack').classList.add('on');
+}
+function closeOverlay(){
+  var el=document.getElementById('ovBack');
+  if(el) el.classList.remove('on');
+}
+
+/* "Isi dari Riwayat Jurnal Umum" — the Kas/Bank Keluar form's shortcut
+   for the everyday case of paying down a Hutang Dagang that was
+   originally booked through a Jurnal Umum voucher (a supplier invoice):
+   search/browse every posted Jurnal Umum line against akun Hutang
+   Dagang, click one, and onPick(line) hands the caller that line's
+   vendor/project/keterangan/nominal to prefill the payment form with
+   (still fully editable afterward — a partial payment is normal and
+   this app has no separate "sisa tagihan per voucher" ledger to check
+   against, so the picker shows the voucher's original amount, not a
+   remaining balance). Mirrors the manual ref-matching this app's own
+   daily sync workflow already does by hand (see backend/mysql/sync_*
+   .sql's relasi-by-delta-match pattern) as a feature inside the app
+   itself, the way sistem asli (Accurate) does with its own "pilih
+   transaksi" bill-pay picker. */
+function openJurnalHutangPicker(onPick){
+  var bills=DB.jurnal.filter(function(j){
+    return akunNamaOnly(j.akun)==='Hutang Dagang' && j.kredit>0 && j.status!=='draft';
+  }).sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+
+  function rowsHtml(filter){
+    var f=(filter||'').toLowerCase();
+    var shown=f?bills.filter(function(j){
+      return [j.relasi,j.project,j.ket,j.ref,j.noFaktur].join(' ').toLowerCase().indexOf(f)>-1;
+    }):bills;
+    if(!shown.length) return '<div class="exp-picker-empty">Tidak ada voucher Hutang Dagang yang cocok.</div>';
+    return shown.map(function(j){
+      return '<button type="button" class="jh-picker-row" data-ref="'+esc(j.ref)+'" data-id="'+esc(j.id)+'">'+
+        '<div class="jh-picker-main">'+
+          '<div class="jh-picker-vendor">'+esc(j.relasi||'(Tanpa Relasi)')+'</div>'+
+          '<div class="jh-picker-meta">'+esc(j.ref)+' · '+fmtDate(j.tgl)+(j.project?' · '+esc(j.project):'')+'</div>'+
+          (j.ket?'<div class="jh-picker-ket">'+esc(j.ket)+'</div>':'')+
+        '</div>'+
+        '<div class="jh-picker-amt">'+rp(j.kredit)+'</div>'+
+      '</button>';
+    }).join('');
+  }
+  function wireRows(){
+    document.querySelectorAll('.jh-picker-row').forEach(function(btn){
+      btn.onclick=function(){
+        var line=bills.find(function(j){ return j.id===btn.getAttribute('data-id'); });
+        closeOverlay();
+        if(line) onPick(line);
+      };
+    });
+  }
+  var html=
+    '<div class="jh-picker-search"><input type="text" id="jhPickSearch" placeholder="Cari vendor / project / ref / keterangan…"></div>'+
+    '<div class="jh-picker-list" id="jhPickList">'+rowsHtml('')+'</div>';
+  openOverlay('Pilih Voucher Hutang Dagang dari Jurnal Umum', html);
+  wireRows();
+  document.getElementById('jhPickSearch').addEventListener('input', function(){
+    document.getElementById('jhPickList').innerHTML=rowsHtml(this.value);
+    wireRows();
+  });
+}
+
 /* ---------------- boot ---------------- */
 document.addEventListener('DOMContentLoaded', function(){
   buildNav();
@@ -3141,13 +3318,27 @@ function financePage(jenis, title, sub){
       var lawanOpts=DB.coa.filter(function(a){ return a.level>=3; })
         .slice().sort(function(a,b){ return compareKode(a.kode,b.kode); })
         .map(function(a){ return {value:a.nama, label:a.kode+'-'+a.nama}; });
-      var relasiList=isIn?DB.customers:DB.vendors;
-      var relasiOpts=[''].concat(relasiList.map(function(r){ return r.nama; }));
-      var relasiLabel=isIn?'Customer':'Vendor';
+      // Vendor/Customer picker normally follows transaction direction
+      // (Kas/Bank Masuk -> Customer, Kas/Bank Keluar -> Vendor), but the
+      // two accounts that carry their own counterpart identity override
+      // that regardless of direction — a Kas Keluar that pays down/adds
+      // to Piutang Usaha is still about a customer (e.g. an advance to
+      // a customer, or a customer's cash refund), and one against Hutang
+      // Dagang is always about a vendor, even on the rare Kas Masuk side
+      // (a vendor refund). Matches sistem asli's own relasi-by-akun-
+      // lawan behavior rather than just relasi-by-transaction-type.
+      function relasiCtxFor(akunLawanVal){
+        if(akunLawanVal==='Piutang Usaha') return {list:DB.customers, label:'Customer', isCustomer:true};
+        if(akunLawanVal==='Hutang Dagang') return {list:DB.vendors, label:'Vendor', isCustomer:false};
+        return isIn?{list:DB.customers,label:'Customer',isCustomer:true}:{list:DB.vendors,label:'Vendor',isCustomer:false};
+      }
       var v=function(k,d){ return rec?(rec[k]!==undefined?rec[k]:d):d; };
+      var relasiCtx=relasiCtxFor(v('akunLawan',''));
       var amount=rec?(isIn?rec.debet:rec.kredit):'';
 
       var html='<div class="form-grid">'+
+        (isIn?'':'<div class="jh-pick-hint"><button type="button" class="btn btn-indigo btn-sm" id="f_pickJurnal">⇄ Isi dari Riwayat Jurnal Umum</button>'+
+          '<span>Pilih voucher Hutang Dagang untuk mengisi Akun Lawan, Vendor, Project, Deskripsi &amp; Amount otomatis — semua tetap bisa diedit sebelum disimpan.</span></div>')+
         '<div class="field"><label>No. Transaksi</label><input type="text" id="f_refPreview" value="'+
           esc(rec?rec.ref:nextRefFor(jenis, v('tgl',todayISO())))+'" disabled></div>'+
         '<div class="field"><label>Tanggal *</label><input type="date" id="f_tgl" value="'+esc(v('tgl',todayISO()))+'"></div>'+
@@ -3155,7 +3346,7 @@ function financePage(jenis, title, sub){
           '<div id="f_akunKas_ssel"></div><input type="hidden" id="f_akunKas" value="'+esc(v('akunKas',''))+'"></div>'+
         '<div class="field"><label>Akun Lawan *</label>'+
           '<div id="f_akunLawan_ssel"></div><input type="hidden" id="f_akunLawan" value="'+esc(v('akunLawan',''))+'"></div>'+
-        '<div class="field"><label>'+relasiLabel+'</label>'+
+        '<div class="field"><label id="f_relasi_label">'+relasiCtx.label+'</label>'+
           '<div id="f_relasi_ssel"></div><input type="hidden" id="f_relasi" value="'+esc(v('relasi',''))+'"></div>'+
         '<div class="field"><label>Project</label>'+
           '<div id="f_project_ssel"></div><input type="hidden" id="f_project" value="'+esc(v('project',''))+'"></div>'+
@@ -3173,9 +3364,10 @@ function financePage(jenis, title, sub){
         obj.akunLawan=fv('f_akunLawan');
         obj.project=fv('f_project');
         obj.relasi=fv('f_relasi')==='–'?'':fv('f_relasi');
-        var relasiRec=relasiList.find(function(r){ return r.nama===obj.relasi; });
-        obj.customerId=isIn?(relasiRec?relasiRec.id:null):null;
-        obj.vendorId=!isIn?(relasiRec?relasiRec.id:null):null;
+        var saveCtx=relasiCtxFor(obj.akunLawan);
+        var relasiRec=saveCtx.list.find(function(r){ return r.nama===obj.relasi; });
+        obj.customerId=saveCtx.isCustomer?(relasiRec?relasiRec.id:null):null;
+        obj.vendorId=!saveCtx.isCustomer?(relasiRec?relasiRec.id:null):null;
         obj.ket=fv('f_ket');
         obj.debet=isIn?amt:0;
         obj.kredit=isIn?0:amt;
@@ -3192,14 +3384,44 @@ function financePage(jenis, title, sub){
         placeholder:'Cari kode / nama akun…'});
       searchableSelect('f_project_ssel','f_project',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
         placeholder:'Cari project…'});
-      searchableSelect('f_relasi_ssel','f_relasi',{options:relasiList.map(function(r){ return {value:r.nama,label:r.nama}; }),
-        placeholder:'Cari '+relasiLabel.toLowerCase()+'…'});
+      function renderRelasiField(keepValue){
+        relasiCtx=relasiCtxFor(fv('f_akunLawan'));
+        document.getElementById('f_relasi_label').textContent=relasiCtx.label;
+        if(!keepValue || !relasiCtx.list.some(function(r){ return r.nama===fv('f_relasi'); })){
+          document.getElementById('f_relasi').value='';
+        }
+        searchableSelect('f_relasi_ssel','f_relasi',{options:relasiCtx.list.map(function(r){ return {value:r.nama,label:r.nama}; }),
+          placeholder:'Cari '+relasiCtx.label.toLowerCase()+'…'});
+      }
+      renderRelasiField(true);
+      // Switching Akun Lawan to/from Piutang Usaha or Hutang Dagang
+      // swaps the picker between Customer/Vendor live, so the field
+      // always matches what's actually being picked — not just whatever
+      // list this form happened to open with.
+      document.getElementById('f_akunLawan').addEventListener('change', function(){ renderRelasiField(false); });
       if(!rec){
         document.getElementById('f_tgl').addEventListener('change', function(){
           document.getElementById('f_refPreview').value=nextRefFor(jenis, fv('f_tgl'));
         });
       }
       bindCurrencyInput('f_amount');
+      var pickBtn=document.getElementById('f_pickJurnal');
+      if(pickBtn){
+        pickBtn.onclick=function(){
+          openJurnalHutangPicker(function(line){
+            document.getElementById('f_akunLawan').value='Hutang Dagang';
+            searchableSelect('f_akunLawan_ssel','f_akunLawan',{options:lawanOpts, placeholder:'Cari kode / nama akun…'});
+            document.getElementById('f_relasi').value=line.relasi||'';
+            renderRelasiField(true);
+            document.getElementById('f_project').value=line.project||'';
+            searchableSelect('f_project_ssel','f_project',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
+              placeholder:'Cari project…'});
+            document.getElementById('f_ket').value=line.ket||'';
+            document.getElementById('f_amount').value=formatThousands(line.kredit);
+            toast('Form diisi dari voucher '+line.ref+'. Cek & sesuaikan sebelum disimpan.','success');
+          });
+        };
+      }
     }
 
     function del(id){
@@ -3571,20 +3793,36 @@ function registerPages(){
           });
         }});
       bindSearch('qProg', progTbl);
-      bindExport('prog', 'Rincian_Progress_Proyek',
-        ['No','Nama Proyek','Pemberi Proyek','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Biaya Akomodasi','Total Pengeluaran RAP',
-         'Sisa RAP','Status RAP','Cost Center','Adm Fee','Total Pengeluaran','Hasil Usaha'],
-        function(){
-          var list=progTbl.getFiltered();
-          var rows=list.map(function(r,i){
-            return [i+1,r.nama,r.pemberiProyek,r.kontrak,r.rap,r.bahan,r.upah,r.akomodasi,r.totalRap,r.sisaRap,r.statusRap,
-              r.costCenter,r.admFee,r.totalPengeluaran,r.hasilUsaha];
-          });
-          function sum(key){ return list.reduce(function(a,b){ return a+b[key]; },0); }
-          rows.push(['','TOTAL','',sum('kontrak'),sum('rap'),sum('bahan'),sum('upah'),sum('akomodasi'),sum('totalRap'),sum('sisaRap'),'',
-            sum('costCenter'),sum('admFee'),sum('totalPengeluaran'),sum('hasilUsaha')]);
-          return rows;
+      // Download diperantarai pemilihan proyek (checklist, bisa dicari,
+      // "Pilih Semua") alih-alih langsung men-download seluruh baris
+      // yang sedang tampil di filter halaman — supaya laporan bisa
+      // dipersempit ke proyek tertentu tanpa harus ganti filter Pemberi
+      // Proyek/tanggal lebih dulu.
+      var progHeaders=['No','Nama Proyek','Pemberi Proyek','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Biaya Akomodasi','Total Pengeluaran RAP',
+        'Sisa RAP','Status RAP','Cost Center','Adm Fee','Total Pengeluaran','Hasil Usaha'];
+      function buildProgExportRows(list){
+        var rows=list.map(function(r,i){
+          return [i+1,r.nama,r.pemberiProyek,r.kontrak,r.rap,r.bahan,r.upah,r.akomodasi,r.totalRap,r.sisaRap,r.statusRap,
+            r.costCenter,r.admFee,r.totalPengeluaran,r.hasilUsaha];
         });
+        function sum(key){ return list.reduce(function(a,b){ return a+b[key]; },0); }
+        rows.push(['','TOTAL','',sum('kontrak'),sum('rap'),sum('bahan'),sum('upah'),sum('akomodasi'),sum('totalRap'),sum('sisaRap'),'',
+          sum('costCenter'),sum('admFee'),sum('totalPengeluaran'),sum('hasilUsaha')]);
+        return rows;
+      }
+      function doProgExport(kind){
+        var list=progTbl.getFiltered();
+        var names=list.map(function(r){ return r.nama; });
+        openExportProjectPicker(names, function(selected){
+          var selSet={}; selected.forEach(function(n){ selSet[n]=true; });
+          var filtered=list.filter(function(r){ return selSet[r.nama]; });
+          var rows=buildProgExportRows(filtered);
+          if(kind==='excel') exportExcel('Rincian_Progress_Proyek', progHeaders, rows);
+          else exportPdf('Rincian_Progress_Proyek', progHeaders, rows);
+        });
+      }
+      document.getElementById('progExcel').onclick=function(){ doProgExport('excel'); };
+      document.getElementById('progPdf').onclick=function(){ doProgExport('pdf'); };
     }
 
     // Everything above this point (cards, donuts, dual progress bars,
