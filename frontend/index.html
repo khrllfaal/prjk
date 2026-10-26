@@ -1461,16 +1461,114 @@ function projectCostTxns(projectNama, kind, from, to){
 
 var HUTANG_DAGANG_CODE='2.1.1';
 
+var HUTANG_BULAN_NAMA={januari:1,jan:1,februari:2,feb:2,maret:3,mar:3,april:4,apr:4,
+  mei:5,juni:6,jun:6,juli:7,jul:7,agustus:8,agt:8,september:9,sep:9,
+  oktober:10,okt:10,november:11,nov:11,desember:12,des:12};
+
+/* Pull every "D/M", "D/M/YY", "tgl D & D <bulan>" or "D <bulan>" date a
+   piece of free-text keterangan mentions — real invoice dates typed by
+   hand (e.g. "nota berkat 29/8", "bayar nota cv berkat tgl 2 & 5 maret"),
+   not necessarily the same as the row's own tgl field. Returns a list of
+   {d,m} (deduped), day/month only — the year in these books is always
+   the same run, so matching day+month is enough to disambiguate. */
+function hutangParseDateTokens(ket){
+  var out=[], seen={}; ket=String(ket||'').toLowerCase();
+  function push(d,m){ if(d>=1&&d<=31&&m>=1&&m<=12){ var k=d+'/'+m; if(!seen[k]){ seen[k]=1; out.push({d:d,m:m}); } } }
+  var re=/(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?/g, mm;
+  while((mm=re.exec(ket))) push(parseInt(mm[1],10), parseInt(mm[2],10));
+  re=/tgl\s+(\d{1,2})(?:\s*&\s*(\d{1,2}))?\s+(\w+)/g;
+  while((mm=re.exec(ket))){
+    var mo=HUTANG_BULAN_NAMA[mm[3]];
+    if(mo){ push(parseInt(mm[1],10), mo); if(mm[2]) push(parseInt(mm[2],10), mo); }
+  }
+  re=/(\d{1,2})\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)/g;
+  while((mm=re.exec(ket))){ var mo2=HUTANG_BULAN_NAMA[mm[2]]; if(mo2) push(parseInt(mm[1],10), mo2); }
+  return out;
+}
+
+/* The invoice date a nota's own keterangan cites in parens (e.g. "cat
+   nippon (18/9/26)") — falling back to the nota's jurnal-posting tgl when
+   the keterangan has no such date, which is what a bare "nota berkat 24/4"
+   with no parenthetical in the voucher itself still matches against. */
+function hutangNotaDate(n){
+  var m=/\((\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\)/.exec(n.ket||'');
+  if(m) return {d:parseInt(m[1],10), m:parseInt(m[2],10)};
+  if(n.tgl){ var p=n.tgl.split('-'); if(p.length===3) return {d:parseInt(p[2],10), m:parseInt(p[1],10)}; }
+  return null;
+}
+
 /* Trial Hutang: per-nota (invoice-level) payable status. A "nota" is a
    jurnal umum entry crediting Hutang Dagang (the accrual when goods/
    services are received on credit); it's paid off later by a kas/bank
-   keluar transaction whose akun lawan is also Hutang Dagang. Payments
-   are matched to notas per vendor, oldest nota first (FIFO) — this is
-   a best-effort auto-link (the books don't record nota-to-payment
-   references directly), so a vendor with several open notas may show
-   an earlier one as paid before a later one if payments don't state
-   which nota they cover. Adjust manually if that ordering is wrong for
-   a specific case.  */
+   keluar transaction whose akun lawan is also Hutang Dagang. A payment
+   tagged "(Nota:<ref>)" pays that exact nota directly (no guessing). For
+   the many older payments with no such tag, the keterangan almost always
+   still names the invoice date being settled ("nota berkat 29/8", "bayar
+   nota cv berkat tgl 2 & 5 maret") -- hutangDateMatchPayments() below
+   reads that date, finds the same vendor+project's nota(s) whose own
+   date matches, and -- only when the amount (or sum of 2-3 candidates'
+   amounts) lines up with the payment to within a small typo tolerance --
+   settles those specific notas directly, the same read-only way a
+   (Nota:) tag would. This never writes anything back to the data; a
+   payment whose date/amount can't be pinned down this confidently still
+   falls through to the plain per-vendor FIFO pool further below, exactly
+   as before. */
+function hutangDateMatchPayments(payments, notas){
+  var TOL=10000; // real typos seen in the books top out at Rp10.000
+  var byVendorProject={};
+  notas.forEach(function(n){
+    if(n.direct>0 || !n.vendor || n.vendor==='(Tanpa Vendor)') return;
+    var d=hutangNotaDate(n);
+    if(!d) return;
+    var key=n.vendor+'|'+n.project+'|'+d.d+'/'+d.m;
+    (byVendorProject[key]=byVendorProject[key]||[]).push(n);
+  });
+  payments.forEach(function(p){
+    if(!p.relasi || p.resolved) return;
+    var tokens=hutangParseDateTokens(p.ket);
+    if(!tokens.length) return;
+    var cands=[], seenIds={};
+    tokens.forEach(function(t){
+      var list=byVendorProject[p.relasi+'|'+p.project+'|'+t.d+'/'+t.m]||[];
+      list.forEach(function(n){ if(!seenIds[n.id] && n.direct<=0){ seenIds[n.id]=1; cands.push(n); } });
+    });
+    if(!cands.length) return;
+    // exactly one candidate whose own amount matches the payment -> that one
+    var exact=cands.filter(function(n){ return Math.abs(n.amount-p.kredit)<=TOL; });
+    var chosen=null;
+    if(exact.length===1) chosen=[exact[0]];
+    else if(cands.length<=4){
+      // try every subset (small, bounded) for a combined sum within tolerance
+      for(var size=1; size<=cands.length && !chosen; size++){
+        chosen=hutangFindSubsetSum(cands, size, p.kredit, TOL);
+      }
+    }
+    if(!chosen) return;
+    var total=chosen.reduce(function(a,n){ return a+n.amount; },0);
+    var remaining=p.kredit;
+    chosen.forEach(function(n,i){
+      var share=i===chosen.length-1?remaining:Math.round(p.kredit*(n.amount/total));
+      n.direct+=share; remaining-=share;
+    });
+    p.resolved=true;
+  });
+}
+function hutangFindSubsetSum(list, size, target, tol){
+  var n=list.length, idx=[];
+  function combo(start, chosen){
+    if(chosen.length===size){
+      var s=chosen.reduce(function(a,n){ return a+n.amount; },0);
+      if(Math.abs(s-target)<=tol) return chosen.slice();
+      return null;
+    }
+    for(var i=start;i<n;i++){
+      var r=combo(i+1, chosen.concat([list[i]]));
+      if(r) return r;
+    }
+    return null;
+  }
+  return combo(0, []);
+}
 function computeHutangDagangRows(){
   var notas=postedJurnal().filter(function(j){
     return akunKode(j.akun)===HUTANG_DAGANG_CODE && j.kredit>0;
@@ -1509,12 +1607,20 @@ function computeHutangDagangRows(){
   // itself genuinely has no vendor also displays as "(Tanpa Vendor)", and
   // sharing one key would incorrectly let it cut in line ahead of older,
   // properly vendor-attributed notas.
-  var pool={}, unattributed=0;
+  var pool={}, unattributed=0, untagged=[];
   DB.txns.forEach(function(t){
     if(!/keluar$/.test(t.jenis) || akunKode(t.akunLawan)!==HUTANG_DAGANG_CODE) return;
     var m=/\(Nota:([^)]+)\)/.exec(t.ket||'');
     var target=m?byRef[m[1]]:null;
     if(target){ target.direct+=t.kredit; return; }
+    untagged.push(t);
+  });
+  // Before falling back to per-vendor FIFO, try to pin each untagged
+  // payment to the exact nota(s) its own keterangan's invoice date (and
+  // matching amount) points to -- see hutangDateMatchPayments() above.
+  hutangDateMatchPayments(untagged, notas);
+  untagged.forEach(function(t){
+    if(t.resolved) return;
     if(t.relasi) pool[t.relasi]=(pool[t.relasi]||0)+t.kredit;
     else unattributed+=t.kredit;
   });
