@@ -2830,7 +2830,14 @@ var NAV=[
   ]},
   {sec:'Laporan', items:[
     {id:'lap_hutang', label:'Laporan Hutang', ic:'○'},
-    {id:'trial_hutang', label:'Trial Hutang', ic:'○'},
+    // Trial Hutang disembunyikan lagi dari menu (bukan dihapus --
+    // PAGES.trial_hutang di bawah masih utuh, dan computeHutangDagangRows()
+    // yang sama masih dipakai langsung oleh picker "Isi dari Riwayat
+    // Jurnal Umum" di form Kas Keluar) atas permintaan owner: cukup
+    // lewat Kas Keluar saja, tidak perlu halaman terpisah. Kembalikan
+    // baris di bawah kalau sewaktu-waktu halaman tersendirinya
+    // dibutuhkan lagi.
+    // {id:'trial_hutang', label:'Trial Hutang', ic:'○'},
     {id:'lap_piutang', label:'Laporan Piutang', ic:'○'},
     {id:'lap_prive', label:'Laporan Prive', ic:'○'},
     {id:'mutasi', label:'Mutasi Kas / Bank', ic:'○'},
