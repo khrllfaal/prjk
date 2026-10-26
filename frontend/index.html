@@ -215,7 +215,6 @@ button,input,select,textarea{font-family:inherit;}
 .btn-success{background:var(--safe); color:#fff;}
 .btn-danger{background:var(--danger); color:#fff;}
 .btn-warn{background:#D89A00; color:#fff;}
-.btn-indigo{background:var(--brand-indigo); color:#fff;}
 .btn-ghost{background:var(--card); color:var(--text-mute); border-color:var(--line);}
 .btn-ghost:hover{border-color:var(--steel); color:var(--text);}
 .btn-sm{padding:5px 10px; font-size:11.5px; border-radius:6px;}
@@ -413,13 +412,6 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 /* ============ MODAL ============ */
 .modal-back{position:fixed; inset:0; background:rgba(11,29,51,.55); z-index:100; display:none; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto;}
 .modal-back.on{display:flex;}
-/* A second, independent modal layer stacked above the first — used by
-   the Hutang Dagang picker launched from inside an already-open
-   Tambah/Edit Kas Keluar modal. This app's main modal is a single
-   shared instance (#modalBack/#modalBody), so opening a second one
-   through the same openModal()/closeModal() would overwrite the form
-   still underneath it instead of layering over it. */
-.overlay-back{z-index:150;}
 .modal{background:var(--card); border-radius:12px; width:100%; max-width:600px; box-shadow:0 18px 50px rgba(11,29,51,.3); animation:pop .18s ease;}
 .modal.wide{max-width:860px;}
 @keyframes pop{from{opacity:0;transform:translateY(-10px) scale(.98);}to{opacity:1;transform:none;}}
@@ -448,30 +440,11 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 .exp-picker-row span{flex:1; line-height:1.4;}
 .exp-picker-empty{padding:20px; text-align:center; color:var(--text-faint); font-size:var(--fs-base);}
 
-/* ============ HUTANG DAGANG BELUM DIBAYAR (picker modal, Kas Keluar) ============ */
-.hd-pick-hint{grid-column:1/-1; display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-  background:var(--brand-indigo-bg); border:1px solid var(--brand-indigo-line); border-radius:10px; padding:10px 14px; margin-bottom:2px;}
-.hd-pick-hint span{font-size:var(--fs-sm); color:var(--text-mute); line-height:1.5;}
-.hd-picker-search{margin-bottom:10px;}
-.hd-picker-search input{width:100%; padding:9px 12px; border:1px solid var(--line); border-radius:8px; font-size:var(--fs-base); font-family:inherit;}
-.hd-picker-list{max-height:420px; overflow-y:auto; border:1px solid var(--line); border-radius:10px;}
-.hd-picker-row{display:flex; align-items:center; justify-content:space-between; gap:14px; width:100%;
-  padding:11px 14px; border-bottom:1px solid var(--line); background:none; border-left:0; border-right:0; border-top:0;
-  text-align:left; cursor:pointer; font-family:inherit;}
-.hd-picker-row:last-child{border-bottom:none;}
-.hd-picker-row:hover{background:var(--brand-indigo-bg);}
-.hd-picker-main{min-width:0;}
-.hd-picker-vendor{font-weight:700; font-size:var(--fs-base); color:var(--text);}
-.hd-picker-meta{font-size:var(--fs-sm); color:var(--text-mute); margin-top:2px;}
-.hd-picker-ket{font-size:var(--fs-sm); color:var(--text-faint); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:420px;}
-.hd-picker-amt{flex:none; font-weight:700; font-size:var(--fs-base); color:var(--danger); font-variant-numeric:tabular-nums; white-space:nowrap;}
-.hd-picker-empty{padding:20px; text-align:center; color:var(--text-faint); font-size:var(--fs-base);}
-
 /* ============ TOAST ============ */
 .toast-wrap{position:fixed; bottom:22px; right:22px; z-index:200; display:flex; flex-direction:column; gap:9px;}
 .toast{background:var(--ink); color:#fff; padding:11px 16px; border-radius:9px; font-size:12.5px; font-weight:500;
   box-shadow:0 8px 24px rgba(11,29,51,.28); animation:slidein .2s ease; max-width:340px;}
-.toast.success{background:var(--safe);} .toast.danger{background:var(--danger);} .toast.warn{background:var(--warn);}
+.toast.success{background:var(--safe);} .toast.danger{background:var(--danger);}
 @keyframes slidein{from{opacity:0;transform:translateX(20px);}to{opacity:1;transform:none;}}
 
 /* ============ COA TREE ============ */
@@ -2827,11 +2800,7 @@ var NAV=[
   ]},
   {sec:'Laporan', items:[
     {id:'lap_hutang', label:'Laporan Hutang', ic:'○'},
-    // Trial Hutang sementara disembunyikan dari menu (bukan dihapus --
-    // PAGES.trial_hutang di bawah masih utuh) atas permintaan owner:
-    // isinya dianggap masih berantakan. Kembalikan baris di bawah untuk
-    // menampilkannya lagi kalau datanya sudah dirapikan.
-    // {id:'trial_hutang', label:'Trial Hutang', ic:'○'},
+    {id:'trial_hutang', label:'Trial Hutang', ic:'○'},
     {id:'lap_piutang', label:'Laporan Piutang', ic:'○'},
     {id:'lap_prive', label:'Laporan Prive', ic:'○'},
     {id:'mutasi', label:'Mutasi Kas / Bank', ic:'○'},
@@ -2973,142 +2942,6 @@ function openExportProjectPicker(names, onConfirm){
   };
   document.getElementById('expPickSearch').addEventListener('input', function(){
     document.getElementById('expPickList').innerHTML=rowsHtml(this.value);
-    wireRows();
-  });
-}
-
-// Automatically figures out which Hutang Dagang voucher in Jurnal Umum
-// is still unpaid, by matching every Kas/Bank Keluar payment against
-// Hutang Dagang (ALL of them — old data included, not just ones
-// entered after this existed) to the Jurnal Umum voucher it most
-// likely settles — same nilai (to the rupiah), same vendor, same
-// project where possible. No stored link field, no manual picking:
-// this just recomputes live off DB.txns + DB.jurnal every time it's
-// called, exactly mirroring the exact-amount delta-matching this app's
-// own daily sync workflow already does by hand (see backend/mysql/
-// sync_*.sql's relasi-by-delta-match pattern).
-//
-// Matching rule, oldest-first on both sides (so an older voucher is
-// claimed before a newer one with the same amount): for each payment,
-// first look for an unclaimed voucher with the exact same amount AND
-// same vendor AND same project; if none, fall back to same amount +
-// vendor only (a payment's project sometimes doesn't match its
-// voucher's project 1:1 in the real data). A payment that still
-// matches nothing is simply not counted against any voucher — it does
-// NOT get invented a match, and does not affect any voucher's status.
-//
-// Because this is pure amount/vendor/project matching with no stored
-// link, two different vouchers that happen to share the exact same
-// amount, vendor and project are matched in date order on both sides,
-// which is the best available signal without an explicit invoice
-// number in the data — not a 100% guarantee for that specific edge
-// case, so always cross-check Laporan Hutang's vendor total if a
-// result here looks surprising.
-function computeHutangDagangBelumLunas(){
-  var bills=DB.jurnal.filter(function(j){
-    return akunNamaOnly(j.akun)==='Hutang Dagang' && j.kredit>0 && j.status!=='draft';
-  }).slice().sort(function(a,b){ return a.tgl<b.tgl?-1:1; });
-  var payments=DB.txns.filter(function(t){
-    return /keluar$/.test(t.jenis) && akunNamaOnly(t.akunLawan)==='Hutang Dagang' && t.kredit>0;
-  }).slice().sort(function(a,b){ return a.tgl<b.tgl?-1:1; });
-
-  var claimed={};
-  payments.forEach(function(pay){
-    var bill=bills.find(function(b){
-      return !claimed[b.id] && Math.abs(b.kredit-pay.kredit)<1 && b.relasi===pay.relasi && b.project===pay.project;
-    });
-    if(!bill){
-      bill=bills.find(function(b){
-        return !claimed[b.id] && Math.abs(b.kredit-pay.kredit)<1 && b.relasi===pay.relasi;
-      });
-    }
-    if(bill) claimed[bill.id]=true;
-  });
-  return bills.filter(function(b){ return !claimed[b.id]; });
-}
-computeHutangDagangBelumLunas=memoizeOnDb(computeHutangDagangBelumLunas, cloneRowArray);
-
-/* Lazily-created second modal layer, independent of openModal()/
-   closeModal()'s single shared instance — see .overlay-back's comment.
-   No footer/save button: the picker built on this closes itself the
-   moment a voucher is clicked, there's no separate "confirm" step. */
-function ensureOverlay(){
-  if(document.getElementById('ovBack')) return;
-  var div=document.createElement('div');
-  div.className='modal-back overlay-back';
-  div.id='ovBack';
-  div.innerHTML='<div class="modal wide" id="ovBox">'+
-    '<div class="modal-head"><h3 id="ovTitle"></h3><button class="modal-close" id="ovClose">&times;</button></div>'+
-    '<div class="modal-body" id="ovBody"></div>'+
-  '</div>';
-  document.body.appendChild(div);
-  document.getElementById('ovClose').onclick=closeOverlay;
-  div.addEventListener('click', function(e){ if(e.target===div) closeOverlay(); });
-}
-function openOverlay(title, bodyHTML){
-  ensureOverlay();
-  document.getElementById('ovTitle').textContent=title;
-  document.getElementById('ovBody').innerHTML=bodyHTML;
-  document.getElementById('ovBack').classList.add('on');
-}
-function closeOverlay(){
-  var el=document.getElementById('ovBack');
-  if(el) el.classList.remove('on');
-}
-
-/* "Isi dari Riwayat Jurnal Umum" — the Kas Keluar form's shortcut for
-   the everyday case of paying down a Hutang Dagang that was originally
-   booked through a Jurnal Umum voucher (a supplier invoice): search/
-   browse every voucher computeHutangDagangBelumLunas() above still
-   considers unpaid (automatic nilai/vendor/project matching — covers
-   every transaction ever entered, old and new, nothing to link or
-   maintain by hand). Click one and onPick(line) hands the caller that
-   line's vendor/project/keterangan/nominal to prefill the payment form
-   with — still fully editable afterward. Because "unpaid" here is
-   worked out by exact-amount matching rather than a stored running
-   balance, a PARTIAL payment against a voucher won't shrink its amount
-   in this list — the voucher just keeps showing its full original
-   nilai until some payment matches it exactly (see the comment on
-   computeHutangDagangBelumLunas() for the matching rule). For a
-   partial payment, treat the amount here as a starting point and edit
-   it down by hand. */
-function openHutangDagangPicker(onPick){
-  var bills=computeHutangDagangBelumLunas();
-
-  function rowsHtml(filter){
-    var f=(filter||'').toLowerCase();
-    var shown=f?bills.filter(function(j){
-      return [j.relasi,j.project,j.ket,j.ref,j.noFaktur].join(' ').toLowerCase().indexOf(f)>-1;
-    }):bills;
-    if(!shown.length) return '<div class="hd-picker-empty">'+
-      (bills.length?'Tidak ada voucher yang cocok.':'Semua voucher Hutang Dagang sudah cocok dibayar.')+'</div>';
-    return shown.map(function(j){
-      return '<button type="button" class="hd-picker-row" data-id="'+esc(j.id)+'">'+
-        '<div class="hd-picker-main">'+
-          '<div class="hd-picker-vendor">'+esc(j.relasi||'(Tanpa Relasi)')+'</div>'+
-          '<div class="hd-picker-meta">'+esc(j.ref)+' · '+fmtDate(j.tgl)+(j.project?' · '+esc(j.project):'')+'</div>'+
-          (j.ket?'<div class="hd-picker-ket">'+esc(j.ket)+'</div>':'')+
-        '</div>'+
-        '<div class="hd-picker-amt">'+rp(j.kredit)+'</div>'+
-      '</button>';
-    }).join('');
-  }
-  function wireRows(){
-    document.querySelectorAll('.hd-picker-row').forEach(function(btn){
-      btn.onclick=function(){
-        var line=bills.find(function(j){ return j.id===btn.getAttribute('data-id'); });
-        closeOverlay();
-        if(line) onPick(line);
-      };
-    });
-  }
-  var html=
-    '<div class="hd-picker-search"><input type="text" id="hdPickSearch" placeholder="Cari vendor / project / ref / keterangan…"></div>'+
-    '<div class="hd-picker-list" id="hdPickList">'+rowsHtml('')+'</div>';
-  openOverlay('Pilih Voucher Hutang Dagang dari Jurnal Umum', html);
-  wireRows();
-  document.getElementById('hdPickSearch').addEventListener('input', function(){
-    document.getElementById('hdPickList').innerHTML=rowsHtml(this.value);
     wireRows();
   });
 }
@@ -3405,8 +3238,6 @@ function financePage(jenis, title, sub){
       var amount=rec?(isIn?rec.debet:rec.kredit):'';
 
       var html='<div class="form-grid">'+
-        (isIn?'':'<div class="hd-pick-hint"><button type="button" class="btn btn-indigo btn-sm" id="f_pickHutang">⇄ Isi dari Riwayat Jurnal Umum</button>'+
-          '<span>Pilih voucher Hutang Dagang untuk mengisi Akun Lawan, Vendor, Project, Deskripsi &amp; Amount otomatis — semua tetap bisa diedit sebelum disimpan.</span></div>')+
         '<div class="field"><label>No. Transaksi</label><input type="text" id="f_refPreview" value="'+
           esc(rec?rec.ref:nextRefFor(jenis, v('tgl',todayISO())))+'" disabled></div>'+
         '<div class="field"><label>Tanggal *</label><input type="date" id="f_tgl" value="'+esc(v('tgl',todayISO()))+'"></div>'+
@@ -3473,23 +3304,6 @@ function financePage(jenis, title, sub){
         });
       }
       bindCurrencyInput('f_amount');
-      var pickBtn=document.getElementById('f_pickHutang');
-      if(pickBtn){
-        pickBtn.onclick=function(){
-          openHutangDagangPicker(function(line){
-            document.getElementById('f_akunLawan').value='Hutang Dagang';
-            searchableSelect('f_akunLawan_ssel','f_akunLawan',{options:lawanOpts, placeholder:'Cari kode / nama akun…'});
-            document.getElementById('f_relasi').value=line.relasi||'';
-            renderRelasiField(true);
-            document.getElementById('f_project').value=line.project||'';
-            searchableSelect('f_project_ssel','f_project',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
-              placeholder:'Cari project…'});
-            document.getElementById('f_ket').value=line.ket||'';
-            document.getElementById('f_amount').value=formatThousands(line.kredit);
-            toast('Form diisi dari voucher '+line.ref+'. Cek & sesuaikan sebelum disimpan.','success');
-          });
-        };
-      }
     }
 
     function del(id){
