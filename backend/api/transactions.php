@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 handle_resource_crud('transactions', [
-    'id', 'jenis', 'tgl', 'ref', 'akun_kas', 'akun_lawan', 'project', 'relasi',
+    'id', 'jenis', 'tgl', 'ref', 'akun_kas', 'akun_lawan', 'project', 'relasi', 'jurnal_ref',
     'customer_id', 'vendor_id', 'ket', 'debet', 'kredit', 'created_by',
 ], 'id', ['created_by'], [
     'id' => ['type' => 'string', 'max' => 40, 'required' => true],
@@ -28,6 +28,7 @@ handle_resource_crud('transactions', [
     'akun_lawan' => ['type' => 'string', 'max' => 255],
     'project' => ['type' => 'string', 'max' => 255],
     'relasi' => ['type' => 'string', 'max' => 255],
+    'jurnal_ref' => ['type' => 'string', 'max' => 40],
     'customer_id' => ['type' => 'string', 'max' => 40],
     'vendor_id' => ['type' => 'string', 'max' => 40],
     'ket' => ['type' => 'string', 'max' => 5000],

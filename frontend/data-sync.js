@@ -38,13 +38,13 @@ async function apiFetch(path, opts){
 /* ---- db row (snake_case) <-> app row (camelCase) mapping ---- */
 function txnFromDb(r){
   return {id:r.id, jenis:r.jenis, tgl:r.tgl, ref:r.ref, akunKas:r.akun_kas, akunLawan:r.akun_lawan,
-    project:r.project||'', relasi:r.relasi||'', customerId:r.customer_id, vendorId:r.vendor_id,
+    project:r.project||'', relasi:r.relasi||'', jurnalRef:r.jurnal_ref||'', customerId:r.customer_id, vendorId:r.vendor_id,
     ket:r.ket||'', debet:Number(r.debet)||0, kredit:Number(r.kredit)||0, updatedAt:r.updated_at||null};
 }
 function txnToDb(obj){
   var isIn=/masuk$/.test(obj.jenis);
   return {id:obj.id, jenis:obj.jenis, tgl:obj.tgl, ref:obj.ref, akun_kas:obj.akunKas, akun_lawan:obj.akunLawan,
-    project:obj.project||'', relasi:obj.relasi||'',
+    project:obj.project||'', relasi:obj.relasi||'', jurnal_ref:obj.jurnalRef||null,
     customer_id: isIn ? (obj.customerId||null) : null,
     vendor_id: !isIn ? (obj.vendorId||null) : null,
     ket:obj.ket||'', debet:obj.debet||0, kredit:obj.kredit||0,
