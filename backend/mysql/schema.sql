@@ -90,13 +90,6 @@ CREATE TABLE IF NOT EXISTS transactions (
   akun_lawan   VARCHAR(255) NOT NULL DEFAULT '',
   project      VARCHAR(255) NOT NULL DEFAULT '',
   relasi       VARCHAR(255) NOT NULL DEFAULT '',
-  -- Ref of the Jurnal Umum voucher this payment settles (wholly or
-  -- partly) when it was created via the "Isi dari Riwayat Jurnal
-  -- Umum" picker -- see add_transactions_jurnal_ref.sql. A plain
-  -- string like project/relasi above, not a FK: one jurnal_umum ref
-  -- spans several rows (one per akun), so there's no single row id to
-  -- point at.
-  jurnal_ref   VARCHAR(40) NULL DEFAULT NULL,
   customer_id  VARCHAR(40) NULL,
   vendor_id    VARCHAR(40) NULL,
   ket          TEXT NULL,
