@@ -440,6 +440,36 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 .exp-picker-row span{flex:1; line-height:1.4;}
 .exp-picker-empty{padding:20px; text-align:center; color:var(--text-faint); font-size:var(--fs-base);}
 
+/* A second, independent modal layer stacked above the first — see
+   ensureOverlay()'s own comment for why this exists. */
+.overlay-back{z-index:150;}
+
+/* ============ HUTANG DAGANG PICKER (Kas Keluar input) ============ */
+.hd-pick-hint{grid-column:1/-1; display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  background:var(--brand-indigo-bg); border:1px solid var(--brand-indigo-line); border-radius:10px; padding:10px 14px; margin-bottom:2px;}
+.hd-pick-hint span{font-size:var(--fs-sm); color:var(--text-mute); line-height:1.5;}
+.hd-picker-search{margin-bottom:10px;}
+.hd-picker-search input{width:100%; padding:9px 12px; border:1px solid var(--line); border-radius:8px; font-size:var(--fs-base); font-family:inherit;}
+.hd-picker-list{max-height:420px; overflow-y:auto; border:1px solid var(--line); border-radius:10px;}
+.hd-picker-row{display:flex; align-items:center; justify-content:space-between; gap:14px; width:100%;
+  padding:11px 14px; border-bottom:1px solid var(--line); background:none; border-left:0; border-right:0; border-top:0;
+  text-align:left; cursor:pointer; font-family:inherit;}
+.hd-picker-row:last-child{border-bottom:none;}
+.hd-picker-row:hover{background:var(--brand-indigo-bg);}
+.hd-picker-main{min-width:0;}
+.hd-picker-vendor{font-weight:700; font-size:var(--fs-base); color:var(--text); display:flex; align-items:center; gap:7px; flex-wrap:wrap;}
+.hd-picker-status{font-size:var(--fs-2xs); font-weight:700; padding:2px 7px; border-radius:99px; text-transform:uppercase; letter-spacing:.02em;}
+.hd-picker-status.status-safe{background:var(--safe-bg); color:#166B44;}
+.hd-picker-status.status-warn{background:var(--warn-bg); color:#8A6100;}
+.hd-picker-status.status-danger{background:var(--danger-bg); color:#9E2F21;}
+.hd-picker-meta{font-size:var(--fs-sm); color:var(--text-mute); margin-top:2px;}
+.hd-picker-ket{font-size:var(--fs-sm); color:var(--text-faint); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:420px;}
+.hd-picker-paid{font-size:var(--fs-2xs); color:var(--text-faint); margin-top:1px;}
+.hd-picker-amt{flex:none; text-align:right;}
+.hd-picker-amt b{display:block; font-weight:700; font-size:var(--fs-base); color:var(--danger); font-variant-numeric:tabular-nums; white-space:nowrap;}
+.hd-picker-amt small{display:block; font-size:var(--fs-2xs); color:var(--text-faint); font-weight:400;}
+.hd-picker-empty{padding:20px; text-align:center; color:var(--text-faint); font-size:var(--fs-base);}
+
 /* ============ TOAST ============ */
 .toast-wrap{position:fixed; bottom:22px; right:22px; z-index:200; display:flex; flex-direction:column; gap:9px;}
 .toast{background:var(--ink); color:#fff; padding:11px 16px; border-radius:9px; font-size:12.5px; font-weight:500;
@@ -2946,6 +2976,96 @@ function openExportProjectPicker(names, onConfirm){
   });
 }
 
+/* Lazily-created second modal layer, independent of openModal()/
+   closeModal()'s single shared instance — used by the Hutang Dagang
+   picker below, launched from inside an already-open Tambah/Edit Kas
+   Keluar modal. This app's main modal is a single shared instance
+   (#modalBack/#modalBody), so opening a second one through the same
+   openModal()/closeModal() would overwrite the form still underneath
+   it instead of layering over it. No footer/save button here: the
+   picker closes itself the moment a nota is clicked. */
+function ensureOverlay(){
+  if(document.getElementById('ovBack')) return;
+  var div=document.createElement('div');
+  div.className='modal-back overlay-back';
+  div.id='ovBack';
+  div.innerHTML='<div class="modal wide" id="ovBox">'+
+    '<div class="modal-head"><h3 id="ovTitle"></h3><button class="modal-close" id="ovClose">&times;</button></div>'+
+    '<div class="modal-body" id="ovBody"></div>'+
+  '</div>';
+  document.body.appendChild(div);
+  document.getElementById('ovClose').onclick=closeOverlay;
+  div.addEventListener('click', function(e){ if(e.target===div) closeOverlay(); });
+}
+function openOverlay(title, bodyHTML){
+  ensureOverlay();
+  document.getElementById('ovTitle').textContent=title;
+  document.getElementById('ovBody').innerHTML=bodyHTML;
+  document.getElementById('ovBack').classList.add('on');
+}
+function closeOverlay(){
+  var el=document.getElementById('ovBack');
+  if(el) el.classList.remove('on');
+}
+
+/* "Isi dari Riwayat Jurnal Umum" — the Kas Keluar form's own shortcut
+   for paying down a Hutang Dagang nota, reusing the EXACT same engine
+   as Trial Hutang (computeHutangDagangRows()) rather than a separate
+   simplified guess — so a nota already partly paid (status SEBAGIAN)
+   shows here too, with its real remaining sisa (not the nota's
+   original full amount), and never disagrees with what Trial Hutang
+   itself shows. Picking a nota prefills Akun Lawan/Vendor/Project/
+   Amount (the sisa) same as before, but now also tags the Description
+   with "(Nota:<ref>)" — the same tag Trial Hutang's own "Bayar" button
+   writes — so this payment is picked up by DIRECT ref match next time
+   computeHutangDagangRows() runs, not just FIFO-by-vendor guessing.
+   Still fully editable before saving (a smaller amount = another
+   partial payment; sisa here already excludes this nota's own prior
+   payments, so no double-counting). */
+function openHutangDagangPicker(onPick){
+  var rows=computeHutangDagangRows().filter(function(r){ return r.sisa>0.5; })
+    .sort(function(a,b){ return a.tgl<b.tgl?-1:1; });
+
+  function rowsHtml(filter){
+    var f=(filter||'').toLowerCase();
+    var shown=f?rows.filter(function(r){
+      return [r.vendor,r.project,r.ket,r.ref,r.noFaktur].join(' ').toLowerCase().indexOf(f)>-1;
+    }):rows;
+    if(!shown.length) return '<div class="hd-picker-empty">'+
+      (rows.length?'Tidak ada nota yang cocok.':'Semua nota Hutang Dagang sudah lunas.')+'</div>';
+    return shown.map(function(r){
+      var info=hutangStatusInfo(r.status);
+      return '<button type="button" class="hd-picker-row" data-id="'+esc(r.id)+'">'+
+        '<div class="hd-picker-main">'+
+          '<div class="hd-picker-vendor">'+esc(r.vendor)+' <span class="hd-picker-status status-'+info.cls+'">'+esc(info.label)+'</span></div>'+
+          '<div class="hd-picker-meta">'+(r.ref?esc(r.ref)+' · ':'')+(r.tgl?fmtDate(r.tgl)+' · ':'')+(r.project?esc(r.project):'')+'</div>'+
+          (r.ket?'<div class="hd-picker-ket">'+esc(r.ket)+'</div>':'')+
+          (r.paid>0.5?'<div class="hd-picker-paid">Nilai nota '+rp(r.amount)+' · sudah dibayar '+rp(r.paid)+'</div>':'')+
+        '</div>'+
+        '<div class="hd-picker-amt"><b>'+rp(r.sisa)+'</b>'+(r.paid>0.5?'<small>sisa</small>':'')+'</div>'+
+      '</button>';
+    }).join('');
+  }
+  function wireRows(){
+    document.querySelectorAll('.hd-picker-row').forEach(function(btn){
+      btn.onclick=function(){
+        var row=rows.find(function(r){ return r.id===btn.getAttribute('data-id'); });
+        closeOverlay();
+        if(row) onPick(row);
+      };
+    });
+  }
+  var html=
+    '<div class="hd-picker-search"><input type="text" id="hdPickSearch" placeholder="Cari vendor / project / ref / keterangan…"></div>'+
+    '<div class="hd-picker-list" id="hdPickList">'+rowsHtml('')+'</div>';
+  openOverlay('Pilih Nota Hutang Dagang Belum Lunas (dari Jurnal Umum)', html);
+  wireRows();
+  document.getElementById('hdPickSearch').addEventListener('input', function(){
+    document.getElementById('hdPickList').innerHTML=rowsHtml(this.value);
+    wireRows();
+  });
+}
+
 /* ---------------- boot ---------------- */
 document.addEventListener('DOMContentLoaded', function(){
   buildNav();
@@ -3238,6 +3358,8 @@ function financePage(jenis, title, sub){
       var amount=rec?(isIn?rec.debet:rec.kredit):'';
 
       var html='<div class="form-grid">'+
+        (jenis==='kas_keluar'?'<div class="hd-pick-hint"><button type="button" class="btn btn-steel btn-sm" id="f_pickHutang">⇄ Isi dari Riwayat Jurnal Umum</button>'+
+          '<span>Pilih nota Hutang Dagang belum lunas (termasuk yang sudah dibayar sebagian) untuk mengisi Akun Lawan, Vendor, Project, Deskripsi &amp; Amount (sisa-nya) otomatis — semua tetap bisa diedit sebelum disimpan.</span></div>':'')+
         '<div class="field"><label>No. Transaksi</label><input type="text" id="f_refPreview" value="'+
           esc(rec?rec.ref:nextRefFor(jenis, v('tgl',todayISO())))+'" disabled></div>'+
         '<div class="field"><label>Tanggal *</label><input type="date" id="f_tgl" value="'+esc(v('tgl',todayISO()))+'"></div>'+
@@ -3304,6 +3426,23 @@ function financePage(jenis, title, sub){
         });
       }
       bindCurrencyInput('f_amount');
+      var pickBtn=document.getElementById('f_pickHutang');
+      if(pickBtn){
+        pickBtn.onclick=function(){
+          openHutangDagangPicker(function(row){
+            document.getElementById('f_akunLawan').value='Hutang Dagang';
+            searchableSelect('f_akunLawan_ssel','f_akunLawan',{options:lawanOpts, placeholder:'Cari kode / nama akun…'});
+            document.getElementById('f_relasi').value=row.vendor==='(Tanpa Vendor)'?'':row.vendor;
+            renderRelasiField(true);
+            document.getElementById('f_project').value=row.project||'';
+            searchableSelect('f_project_ssel','f_project',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
+              placeholder:'Cari project…'});
+            document.getElementById('f_ket').value='Pembayaran hutang (Nota:'+row.ref+') — '+(row.ket||row.ref);
+            document.getElementById('f_amount').value=formatThousands(row.sisa);
+            toast('Form diisi dari nota '+row.ref+' (sisa Rp'+num0(row.sisa)+'). Cek & sesuaikan sebelum disimpan.','success');
+          });
+        };
+      }
     }
 
     function del(id){
