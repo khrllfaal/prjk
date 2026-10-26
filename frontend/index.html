@@ -413,6 +413,13 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 /* ============ MODAL ============ */
 .modal-back{position:fixed; inset:0; background:rgba(11,29,51,.55); z-index:100; display:none; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto;}
 .modal-back.on{display:flex;}
+/* A second, independent modal layer stacked above the first — used by
+   the Hutang Dagang picker launched from inside an already-open
+   Tambah/Edit Kas Keluar modal. This app's main modal is a single
+   shared instance (#modalBack/#modalBody), so opening a second one
+   through the same openModal()/closeModal() would overwrite the form
+   still underneath it instead of layering over it. */
+.overlay-back{z-index:150;}
 .modal{background:var(--card); border-radius:12px; width:100%; max-width:600px; box-shadow:0 18px 50px rgba(11,29,51,.3); animation:pop .18s ease;}
 .modal.wide{max-width:860px;}
 @keyframes pop{from{opacity:0;transform:translateY(-10px) scale(.98);}to{opacity:1;transform:none;}}
@@ -441,21 +448,24 @@ table.dtab td.status-neutral{background:var(--neutral-bg); color:var(--text-mute
 .exp-picker-row span{flex:1; line-height:1.4;}
 .exp-picker-empty{padding:20px; text-align:center; color:var(--text-faint); font-size:var(--fs-base);}
 
-/* ============ HUTANG DAGANG BELUM DIBAYAR (inline panel, Kas Keluar) ============ */
-.hd-belum-panel{margin-bottom:14px;}
-.hd-belum-head{display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; cursor:pointer; user-select:none;}
-.hd-belum-head h3{display:flex; align-items:center; gap:8px;}
-.hd-belum-count{font-size:var(--fs-sm); color:var(--text-mute); font-weight:400;}
-.hd-belum-desc{font-size:var(--fs-sm); color:var(--text-mute); margin:4px 0 12px;}
-.hd-belum-list{max-height:380px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; margin-top:10px;}
-.hd-belum-row{display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px 14px; border-bottom:1px solid var(--line);}
-.hd-belum-row:last-child{border-bottom:none;}
-.hd-belum-main{min-width:0;}
-.hd-belum-vendor{font-weight:700; font-size:var(--fs-base); color:var(--text);}
-.hd-belum-meta{font-size:var(--fs-sm); color:var(--text-mute); margin-top:2px;}
-.hd-belum-ket{font-size:var(--fs-sm); color:var(--text-faint); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:420px;}
-.hd-belum-amt{flex:none; font-weight:700; font-size:var(--fs-base); color:var(--danger); font-variant-numeric:tabular-nums; white-space:nowrap;}
-.hd-belum-empty{padding:20px; text-align:center; color:var(--text-faint); font-size:var(--fs-base);}
+/* ============ HUTANG DAGANG BELUM DIBAYAR (picker modal, Kas Keluar) ============ */
+.hd-pick-hint{grid-column:1/-1; display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  background:var(--brand-indigo-bg); border:1px solid var(--brand-indigo-line); border-radius:10px; padding:10px 14px; margin-bottom:2px;}
+.hd-pick-hint span{font-size:var(--fs-sm); color:var(--text-mute); line-height:1.5;}
+.hd-picker-search{margin-bottom:10px;}
+.hd-picker-search input{width:100%; padding:9px 12px; border:1px solid var(--line); border-radius:8px; font-size:var(--fs-base); font-family:inherit;}
+.hd-picker-list{max-height:420px; overflow-y:auto; border:1px solid var(--line); border-radius:10px;}
+.hd-picker-row{display:flex; align-items:center; justify-content:space-between; gap:14px; width:100%;
+  padding:11px 14px; border-bottom:1px solid var(--line); background:none; border-left:0; border-right:0; border-top:0;
+  text-align:left; cursor:pointer; font-family:inherit;}
+.hd-picker-row:last-child{border-bottom:none;}
+.hd-picker-row:hover{background:var(--brand-indigo-bg);}
+.hd-picker-main{min-width:0;}
+.hd-picker-vendor{font-weight:700; font-size:var(--fs-base); color:var(--text);}
+.hd-picker-meta{font-size:var(--fs-sm); color:var(--text-mute); margin-top:2px;}
+.hd-picker-ket{font-size:var(--fs-sm); color:var(--text-faint); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:420px;}
+.hd-picker-amt{flex:none; font-weight:700; font-size:var(--fs-base); color:var(--danger); font-variant-numeric:tabular-nums; white-space:nowrap;}
+.hd-picker-empty{padding:20px; text-align:center; color:var(--text-faint); font-size:var(--fs-base);}
 
 /* ============ TOAST ============ */
 .toast-wrap{position:fixed; bottom:22px; right:22px; z-index:200; display:flex; flex-direction:column; gap:9px;}
@@ -3018,6 +3028,91 @@ function computeHutangDagangBelumLunas(){
 }
 computeHutangDagangBelumLunas=memoizeOnDb(computeHutangDagangBelumLunas, cloneRowArray);
 
+/* Lazily-created second modal layer, independent of openModal()/
+   closeModal()'s single shared instance — see .overlay-back's comment.
+   No footer/save button: the picker built on this closes itself the
+   moment a voucher is clicked, there's no separate "confirm" step. */
+function ensureOverlay(){
+  if(document.getElementById('ovBack')) return;
+  var div=document.createElement('div');
+  div.className='modal-back overlay-back';
+  div.id='ovBack';
+  div.innerHTML='<div class="modal wide" id="ovBox">'+
+    '<div class="modal-head"><h3 id="ovTitle"></h3><button class="modal-close" id="ovClose">&times;</button></div>'+
+    '<div class="modal-body" id="ovBody"></div>'+
+  '</div>';
+  document.body.appendChild(div);
+  document.getElementById('ovClose').onclick=closeOverlay;
+  div.addEventListener('click', function(e){ if(e.target===div) closeOverlay(); });
+}
+function openOverlay(title, bodyHTML){
+  ensureOverlay();
+  document.getElementById('ovTitle').textContent=title;
+  document.getElementById('ovBody').innerHTML=bodyHTML;
+  document.getElementById('ovBack').classList.add('on');
+}
+function closeOverlay(){
+  var el=document.getElementById('ovBack');
+  if(el) el.classList.remove('on');
+}
+
+/* "Isi dari Riwayat Jurnal Umum" — the Kas Keluar form's shortcut for
+   the everyday case of paying down a Hutang Dagang that was originally
+   booked through a Jurnal Umum voucher (a supplier invoice): search/
+   browse every voucher computeHutangDagangBelumLunas() above still
+   considers unpaid (automatic nilai/vendor/project matching — covers
+   every transaction ever entered, old and new, nothing to link or
+   maintain by hand). Click one and onPick(line) hands the caller that
+   line's vendor/project/keterangan/nominal to prefill the payment form
+   with — still fully editable afterward. Because "unpaid" here is
+   worked out by exact-amount matching rather than a stored running
+   balance, a PARTIAL payment against a voucher won't shrink its amount
+   in this list — the voucher just keeps showing its full original
+   nilai until some payment matches it exactly (see the comment on
+   computeHutangDagangBelumLunas() for the matching rule). For a
+   partial payment, treat the amount here as a starting point and edit
+   it down by hand. */
+function openHutangDagangPicker(onPick){
+  var bills=computeHutangDagangBelumLunas();
+
+  function rowsHtml(filter){
+    var f=(filter||'').toLowerCase();
+    var shown=f?bills.filter(function(j){
+      return [j.relasi,j.project,j.ket,j.ref,j.noFaktur].join(' ').toLowerCase().indexOf(f)>-1;
+    }):bills;
+    if(!shown.length) return '<div class="hd-picker-empty">'+
+      (bills.length?'Tidak ada voucher yang cocok.':'Semua voucher Hutang Dagang sudah cocok dibayar.')+'</div>';
+    return shown.map(function(j){
+      return '<button type="button" class="hd-picker-row" data-id="'+esc(j.id)+'">'+
+        '<div class="hd-picker-main">'+
+          '<div class="hd-picker-vendor">'+esc(j.relasi||'(Tanpa Relasi)')+'</div>'+
+          '<div class="hd-picker-meta">'+esc(j.ref)+' · '+fmtDate(j.tgl)+(j.project?' · '+esc(j.project):'')+'</div>'+
+          (j.ket?'<div class="hd-picker-ket">'+esc(j.ket)+'</div>':'')+
+        '</div>'+
+        '<div class="hd-picker-amt">'+rp(j.kredit)+'</div>'+
+      '</button>';
+    }).join('');
+  }
+  function wireRows(){
+    document.querySelectorAll('.hd-picker-row').forEach(function(btn){
+      btn.onclick=function(){
+        var line=bills.find(function(j){ return j.id===btn.getAttribute('data-id'); });
+        closeOverlay();
+        if(line) onPick(line);
+      };
+    });
+  }
+  var html=
+    '<div class="hd-picker-search"><input type="text" id="hdPickSearch" placeholder="Cari vendor / project / ref / keterangan…"></div>'+
+    '<div class="hd-picker-list" id="hdPickList">'+rowsHtml('')+'</div>';
+  openOverlay('Pilih Voucher Hutang Dagang dari Jurnal Umum', html);
+  wireRows();
+  document.getElementById('hdPickSearch').addEventListener('input', function(){
+    document.getElementById('hdPickList').innerHTML=rowsHtml(this.value);
+    wireRows();
+  });
+}
+
 /* ---------------- boot ---------------- */
 document.addEventListener('DOMContentLoaded', function(){
   buildNav();
@@ -3207,26 +3302,8 @@ function financePage(jenis, title, sub){
     var kasAkunOpts=kasAkunCoa.map(function(a){ return {value:a.nama, label:a.kode+'-'+a.nama}; });
     if(!kasAkunOpts.length) kasAkunOpts=kasAkun.map(function(a){ return {value:a,label:a}; });
 
-    // Hutang Dagang Belum Dibayar: only on Kas Keluar (where every one
-    // of these payments in the real data actually happens — see
-    // Data_Kas_Keluar.pdf), and worked out automatically by matching
-    // nilai/vendor/project against Jurnal Umum (see
-    // computeHutangDagangBelumLunas() above) — nothing stored, nothing
-    // to pick from a popup, covers every transaction ever entered
-    // (old and new) the same way. Collapsed by default so it doesn't
-    // crowd the page; the count badge is always visible either way.
-    var hdBelumHtml=jenis==='kas_keluar'?
-      '<div class="panel hd-belum-panel"><div class="hd-belum-head" id="hdBelumToggle">'+
-        '<h3>📋 Hutang Dagang Belum Dibayar (dari Jurnal Umum) <span class="hd-belum-count" id="hdBelumCount"></span></h3>'+
-        '<button type="button" class="btn btn-ghost btn-sm" id="hdBelumToggleBtn">Tampilkan</button>'+
-      '</div>'+
-      '<div class="hd-belum-desc">Dicocokkan otomatis dari nilai, vendor &amp; project terhadap Jurnal Umum — bukan daftar untuk dipilih, hanya referensi sebelum mengisi form di bawah.</div>'+
-      '<div id="hdBelumBody" style="display:none;"></div></div>'
-      :'';
-
     c.innerHTML = pageHead(title, sub,
       '<button class="btn btn-primary" id="btnAdd">+ Tambah Data</button>'+exportBtns('exp')) +
-      hdBelumHtml+
       '<div class="filterbar">'+
         '<div class="field"><label>Dari Tanggal</label><input type="date" id="fFrom"></div>'+
         '<div class="field"><label>Sampai Tanggal</label><input type="date" id="fTo"></div>'+
@@ -3328,6 +3405,8 @@ function financePage(jenis, title, sub){
       var amount=rec?(isIn?rec.debet:rec.kredit):'';
 
       var html='<div class="form-grid">'+
+        (isIn?'':'<div class="hd-pick-hint"><button type="button" class="btn btn-indigo btn-sm" id="f_pickHutang">⇄ Isi dari Riwayat Jurnal Umum</button>'+
+          '<span>Pilih voucher Hutang Dagang untuk mengisi Akun Lawan, Vendor, Project, Deskripsi &amp; Amount otomatis — semua tetap bisa diedit sebelum disimpan.</span></div>')+
         '<div class="field"><label>No. Transaksi</label><input type="text" id="f_refPreview" value="'+
           esc(rec?rec.ref:nextRefFor(jenis, v('tgl',todayISO())))+'" disabled></div>'+
         '<div class="field"><label>Tanggal *</label><input type="date" id="f_tgl" value="'+esc(v('tgl',todayISO()))+'"></div>'+
@@ -3394,6 +3473,23 @@ function financePage(jenis, title, sub){
         });
       }
       bindCurrencyInput('f_amount');
+      var pickBtn=document.getElementById('f_pickHutang');
+      if(pickBtn){
+        pickBtn.onclick=function(){
+          openHutangDagangPicker(function(line){
+            document.getElementById('f_akunLawan').value='Hutang Dagang';
+            searchableSelect('f_akunLawan_ssel','f_akunLawan',{options:lawanOpts, placeholder:'Cari kode / nama akun…'});
+            document.getElementById('f_relasi').value=line.relasi||'';
+            renderRelasiField(true);
+            document.getElementById('f_project').value=line.project||'';
+            searchableSelect('f_project_ssel','f_project',{options:DB.projects.map(function(p){ return {value:p.ledgerName||p.nama,label:p.nama}; }),
+              placeholder:'Cari project…'});
+            document.getElementById('f_ket').value=line.ket||'';
+            document.getElementById('f_amount').value=formatThousands(line.kredit);
+            toast('Form diisi dari voucher '+line.ref+'. Cek & sesuaikan sebelum disimpan.','success');
+          });
+        };
+      }
     }
 
     function del(id){
@@ -3432,28 +3528,6 @@ function financePage(jenis, title, sub){
       function(){ return tbl.getFiltered().map(function(r){
         return [r.tgl,r.ref,r.akunKas,r.akunLawan?akunLabel(r.akunLawan):'',r.project,r.relasi,(isIn?r.debet:r.kredit),r.ket]; }); });
 
-    if(jenis==='kas_keluar'){
-      function drawHdBelum(){
-        var rows=computeHutangDagangBelumLunas();
-        document.getElementById('hdBelumCount').textContent='('+rows.length+' voucher)';
-        document.getElementById('hdBelumBody').innerHTML=rows.length
-          ? '<div class="hd-belum-list">'+rows.map(function(j){
-              return '<div class="hd-belum-row"><div class="hd-belum-main">'+
-                '<div class="hd-belum-vendor">'+esc(j.relasi||'(Tanpa Relasi)')+'</div>'+
-                '<div class="hd-belum-meta">'+esc(j.ref)+' · '+fmtDate(j.tgl)+(j.project?' · '+esc(j.project):'')+'</div>'+
-                (j.ket?'<div class="hd-belum-ket">'+esc(j.ket)+'</div>':'')+
-              '</div><div class="hd-belum-amt">'+rp(j.kredit)+'</div></div>';
-            }).join('')+'</div>'
-          : '<div class="hd-belum-empty">Semua voucher Hutang Dagang sudah cocok dibayar.</div>';
-      }
-      var hdOpen=false;
-      drawHdBelum();
-      document.getElementById('hdBelumToggle').onclick=function(){
-        hdOpen=!hdOpen;
-        document.getElementById('hdBelumBody').style.display=hdOpen?'block':'none';
-        document.getElementById('hdBelumToggleBtn').textContent=hdOpen?'Sembunyikan':'Tampilkan';
-      };
-    }
   };
 }
 
