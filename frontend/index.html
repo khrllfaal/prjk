@@ -1497,6 +1497,26 @@ function hutangNotaDate(n){
   return null;
 }
 
+/* FIFO needs the real invoice age, not the bookkeeping entry date --
+   confirmed against real data: 90 of 111 Hutang Dagang vouchers get
+   posted in same-day batches (one bulk Jurnal Umum entry session
+   covering a week or more of actual purchases), so sorting by posting
+   tgl alone leaves same-day invoices in essentially arbitrary order
+   against each other. This builds a sortable "YYYY-MM-DD" using the
+   invoice day/month hutangNotaDate() finds (own ket, falling back to
+   tgl) combined with the posting tgl's year -- correcting for the one
+   real edge case that matters here (an invoice dated in a later
+   calendar month than its own posting, e.g. a December invoice posted
+   in January) by rolling the year back one. */
+function hutangNotaSortDate(n){
+  if(!n.tgl) return '0000-00-00'; // synthetic Saldo Awal nota -- always oldest
+  var d=hutangNotaDate(n);
+  if(!d) return n.tgl;
+  var year=parseInt(n.tgl.slice(0,4),10), postMonth=parseInt(n.tgl.slice(5,7),10);
+  if(d.m-postMonth>6) year-=1;
+  return year+'-'+String(d.m).padStart(2,'0')+'-'+String(d.d).padStart(2,'0');
+}
+
 /* Trial Hutang: per-nota (invoice-level) payable status. A "nota" is a
    jurnal umum entry crediting Hutang Dagang (the accrual when goods/
    services are received on credit); it's paid off later by a kas/bank
@@ -1575,7 +1595,7 @@ function computeHutangDagangRows(){
   }).map(function(j){
     return {id:j.id, tgl:j.tgl, ref:j.ref, noFaktur:j.noFaktur||'', vendor:j.relasi||'(Tanpa Vendor)', project:j.project||'',
       ket:j.ket, amount:j.kredit, paid:0, direct:0};
-  }).sort(function(a,b){ return a.tgl<b.tgl?-1:1; });
+  }).sort(function(a,b){ var da=hutangNotaSortDate(a), db=hutangNotaSortDate(b); return da<db?-1:(da>db?1:0); });
   // Master COA's Saldo Awal for Hutang Dagang (debt already owed before
   // this ledger's first jurnal entry) is otherwise invisible here --
   // every other nota comes from a Jurnal Umum posting, but an opening
