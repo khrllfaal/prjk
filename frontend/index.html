@@ -1616,6 +1616,7 @@ function computeHutangDagangRows(){
       amount:hdCoa.saldoAwal, paid:0, direct:0});
   }
   var byRef={}; notas.forEach(function(n){ byRef[n.ref]=n; });
+  var saldoAwalNota=notas.find(function(n){ return n.id==='saldo_awal_'+HUTANG_DAGANG_CODE; });
 
   // A payment whose description carries "(Nota:<ref>)" — always added by
   // the Trial Hutang "Bayar" button — pays that exact nota directly, no
@@ -1633,6 +1634,17 @@ function computeHutangDagangRows(){
     var m=/\(Nota:([^)]+)\)/.exec(t.ket||'');
     var target=m?byRef[m[1]]:null;
     if(target){ target.direct+=t.kredit; return; }
+    // "Proyek 2025" on a Hutang Dagang payment is this company's own
+    // marker for settling the opening balance, not a real 2026 job --
+    // confirmed against real data: there is not one single Jurnal Umum
+    // Hutang Dagang voucher posted under "Proyek 2025" (every actual
+    // 2026 debt has a real project), while the 9 Kas Keluar payments
+    // tagged "Proyek 2025" sum to Rp506.561.984 -- the account's saldo
+    // awal, to the rupiah. Without this, those 9 payments fell into
+    // their vendor's ordinary date/FIFO pool and quietly paid off ~20
+    // unrelated 2026 vouchers that have no payment of their own at all,
+    // while the real saldo awal sat there showing a false shortfall.
+    if(t.project==='Proyek 2025' && saldoAwalNota){ saldoAwalNota.direct+=t.kredit; return; }
     // A fresh plain object, never the live DB.txns record itself --
     // hutangDateMatchPayments() stamps a `resolved` flag onto whatever
     // it's given, and that flag must die with this one computeHutangDagangRows()
