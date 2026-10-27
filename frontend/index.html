@@ -1476,10 +1476,10 @@ function hutangParseDateTokens(ket){
   function push(d,m){ if(d>=1&&d<=31&&m>=1&&m<=12){ var k=d+'/'+m; if(!seen[k]){ seen[k]=1; out.push({d:d,m:m}); } } }
   var re=/(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?/g, mm;
   while((mm=re.exec(ket))) push(parseInt(mm[1],10), parseInt(mm[2],10));
-  re=/tgl\s+(\d{1,2})(?:\s*&\s*(\d{1,2}))?\s+(\w+)/g;
+  re=/(?:tgl\s+)?(\d{1,2})\s*(?:&|dan)\s*(\d{1,2})\s+(\w+)/g;
   while((mm=re.exec(ket))){
     var mo=HUTANG_BULAN_NAMA[mm[3]];
-    if(mo){ push(parseInt(mm[1],10), mo); if(mm[2]) push(parseInt(mm[2],10), mo); }
+    if(mo){ push(parseInt(mm[1],10), mo); push(parseInt(mm[2],10), mo); }
   }
   re=/(\d{1,2})\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)/g;
   while((mm=re.exec(ket))){ var mo2=HUTANG_BULAN_NAMA[mm[2]]; if(mo2) push(parseInt(mm[1],10), mo2); }
@@ -1563,15 +1563,53 @@ function hutangDateMatchPayments(payments, notas){
         chosen=hutangFindSubsetSum(cands, size, p.kredit, TOL);
       }
     }
-    if(!chosen) return;
-    var total=chosen.reduce(function(a,n){ return a+n.amount; },0);
-    var remaining=p.kredit;
-    chosen.forEach(function(n,i){
-      var share=i===chosen.length-1?remaining:Math.round(p.kredit*(n.amount/total));
-      n.direct+=share; remaining-=share;
-    });
-    p.resolved=true;
+    if(!chosen){ return; }
+    hutangApplyChosen(p, chosen);
   });
+
+  // Second pass: a payment whose keterangan names no invoice date at all
+  // ("Nota berkat serang ciamis", "semen, amplas, dll") still often has
+  // only one plausible nota (or one unique pair) in its own vendor+
+  // project once every dated payment above has already claimed its own
+  // -- confirmed against real data (CO-2608-0464, CO-2608-1039,
+  // CO-2610-1162, all undated, each landing on exactly one same-vendor-
+  // project nota at their exact amount). Scoped tightly to vendor+
+  // project and only acted on when the match is UNIQUE (one single nota,
+  // or exactly one 2-4-nota combo) -- an ambiguous amount still falls
+  // through to the plain FIFO pool rather than risk a wrong guess.
+  var byVendorProject2={};
+  notas.forEach(function(n){
+    if(n.direct>0 || !n.vendor || n.vendor==='(Tanpa Vendor)') return;
+    (byVendorProject2[n.vendor+'|'+n.project]=byVendorProject2[n.vendor+'|'+n.project]||[]).push(n);
+  });
+  payments.forEach(function(p){
+    if(!p.relasi || p.resolved) return;
+    var cands=(byVendorProject2[p.relasi+'|'+p.project]||[]).filter(function(n){ return n.direct<=0; });
+    if(!cands.length) return;
+    var exact=cands.filter(function(n){ return Math.abs(n.amount-p.kredit)<=TOL; });
+    var chosen=null;
+    if(exact.length===1) chosen=[exact[0]];
+    else if(cands.length<=6){
+      var matches=[];
+      for(var size=2; size<=4 && size<=cands.length; size++){
+        var found=hutangFindAllSubsetSums(cands, size, p.kredit, TOL);
+        matches=matches.concat(found);
+        if(matches.length>1) break; // already ambiguous, stop early
+      }
+      if(matches.length===1) chosen=matches[0];
+    }
+    if(!chosen) return;
+    hutangApplyChosen(p, chosen);
+  });
+}
+function hutangApplyChosen(p, chosen){
+  var total=chosen.reduce(function(a,n){ return a+n.amount; },0);
+  var remaining=p.kredit;
+  chosen.forEach(function(n,i){
+    var share=i===chosen.length-1?remaining:Math.round(p.kredit*(n.amount/total));
+    n.direct+=share; remaining-=share;
+  });
+  p.resolved=true;
 }
 function hutangFindSubsetSum(list, size, target, tol){
   var n=list.length, idx=[];
@@ -1588,6 +1626,23 @@ function hutangFindSubsetSum(list, size, target, tol){
     return null;
   }
   return combo(0, []);
+}
+/* Same brute-force combo search as hutangFindSubsetSum(), but collects
+   every matching combo instead of stopping at the first -- the vendor+
+   project amount-only fallback needs to know if a match is unique
+   before trusting it, not just that one exists. */
+function hutangFindAllSubsetSums(list, size, target, tol){
+  var n=list.length, out=[];
+  function combo(start, chosen){
+    if(chosen.length===size){
+      var s=chosen.reduce(function(a,n){ return a+n.amount; },0);
+      if(Math.abs(s-target)<=tol) out.push(chosen.slice());
+      return;
+    }
+    for(var i=start;i<n;i++) combo(i+1, chosen.concat([list[i]]));
+  }
+  combo(0, []);
+  return out;
 }
 function computeHutangDagangRows(){
   var notas=postedJurnal().filter(function(j){
