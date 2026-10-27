@@ -1633,7 +1633,18 @@ function computeHutangDagangRows(){
     var m=/\(Nota:([^)]+)\)/.exec(t.ket||'');
     var target=m?byRef[m[1]]:null;
     if(target){ target.direct+=t.kredit; return; }
-    untagged.push(t);
+    // A fresh plain object, never the live DB.txns record itself --
+    // hutangDateMatchPayments() stamps a `resolved` flag onto whatever
+    // it's given, and that flag must die with this one computeHutangDagangRows()
+    // call. Handing it the real `t` made that flag stick to the actual
+    // transaction permanently, so a second call in the same session
+    // (e.g. reopening the Kas Keluar picker) saw `resolved` already
+    // true, skipped re-matching it, and the payment's money vanished
+    // from every nota's paid total from then on -- a different, wrong
+    // result each time the same list was opened, with no DB change in
+    // between (confirmed from two screenshots of the same vendor five
+    // minutes apart showing different Belum Dibayar/Sebagian sets).
+    untagged.push({ket:t.ket, relasi:t.relasi, project:t.project, kredit:t.kredit});
   });
   // Before falling back to per-vendor FIFO, try to pin each untagged
   // payment to the exact nota(s) its own keterangan's invoice date (and
