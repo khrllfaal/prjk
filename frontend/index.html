@@ -880,8 +880,17 @@ function guessLedgerName(displayName, knownLedgerNames){
 // Both the old and current COA numbering are listed per category — a
 // jurnal_umum entry keeps whatever code it was posted with, so matching
 // only today's COA codes would silently stop counting older rows.
-var RAP_COST_CODES={bahan:['5.1.1','5.1.01','5.1.18','5.1.19'], upah:['5.1.2','5.1.9','5.1.02','5.1.09','5.1.10'],
-  akomodasi:['5.1.26','6.2.36','5.1.11']};
+// 2026-10-28: COA codes for Biaya Upah/Upah2/Upah3, Biaya ADM, Biaya ADM
+// Fee, Biaya Bahan2/Bahan3, Biaya Alat Konstruksi, Biaya Akomodasi were
+// realigned to the reference system's numbering (align_coa_codes_to_asli.sql)
+// -- the OLD codes stay listed below (same reasoning as the pre-existing
+// 5.1.1/5.1.2/5.1.9 entries: a handful of much older jurnal_umum rows may
+// still carry the old code baked into their own akun text) and the NEW
+// codes are added alongside them, so matching works for both old rows and
+// every row from today onward.
+var RAP_COST_CODES={bahan:['5.1.1','5.1.01','5.1.18','5.1.19','5.1.02','5.1.03'],
+  upah:['5.1.2','5.1.9','5.1.02','5.1.09','5.1.10','5.1.04','5.1.05','5.1.06'],
+  akomodasi:['5.1.26','6.2.36','5.1.11','5.1.07']};
 function matchesRapCost(akunStr, kind){ return RAP_COST_CODES[kind].indexOf(akunKode(akunStr))>-1; }
 
 /* Kas/bank keluar postings name the account either with a COA code
