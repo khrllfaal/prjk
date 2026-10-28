@@ -4103,15 +4103,15 @@ function registerPages(){
       // yang sedang tampil di filter halaman — supaya laporan bisa
       // dipersempit ke proyek tertentu tanpa harus ganti filter Pemberi
       // Proyek/tanggal lebih dulu.
-      var progHeaders=['No','Nama Proyek','Pemberi Proyek','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Biaya Akomodasi','Total Pengeluaran RAP',
+      var progHeaders=['No','Nama Proyek','Status','Pemberi Proyek','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Biaya Akomodasi','Total Pengeluaran RAP',
         'Sisa RAP','Status RAP','Cost Center','Adm Fee','Total Pengeluaran','Hasil Usaha'];
       function buildProgExportRows(list){
         var rows=list.map(function(r,i){
-          return [i+1,r.nama,r.pemberiProyek,r.kontrak,r.rap,r.bahan,r.upah,r.akomodasi,r.totalRap,r.sisaRap,r.statusRap,
+          return [i+1,r.nama,r.status==='Selesai'?'Selesai':'Belum',r.pemberiProyek,r.kontrak,r.rap,r.bahan,r.upah,r.akomodasi,r.totalRap,r.sisaRap,r.statusRap,
             r.costCenter,r.admFee,r.totalPengeluaran,r.hasilUsaha];
         });
         function sum(key){ return list.reduce(function(a,b){ return a+b[key]; },0); }
-        rows.push(['','TOTAL','',sum('kontrak'),sum('rap'),sum('bahan'),sum('upah'),sum('akomodasi'),sum('totalRap'),sum('sisaRap'),'',
+        rows.push(['','TOTAL','','',sum('kontrak'),sum('rap'),sum('bahan'),sum('upah'),sum('akomodasi'),sum('totalRap'),sum('sisaRap'),'',
           sum('costCenter'),sum('admFee'),sum('totalPengeluaran'),sum('hasilUsaha')]);
         return rows;
       }
@@ -4263,8 +4263,6 @@ function registerPages(){
             {key:'kontrak',label:'Nilai Kontrak (Rp)',type:'currency'},
             {key:'rapPercent',label:'RAP (% dari Kontrak — kosongkan jika isi Nilai RAP manual di bawah)',type:'number'},
             {key:'rap',label:'Nilai RAP (Rp) — otomatis terisi kalau % di atas diisi',type:'currency'},
-            {key:'costCenter',label:'Cost Center / Overhead (Rp)',type:'currency'},
-            {key:'admFee',label:'Adm Fee (Rp)',type:'currency'},
             {key:'progress',label:'Progress Lapangan (0–1, mis. 0.6)',type:'number'},
             {key:'status',label:'Status Proyek',type:'select',options:['Belum','Selesai']}],
     // Nilai RAP (Rp) is still the single number every dashboard reads
@@ -6301,7 +6299,7 @@ function registerPages(){
     ['FARM', function(s){ return s.toLowerCase()==='farm'; }],
     ['BGN MBG', function(s){ return s.toLowerCase()==='bgn mbg'; }]
   ];
-  var DASHBOARD_PROYEK_ORDER=['TNI','BJB','PUPR','KMNP','FARM','BGN MBG','Lainnya'];
+  var DASHBOARD_PROYEK_ORDER=['TNI','FARM','BJB','PUPR','KMNP','BGN MBG','Lainnya'];
   function bucketPemberiProyek(pemberi){
     var s=(pemberi||'').trim();
     if(!s) return 'Lainnya';
@@ -6346,6 +6344,33 @@ function registerPages(){
     });
   }
 
+  /* Underlying P&L postings behind one of computeFarmRows()'s 5
+     auto-computed columns (klik angka -> showTxnDrilldown()) -- reads
+     allEntries() with the EXACT SAME category rules computeFarmRows()
+     itself uses (same source groupByHead() aggregates from), so the
+     drilldown list's total can never disagree with the number clicked.
+     kind is 'produksi' | 'gaji' | 'pajak' | 'thr' | 'pemeliharaan'. */
+  function farmCostTxns(ledger, kind, from, to){
+    var list=[];
+    allEntries().forEach(function(e){
+      if(e.project!==ledger) return;
+      if(!inRange(e.tgl,from,to)) return;
+      if(['5','6','7','8'].indexOf(akunHead(e.akun))===-1) return;
+      if(isHpk3LongTermEntry(e)) return;
+      var net=e.debet-e.kredit;
+      if(!net) return;
+      var nm=akunNamaOnly(e.akun), nmLow=nm.toLowerCase();
+      var cat = nm==='Biaya Gaji Pegawai' ? 'gaji'
+        : nmLow.indexOf('pajak')>-1 ? 'pajak'
+        : nm==='Cadangan THR' ? 'thr'
+        : (nm==='Biaya Pemeliharaan Alat & Kandang'||nm==='Biaya Perlengkapan Kandang') ? 'pemeliharaan'
+        : 'produksi';
+      if(cat!==kind) return;
+      list.push({tgl:e.tgl, ref:e.ref, ket:e.ket+' — '+e.akun, amount:net});
+    });
+    return list.sort(function(a,b){ return a.tgl<b.tgl?1:-1; });
+  }
+
   PAGES.dashboard_proyek=function(c){
     c.innerHTML = pageHead('Dashboard Pengeluaran','Rincian progress & RAP tiap proyek, dikelompokkan per pemberi proyek','') +
       '<div class="filterbar">'+
@@ -6363,6 +6388,12 @@ function registerPages(){
         'data-drill-label="'+esc(r.nama)+'" data-drill-kind="'+kind+'">'+num0(amount)+'</button>';
     }
     var KIND_LABEL={bahan:'Biaya Bahan',upah:'Biaya Upah',akomodasi:'Biaya Akomodasi',costCenter:'Cost Center',admFee:'Adm Fee',all:'Total Pengeluaran RAP'};
+    var FARM_KIND_LABEL={produksi:'Produksi',gaji:'Gaji Pegawai',pajak:'Pajak',thr:'Cadangan THR',pemeliharaan:'Pemeliharaan Kandang'};
+    function farmDrillCell(amount, r, kind){
+      if(!amount) return '<span class="faint-italic">–</span>';
+      return '<button type="button" class="linklike" data-farm-drill-ledger="'+esc(r.ledgerName)+'" '+
+        'data-farm-drill-label="'+esc(r.nama)+'" data-farm-drill-kind="'+kind+'">'+num0(amount)+'</button>';
+    }
     var progFrom, progTo;
 
     function buildSection(bucket, rows){
@@ -6455,16 +6486,16 @@ function registerPages(){
           }});
         bindSearch(sec.idp+'_q', tbl);
         bindExportWithPicker(sec.idp, 'Dashboard_Proyek_'+sec.bucket.replace(/\s+/g,'_'),
-          ['No','Nama Proyek','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Biaya Akomodasi','Total Pengeluaran RAP',
+          ['No','Nama Proyek','Status','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Biaya Akomodasi','Total Pengeluaran RAP',
            'Sisa RAP','Status RAP','Cost Center','Adm Fee','Total Pengeluaran','Hasil Usaha'],
           function(){ return tbl.getFiltered(); }, function(r){ return r.nama; },
           function(list){
             var rows=list.map(function(r,i){
-              return [i+1,r.nama,r.kontrak,r.rap,r.bahan,r.upah,r.akomodasi,r.totalRap,r.sisaRap,r.statusRap,
+              return [i+1,r.nama,r.status==='Selesai'?'Selesai':'Belum',r.kontrak,r.rap,r.bahan,r.upah,r.akomodasi,r.totalRap,r.sisaRap,r.statusRap,
                 r.costCenter,r.admFee,r.totalPengeluaran,r.hasilUsaha];
             });
             function sum(key){ return list.reduce(function(a,b){ return a+b[key]; },0); }
-            rows.push(['','TOTAL',sum('kontrak'),sum('rap'),sum('bahan'),sum('upah'),sum('akomodasi'),sum('totalRap'),sum('sisaRap'),'',
+            rows.push(['','TOTAL','',sum('kontrak'),sum('rap'),sum('bahan'),sum('upah'),sum('akomodasi'),sum('totalRap'),sum('sisaRap'),'',
               sum('costCenter'),sum('admFee'),sum('totalPengeluaran'),sum('hasilUsaha')]);
             return rows;
           }, {title:'Dashboard Pengeluaran — '+sec.bucket});
@@ -6485,11 +6516,11 @@ function registerPages(){
             return '<input type="text" inputmode="numeric" class="ph-plafond-input farm-input" '+
               'id="farmHutang_'+r.id+'" data-id="'+r.id+'" data-field="farmHutang" value="'+(r.hutang?num0(r.hutang):'')+'" placeholder="0">'; },
             foot:farmSum('hutang')},
-          {key:'produksi',label:'Produksi',num:true,render:function(r){ return num0(r.produksi); }, foot:farmSum('produksi')},
-          {key:'gaji',label:'Gaji Pegawai',num:true,render:function(r){ return num0(r.gaji); }, foot:farmSum('gaji')},
-          {key:'pajak',label:'Pajak',num:true,render:function(r){ return num0(r.pajak); }, foot:farmSum('pajak')},
-          {key:'thr',label:'Cadangan THR',num:true,render:function(r){ return num0(r.thr); }, foot:farmSum('thr')},
-          {key:'pemeliharaan',label:'Pemeliharaan Kandang',num:true,render:function(r){ return num0(r.pemeliharaan); }, foot:farmSum('pemeliharaan')},
+          {key:'produksi',label:'Produksi',num:true,render:function(r){ return farmDrillCell(r.produksi,r,'produksi'); }, foot:farmSum('produksi')},
+          {key:'gaji',label:'Gaji Pegawai',num:true,render:function(r){ return farmDrillCell(r.gaji,r,'gaji'); }, foot:farmSum('gaji')},
+          {key:'pajak',label:'Pajak',num:true,render:function(r){ return farmDrillCell(r.pajak,r,'pajak'); }, foot:farmSum('pajak')},
+          {key:'thr',label:'Cadangan THR',num:true,render:function(r){ return farmDrillCell(r.thr,r,'thr'); }, foot:farmSum('thr')},
+          {key:'pemeliharaan',label:'Pemeliharaan Kandang',num:true,render:function(r){ return farmDrillCell(r.pemeliharaan,r,'pemeliharaan'); }, foot:farmSum('pemeliharaan')},
           {key:'hasilUsaha',label:'Hasil Usaha Farm',num:true,render:function(r){
             return '<b class="'+(r.hasilUsaha<0?'neg':'pos')+'">'+num0(r.hasilUsaha)+'</b>'; }, foot:farmSum('hasilUsaha')}
         ], farmSec.rows, {defaultSort:'nama',defaultDir:'asc',perPage:15,showFoot:true,
@@ -6508,17 +6539,25 @@ function registerPages(){
                 toast((field==='farmPendapatan'?'Pendapatan Kandang':'Pembayaran Hutang')+' tersimpan.','success');
               });
             });
+            document.querySelectorAll('#'+farmSec.idp+'_tbl [data-farm-drill-ledger]').forEach(function(b){
+              b.onclick=function(){
+                var ledger=b.getAttribute('data-farm-drill-ledger'), label=b.getAttribute('data-farm-drill-label');
+                var kind=b.getAttribute('data-farm-drill-kind');
+                showTxnDrilldown(FARM_KIND_LABEL[kind]+' — '+label, 'Rincian transaksi & jurnal yang membentuk angka ini',
+                  farmCostTxns(ledger, kind, progFrom, progTo));
+              };
+            });
           }});
         bindSearch(farmSec.idp+'_q', farmTbl);
         bindExportWithPicker(farmSec.idp, 'Dashboard_Pengeluaran_Farm',
-          ['No','Nama Farm','Pendapatan Kandang','Pembayaran Hutang','Produksi','Gaji Pegawai','Pajak','Cadangan THR','Pemeliharaan Kandang','Hasil Usaha Farm'],
+          ['No','Nama Farm','Status','Pendapatan Kandang','Pembayaran Hutang','Produksi','Gaji Pegawai','Pajak','Cadangan THR','Pemeliharaan Kandang','Hasil Usaha Farm'],
           function(){ return farmTbl.getFiltered(); }, function(r){ return r.nama; },
           function(list){
             var rows=list.map(function(r,i){
-              return [i+1,r.nama,r.pendapatan,r.hutang,r.produksi,r.gaji,r.pajak,r.thr,r.pemeliharaan,r.hasilUsaha];
+              return [i+1,r.nama,r.status==='Selesai'?'Selesai':'Belum',r.pendapatan,r.hutang,r.produksi,r.gaji,r.pajak,r.thr,r.pemeliharaan,r.hasilUsaha];
             });
             function sum(key){ return list.reduce(function(a,b){ return a+b[key]; },0); }
-            rows.push(['','TOTAL',sum('pendapatan'),sum('hutang'),sum('produksi'),sum('gaji'),sum('pajak'),sum('thr'),sum('pemeliharaan'),sum('hasilUsaha')]);
+            rows.push(['','TOTAL','',sum('pendapatan'),sum('hutang'),sum('produksi'),sum('gaji'),sum('pajak'),sum('thr'),sum('pemeliharaan'),sum('hasilUsaha')]);
             return rows;
           }, {title:'Dashboard Pengeluaran — Farm'});
       }
