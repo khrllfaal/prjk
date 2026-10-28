@@ -391,6 +391,26 @@ table.posisi-hutang-tbl tbody td{vertical-align:middle;}
 .chip.danger{background:var(--danger-bg);border-color:var(--danger-line);color:#9E2F21;} .chip.danger .sig{background:var(--danger);}
 .chip.neutral{background:var(--neutral-bg);border-color:var(--neutral-line);color:var(--text-mute);font-style:italic;font-weight:500;} .chip.neutral .sig{background:var(--text-faint);}
 .chip.info{background:#E7EFFC;border-color:#C7D9F4;color:#1F3864;} .chip.info .sig{background:var(--steel);}
+/* A project marked "Selesai" (Master Project status) sorts to the
+   bottom of Rincian Progress per Proyek / Dashboard Pengeluaran
+   (DataTable's pinDoneLast) and is dimmed here so it reads as done at
+   a glance without being hard to read. */
+table.dtab tbody tr.row-done{background:var(--neutral-bg); color:var(--text-mute);}
+table.dtab tbody tr.row-done td.num{color:var(--text-mute);}
+/* Dashboard Rincian Progress per Proyek / Dashboard Pengeluaran /
+   Dashboard Pemasukan: numeric cells everywhere else in the app use
+   --font-mono (a monospace face) and a clickable drill-down amount is
+   colored --steel (blue) to read as a link -- both left as-is app-wide
+   on purpose. In these 3 dashboards specifically the numbers are dense
+   enough that the owner asked for the plain body font and standard
+   text color instead, so it's scoped to just these 3 pages via the
+   data-page attribute go() sets on #content, not changed globally. */
+#content[data-page="dashboard"] table.dtab tbody td.num,
+#content[data-page="dashboard_proyek"] table.dtab tbody td.num,
+#content[data-page="dashboard_pemasukan"] table.dtab tbody td.num{font-family:var(--font-body);}
+#content[data-page="dashboard"] .linklike,
+#content[data-page="dashboard_proyek"] .linklike,
+#content[data-page="dashboard_pemasukan"] .linklike{color:var(--text);}
 table.dtab td.status-safe{background:var(--safe-bg); color:#166B44; font-weight:700; text-align:center;}
 table.dtab td.status-warn{background:var(--warn-bg); color:#8A6100; font-weight:700; text-align:center;}
 table.dtab td.status-danger{background:var(--danger-bg); color:#9E2F21; font-weight:700; text-align:center;}
@@ -778,7 +798,8 @@ function seedDB(){
     if(seen[key]) return; seen[key]=1;
     var ledgerName=ledgerNameSet[nama]?nama:guessLedgerName(nama, knownLedgerNames);
     projects.push({id:'p'+pi++, nama:nama, ledgerName:ledgerName, kontrak:kontrak||0, rap:rap||0,
-      progress:progress, pemberiProyek:guessPemberiProyek(nama), costCenter:0, admFee:0});
+      progress:progress, pemberiProyek:guessPemberiProyek(nama), costCenter:0, admFee:0,
+      status:'Belum', farmPendapatan:0, farmHutang:0});
   }
   (SEED.progress.rows||[]).forEach(function(r){
     pushProject(r.nama, r.kontrak, r.rap, (typeof r.progress_lapangan==='number')?r.progress_lapangan:null);
@@ -1035,11 +1056,13 @@ function computeProjectProgressRows(from, to){
     var c=buckets[ledger]||empty;
     var bahan=c.bahan, upah=c.upah, akomodasi=c.akomodasi, admFee=c.admFee, costCenter=c.costCenter;
     var totalRap=bahan+upah+akomodasi;
-    // Nilai RAP is always 65% of Nilai Kontrak — computed directly here
-    // rather than read from a separately-maintained project.rap field,
-    // which was left at 0 for almost every project and made Status RAP
-    // come out blank ("Data Tidak Lengkap") for the whole table.
-    var rapValue=(p.kontrak||0)*0.65;
+    // Nilai RAP comes from the project's own master-data field when the
+    // user has filled it in — only a project left at 0 (the vast
+    // majority) falls back to the 65%-of-Kontrak estimate. Previously
+    // this always recomputed 65% and ignored p.rap entirely, so a
+    // project with a real RAP on file still showed the generic 65%
+    // figure and a Status RAP judged against the wrong budget.
+    var rapValue=(p.rap>0)?p.rap:(p.kontrak||0)*0.65;
     var sisaRap=rapValue-totalRap;
     // Status RAP judges whether a project is nearing/over its RAP
     // budget, a cumulative-since-groundbreaking question — it must NOT
@@ -1062,7 +1085,7 @@ function computeProjectProgressRows(from, to){
     var hasilUsaha=(p.kontrak||0)-totalPengeluaran;
     return {
       no:i+1, id:p.id, nama:p.nama, ledgerName:ledger, linked:!!ledger,
-      pemberiProyek:p.pemberiProyek||'Lainnya',
+      pemberiProyek:p.pemberiProyek||'Lainnya', status:p.status||'Belum',
       kontrak:p.kontrak||0, rap:rapValue,
       bahan:bahan, bahanPct:totalRap?bahan/totalRap:0,
       upah:upah, upahPct:totalRap?upah/totalRap:0,
@@ -2743,20 +2766,31 @@ function DataTable(mountId, columns, rows, opts){
       var q=state.search.toLowerCase();
       out=out.filter(function(r){ return opts.searchFn(r).toLowerCase().indexOf(q)>-1; });
     }
-    if(state.sortKey){
-      var col=columns.find(function(c){ return c.key===state.sortKey; });
-      if(col){
-        out=out.slice().sort(function(a,b){
-          var av=col.sortVal?col.sortVal(a):a[state.sortKey];
-          var bv=col.sortVal?col.sortVal(b):b[state.sortKey];
-          if(av===null||av===undefined) av=-Infinity;
-          if(bv===null||bv===undefined) bv=-Infinity;
-          if(typeof av==='string'){ av=av.toLowerCase(); bv=String(bv||'').toLowerCase(); }
-          if(av<bv) return state.sortDir==='asc'?-1:1;
-          if(av>bv) return state.sortDir==='asc'?1:-1;
-          return 0;
-        });
-      }
+    // opts.pinDoneLast: a row whose [key] equals `value` always sorts to
+    // the bottom regardless of which column header is clicked or which
+    // direction -- used to keep "Selesai" projects below active ones in
+    // Rincian Progress per Proyek / Dashboard Pengeluaran no matter how
+    // the table is otherwise sorted, without every single column needing
+    // its own composite sortVal.
+    var pin=opts.pinDoneLast;
+    function pinRank(r){ return (pin && r[pin.key]===pin.value) ? 1 : 0; }
+    if(state.sortKey || pin){
+      var col=state.sortKey?columns.find(function(c){ return c.key===state.sortKey; }):null;
+      out=out.slice().sort(function(a,b){
+        if(pin){
+          var pr=pinRank(a)-pinRank(b);
+          if(pr) return pr; // pinned rows always last, independent of sortDir
+        }
+        if(!col) return 0;
+        var av=col.sortVal?col.sortVal(a):a[state.sortKey];
+        var bv=col.sortVal?col.sortVal(b):b[state.sortKey];
+        if(av===null||av===undefined) av=-Infinity;
+        if(bv===null||bv===undefined) bv=-Infinity;
+        if(typeof av==='string'){ av=av.toLowerCase(); bv=String(bv||'').toLowerCase(); }
+        if(av<bv) return state.sortDir==='asc'?-1:1;
+        if(av>bv) return state.sortDir==='asc'?1:-1;
+        return 0;
+      });
     }
     return out;
   }
@@ -3104,6 +3138,7 @@ function go(pageId){
 
   var c=document.getElementById('content');
   c.innerHTML='';
+  c.setAttribute('data-page', pageId); // scopes the 3 dashboards' readable-number CSS below
   PAGES[pageId](c);
   window.scrollTo(0,0);
   closeSidebar();
@@ -3133,6 +3168,29 @@ function bindExport(idPrefix, filename, headers, rowsFn, opts){
   if(e) e.onclick=function(){ exportExcel(filename, headers, rowsFn()); };
   var p=document.getElementById(idPrefix+'Pdf');
   if(p) p.onclick=function(){ exportPdf(filename, headers, rowsFn(), opts); };
+}
+/* Same as bindExport(), but opens openExportProjectPicker() first (same
+   checklist UX as Rincian Progress per Proyek's own export) so the
+   download can be narrowed to one project or kept at "Pilih Semua"
+   instead of always dumping every row currently on screen. nameFn(row)
+   names the project a row belongs to; rowsFn(filteredRows) builds the
+   export table from whichever rows the picker left checked. */
+function bindExportWithPicker(idPrefix, filename, headers, listFn, nameFn, rowsFn, opts){
+  function run(kind){
+    var list=listFn();
+    var names=Array.from(new Set(list.map(nameFn)));
+    openExportProjectPicker(names, function(selected){
+      var selSet={}; selected.forEach(function(n){ selSet[n]=true; });
+      var filtered=list.filter(function(r){ return selSet[nameFn(r)]; });
+      var rows=rowsFn(filtered);
+      if(kind==='excel') exportExcel(filename, headers, rows);
+      else exportPdf(filename, headers, rows, opts);
+    });
+  }
+  var e=document.getElementById(idPrefix+'Excel');
+  if(e) e.onclick=function(){ run('excel'); };
+  var p=document.getElementById(idPrefix+'Pdf');
+  if(p) p.onclick=function(){ run('pdf'); };
 }
 
 /* A checklist of project names (search box, "Pilih Semua", a live
@@ -3976,7 +4034,11 @@ function registerPages(){
     function drawProgTbl(){
       progFrom = fv('fProgFrom')||null;
       progTo = fv('fProgTo')||null;
-      progRows = computeProjectProgressRows(progFrom, progTo);
+      // Farm/Kandang projects have their own dedicated table now
+      // (Dashboard Pengeluaran > Farm) -- showing them here too was
+      // redundant, so they're dropped from Rincian Progress per Proyek
+      // entirely (table rows AND the Pemberi Proyek filter dropdown).
+      progRows = computeProjectProgressRows(progFrom, progTo).filter(function(r){ return bucketPemberiProyek(r.pemberiProyek)!=='FARM'; });
       document.getElementById('progPeriodDesc').textContent = (progFrom||progTo)
         ? 'Biaya Bahan/Upah/Akomodasi/Cost Center/Adm Fee di bawah ini untuk periode '+
           (progFrom?fmtDate(progFrom):'awal')+' s/d '+(progTo?fmtDate(progTo):'sekarang')+
@@ -3989,11 +4051,12 @@ function registerPages(){
       progTbl=DataTable('tblProg',[
         {key:'no',label:'No',sort:false,render:function(r,idx){ return '<span class="no">'+(idx+1)+'</span>'; }},
         {key:'nama',label:'Nama Proyek',cls:'wrap',render:function(r){
-          return esc(r.nama)+'<div class="faint-italic" style="font-size:11px;">'+esc(r.pemberiProyek)+
+          return esc(r.nama)+(r.status==='Selesai'?' <span class="chip neutral"><span class="sig"></span>Selesai</span>':'')+
+            '<div class="faint-italic" style="font-size:11px;">'+esc(r.pemberiProyek)+
             (r.linked?'':' · <span style="color:var(--danger);">⚠ belum tertaut ke transaksi — atur di Master Project</span>')+
             '</div>'; }, foot:function(){ return '<b>TOTAL</b>'; }},
         {key:'kontrak',label:'Nilai Kontrak',num:true,render:function(r){ return num0(r.kontrak); }, foot:sumFoot('kontrak')},
-        {key:'rap',label:'Nilai RAP (65%)',num:true,render:function(r){ return num0(r.rap); }, foot:sumFoot('rap')},
+        {key:'rap',label:'Nilai RAP',num:true,render:function(r){ return num0(r.rap); }, foot:sumFoot('rap')},
         {key:'bahan',label:'Biaya Bahan',num:true,render:function(r){ return drillCell(r.bahan,r,'bahan'); }, foot:sumFoot('bahan')},
         {key:'bahanPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.bahanPct):'–'; }},
         {key:'upah',label:'Biaya Upah',num:true,render:function(r){ return drillCell(r.upah,r,'upah'); }, foot:sumFoot('upah')},
@@ -4014,6 +4077,7 @@ function registerPages(){
           return '<b class="'+(r.hasilUsaha<0?'neg':'pos')+'">'+num0(r.hasilUsaha)+'</b>'; }, foot:sumFoot('hasilUsaha')},
         {key:'hasilUsahaPct',label:'%',num:true,render:function(r){ return r.kontrak?pct(r.hasilUsahaPct):'–'; }}
       ], data, {defaultSort:'kontrak',defaultDir:'desc',perPage:15,showFoot:true,
+        pinDoneLast:{key:'status',value:'Selesai'}, rowClass:function(r){ return r.status==='Selesai'?'row-done':''; },
         searchFn:function(r){ return r.nama+' '+r.pemberiProyek; }, countId:'cntProg',
         onRender:function(){
           document.querySelectorAll('#tblProg [data-drill-ledger]').forEach(function(b){
@@ -4068,7 +4132,7 @@ function registerPages(){
     function refreshDashboardData(){
       window.__liveRefresh=refreshDashboardData;
 
-      allProgRows=computeProjectProgressRows();
+      allProgRows=computeProjectProgressRows().filter(function(r){ return bucketPemberiProyek(r.pemberiProyek)!=='FARM'; });
       proyekAktif=DB.projects.length;
       totalKontrak=DB.projects.reduce(function(a,p){ return a+(p.kontrak||0); },0);
       rows=allProgRows.map(function(r){
@@ -4192,7 +4256,8 @@ function registerPages(){
             {key:'rap',label:'Nilai RAP (Rp)',type:'currency'},
             {key:'costCenter',label:'Cost Center / Overhead (Rp)',type:'currency'},
             {key:'admFee',label:'Adm Fee (Rp)',type:'currency'},
-            {key:'progress',label:'Progress Lapangan (0–1, mis. 0.6)',type:'number'}],
+            {key:'progress',label:'Progress Lapangan (0–1, mis. 0.6)',type:'number'},
+            {key:'status',label:'Status Proyek',type:'select',options:['Belum','Selesai']}],
     searchFn:function(r){ return r.nama+' '+(r.pemberiProyek||''); },
     columns:[
       {key:'nama',label:'Nama Project',cls:'wrap',render:function(r){ return '<b>'+esc(r.nama)+'</b>'; }},
@@ -4202,7 +4267,9 @@ function registerPages(){
       {key:'rap',label:'Nilai RAP',num:true,render:function(r){ return num0(r.rap); },
        foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+(b.rap||0);},0))+'</b>'; }},
       {key:'progress',label:'Progress Lapangan',num:true,render:function(r){
-        return typeof r.progress==='number'?pct(r.progress):'<span class="faint-italic">Belum Lapor</span>'; }}
+        return typeof r.progress==='number'?pct(r.progress):'<span class="faint-italic">Belum Lapor</span>'; }},
+      {key:'status',label:'Status',render:function(r){
+        return r.status==='Selesai'?'<span class="chip safe"><span class="sig"></span>Selesai</span>':'<span class="chip neutral"><span class="sig"></span>Belum</span>'; }}
     ]
   });
 
@@ -6212,6 +6279,41 @@ function registerPages(){
     return 'Lainnya';
   }
 
+  /* Dashboard Pengeluaran's "Farm" section (projects whose Pemberi
+     Proyek buckets to FARM) uses its own 9-column layout instead of the
+     generic Rincian-Progress-style table every other bucket gets --
+     2 figures entered by hand per farm (Pendapatan Kandang, Pembayaran
+     Hutang -- persisted on the project record itself, same as Nilai
+     Kontrak/RAP), the rest read straight off that farm's own Laba Rugi
+     (groupByHead(), the exact account-by-account numbers Laporan Laba
+     Rugi itself uses, so this table can never disagree with it) and
+     split into the owner's own named buckets: Gaji Pegawai (exactly
+     "Biaya Gaji Pegawai"), Pajak (every P&L account whose name contains
+     "pajak"), Cadangan THR (exactly "Cadangan THR"), Pemeliharaan
+     Kandang ("Biaya Pemeliharaan Alat & Kandang" + "Biaya Perlengkapan
+     Kandang"), and Produksi = every other P&L cost left over. */
+  function computeFarmRows(from, to){
+    return DB.projects.filter(function(p){ return bucketPemberiProyek(p.pemberiProyek)==='FARM'; }).map(function(p){
+      var ledger=p.ledgerName||p.nama;
+      var gaji=0, pajak=0, thr=0, pemeliharaan=0, produksi=0;
+      groupByHead(from, to, ['5','6','7','8'], ledger).forEach(function(a){
+        var net=a.debet-a.kredit;
+        if(!net) return;
+        var nm=akunNamaOnly(a.akun), nmLow=nm.toLowerCase();
+        if(nm==='Biaya Gaji Pegawai') gaji+=net;
+        else if(nmLow.indexOf('pajak')>-1) pajak+=net;
+        else if(nm==='Cadangan THR') thr+=net;
+        else if(nm==='Biaya Pemeliharaan Alat & Kandang'||nm==='Biaya Perlengkapan Kandang') pemeliharaan+=net;
+        else produksi+=net;
+      });
+      var pendapatan=p.farmPendapatan||0, hutang=p.farmHutang||0;
+      var hasilUsaha=pendapatan-hutang-produksi-gaji-pajak-thr-pemeliharaan;
+      return {id:p.id, nama:p.nama, ledgerName:ledger, status:p.status||'Belum',
+        pendapatan:pendapatan, hutang:hutang, produksi:produksi, gaji:gaji, pajak:pajak, thr:thr,
+        pemeliharaan:pemeliharaan, hasilUsaha:hasilUsaha};
+    });
+  }
+
   PAGES.dashboard_proyek=function(c){
     c.innerHTML = pageHead('Dashboard Pengeluaran','Rincian progress & RAP tiap proyek, dikelompokkan per pemberi proyek','') +
       '<div class="filterbar">'+
@@ -6253,13 +6355,21 @@ function registerPages(){
           '. Nilai Kontrak dan Nilai RAP selalu total sejak awal proyek.'
         : 'Menampilkan total biaya sejak awal setiap proyek sampai sekarang.';
 
-      var allRows=computeProjectProgressRows(progFrom, progTo);
+      // FARM has its own 9-column layout (computeFarmRows() below) and
+      // is rendered separately -- excluded here so it never also shows
+      // up in the generic Rincian-Progress-style section loop.
+      var allRows=computeProjectProgressRows(progFrom, progTo).filter(function(r){ return bucketPemberiProyek(r.pemberiProyek)!=='FARM'; });
       var byBucket={};
       DASHBOARD_PROYEK_ORDER.forEach(function(b){ byBucket[b]=[]; });
       allRows.forEach(function(r){ byBucket[bucketPemberiProyek(r.pemberiProyek)].push(r); });
 
+      var farmRows=computeFarmRows(progFrom, progTo);
+      var farmSec=farmRows.length?buildSection('FARM', farmRows):null;
+      if(farmSec) farmSec.rows=farmRows;
+
       var bodyHtml='', sections=[];
       DASHBOARD_PROYEK_ORDER.forEach(function(bucket){
+        if(bucket==='FARM'){ if(farmSec) bodyHtml+=farmSec.html; return; }
         var rows=byBucket[bucket];
         if(!rows.length) return;
         var sec=buildSection(bucket, rows);
@@ -6274,10 +6384,11 @@ function registerPages(){
         var tbl=DataTable(sec.idp+'_tbl',[
           {key:'no',label:'No',sort:false,render:function(r,idx){ return '<span class="no">'+(idx+1)+'</span>'; }},
           {key:'nama',label:'Nama Proyek',cls:'wrap',render:function(r){
-            return esc(r.nama)+(r.linked?'':'<div class="faint-italic" style="font-size:11px;color:var(--danger);">⚠ belum tertaut ke transaksi — atur di Master Project</div>'); },
+            return esc(r.nama)+(r.status==='Selesai'?' <span class="chip neutral"><span class="sig"></span>Selesai</span>':'')+
+              (r.linked?'':'<div class="faint-italic" style="font-size:11px;color:var(--danger);">⚠ belum tertaut ke transaksi — atur di Master Project</div>'); },
             foot:function(){ return '<b>TOTAL</b>'; }},
           {key:'kontrak',label:'Nilai Kontrak',num:true,render:function(r){ return num0(r.kontrak); }, foot:sumFoot('kontrak')},
-          {key:'rap',label:'Nilai RAP (65%)',num:true,render:function(r){ return num0(r.rap); }, foot:sumFoot('rap')},
+          {key:'rap',label:'Nilai RAP',num:true,render:function(r){ return num0(r.rap); }, foot:sumFoot('rap')},
           {key:'bahan',label:'Biaya Bahan',num:true,render:function(r){ return drillCell(r.bahan,r,'bahan'); }, foot:sumFoot('bahan')},
           {key:'bahanPct',label:'%',num:true,render:function(r){ return r.totalRap?pct(r.bahanPct):'–'; }},
           {key:'upah',label:'Biaya Upah',num:true,render:function(r){ return drillCell(r.upah,r,'upah'); }, foot:sumFoot('upah')},
@@ -6298,6 +6409,7 @@ function registerPages(){
             return '<b class="'+(r.hasilUsaha<0?'neg':'pos')+'">'+num0(r.hasilUsaha)+'</b>'; }, foot:sumFoot('hasilUsaha')},
           {key:'hasilUsahaPct',label:'%',num:true,render:function(r){ return r.kontrak?pct(r.hasilUsahaPct):'–'; }}
         ], sec.rows, {defaultSort:'kontrak',defaultDir:'desc',perPage:15,showFoot:true,
+          pinDoneLast:{key:'status',value:'Selesai'}, rowClass:function(r){ return r.status==='Selesai'?'row-done':''; },
           searchFn:function(r){ return r.nama; }, countId:sec.idp+'_cnt',
           onRender:function(){
             document.querySelectorAll('#'+sec.idp+'_tbl [data-drill-ledger]').forEach(function(b){
@@ -6310,11 +6422,11 @@ function registerPages(){
             });
           }});
         bindSearch(sec.idp+'_q', tbl);
-        bindExport(sec.idp, 'Dashboard_Proyek_'+sec.bucket.replace(/\s+/g,'_'),
+        bindExportWithPicker(sec.idp, 'Dashboard_Proyek_'+sec.bucket.replace(/\s+/g,'_'),
           ['No','Nama Proyek','Nilai Kontrak','Nilai RAP','Biaya Bahan','Biaya Upah','Biaya Akomodasi','Total Pengeluaran RAP',
            'Sisa RAP','Status RAP','Cost Center','Adm Fee','Total Pengeluaran','Hasil Usaha'],
-          function(){
-            var list=tbl.getFiltered();
+          function(){ return tbl.getFiltered(); }, function(r){ return r.nama; },
+          function(list){
             var rows=list.map(function(r,i){
               return [i+1,r.nama,r.kontrak,r.rap,r.bahan,r.upah,r.akomodasi,r.totalRap,r.sisaRap,r.statusRap,
                 r.costCenter,r.admFee,r.totalPengeluaran,r.hasilUsaha];
@@ -6325,6 +6437,59 @@ function registerPages(){
             return rows;
           }, {title:'Dashboard Pengeluaran — '+sec.bucket});
       });
+
+      if(farmSec){
+        function farmSum(key){ return function(list){ return '<b>'+num0(list.reduce(function(a,b){ return a+b[key]; },0))+'</b>'; }; }
+        var farmTbl=DataTable(farmSec.idp+'_tbl',[
+          {key:'no',label:'No',sort:false,render:function(r,idx){ return '<span class="no">'+(idx+1)+'</span>'; }},
+          {key:'nama',label:'Nama Farm',cls:'wrap',render:function(r){
+            return esc(r.nama)+(r.status==='Selesai'?' <span class="chip neutral"><span class="sig"></span>Selesai</span>':''); },
+            foot:function(){ return '<b>TOTAL</b>'; }},
+          {key:'pendapatan',label:'Pendapatan Kandang',num:true,render:function(r){
+            return '<input type="text" inputmode="numeric" class="ph-plafond-input farm-input" '+
+              'id="farmPendapatan_'+r.id+'" data-id="'+r.id+'" data-field="farmPendapatan" value="'+(r.pendapatan?num0(r.pendapatan):'')+'" placeholder="0">'; },
+            foot:farmSum('pendapatan')},
+          {key:'hutang',label:'Pembayaran Hutang',num:true,render:function(r){
+            return '<input type="text" inputmode="numeric" class="ph-plafond-input farm-input" '+
+              'id="farmHutang_'+r.id+'" data-id="'+r.id+'" data-field="farmHutang" value="'+(r.hutang?num0(r.hutang):'')+'" placeholder="0">'; },
+            foot:farmSum('hutang')},
+          {key:'produksi',label:'Produksi',num:true,render:function(r){ return num0(r.produksi); }, foot:farmSum('produksi')},
+          {key:'gaji',label:'Gaji Pegawai',num:true,render:function(r){ return num0(r.gaji); }, foot:farmSum('gaji')},
+          {key:'pajak',label:'Pajak',num:true,render:function(r){ return num0(r.pajak); }, foot:farmSum('pajak')},
+          {key:'thr',label:'Cadangan THR',num:true,render:function(r){ return num0(r.thr); }, foot:farmSum('thr')},
+          {key:'pemeliharaan',label:'Pemeliharaan Kandang',num:true,render:function(r){ return num0(r.pemeliharaan); }, foot:farmSum('pemeliharaan')},
+          {key:'hasilUsaha',label:'Hasil Usaha Farm',num:true,render:function(r){
+            return '<b class="'+(r.hasilUsaha<0?'neg':'pos')+'">'+num0(r.hasilUsaha)+'</b>'; }, foot:farmSum('hasilUsaha')}
+        ], farmSec.rows, {defaultSort:'nama',defaultDir:'asc',perPage:15,showFoot:true,
+          pinDoneLast:{key:'status',value:'Selesai'}, rowClass:function(r){ return r.status==='Selesai'?'row-done':''; },
+          searchFn:function(r){ return r.nama; }, countId:farmSec.idp+'_cnt',
+          onRender:function(){
+            document.querySelectorAll('#'+farmSec.idp+'_tbl .farm-input').forEach(function(inp){
+              bindCurrencyInput(inp.id);
+              inp.addEventListener('change',function(){
+                var id=inp.getAttribute('data-id'), field=inp.getAttribute('data-field');
+                var rec=DB.projects.find(function(p){ return p.id===id; });
+                if(!rec) return;
+                rec[field]=fnumC(inp.id);
+                saveDB(); syncUpsert('projects', rec);
+                setTimeout(function(){ drawAll(); }, 0);
+                toast((field==='farmPendapatan'?'Pendapatan Kandang':'Pembayaran Hutang')+' tersimpan.','success');
+              });
+            });
+          }});
+        bindSearch(farmSec.idp+'_q', farmTbl);
+        bindExportWithPicker(farmSec.idp, 'Dashboard_Pengeluaran_Farm',
+          ['No','Nama Farm','Pendapatan Kandang','Pembayaran Hutang','Produksi','Gaji Pegawai','Pajak','Cadangan THR','Pemeliharaan Kandang','Hasil Usaha Farm'],
+          function(){ return farmTbl.getFiltered(); }, function(r){ return r.nama; },
+          function(list){
+            var rows=list.map(function(r,i){
+              return [i+1,r.nama,r.pendapatan,r.hutang,r.produksi,r.gaji,r.pajak,r.thr,r.pemeliharaan,r.hasilUsaha];
+            });
+            function sum(key){ return list.reduce(function(a,b){ return a+b[key]; },0); }
+            rows.push(['','TOTAL',sum('pendapatan'),sum('hutang'),sum('produksi'),sum('gaji'),sum('pajak'),sum('thr'),sum('pemeliharaan'),sum('hasilUsaha')]);
+            return rows;
+          }, {title:'Dashboard Pengeluaran — Farm'});
+      }
     }
 
     drawAll();
@@ -6491,8 +6656,9 @@ function registerPages(){
         var headers=['No','Nama Proyek','Pemberi Proyek'].concat(akunList);
         if(showTotalPemasukan) headers.push('Total Pemasukan');
         headers.push('Total Pengeluaran','Selisih');
-        bindExport(sec.idp, 'Dashboard_Pemasukan_'+sec.bucket.replace(/\s+/g,'_'), headers, function(){
-          var list=tbl.getFiltered();
+        bindExportWithPicker(sec.idp, 'Dashboard_Pemasukan_'+sec.bucket.replace(/\s+/g,'_'), headers,
+          function(){ return tbl.getFiltered(); }, function(r){ return r.nama; },
+          function(list){
           var rows=list.map(function(r,i){
             var row=[i+1, r.nama, r.pemberiProyek];
             akunList.forEach(function(akun){ row.push(r.byAkun[akun]||0); });

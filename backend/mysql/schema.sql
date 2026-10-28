@@ -58,6 +58,9 @@ CREATE TABLE IF NOT EXISTS projects (
   pemberi_proyek  VARCHAR(120) NOT NULL DEFAULT '',
   cost_center     DECIMAL(18,2) NOT NULL DEFAULT 0,
   adm_fee         DECIMAL(18,2) NOT NULL DEFAULT 0,
+  status          VARCHAR(20) NOT NULL DEFAULT 'Belum', -- 'Belum' (aktif) or 'Selesai'
+  farm_pendapatan DECIMAL(18,2) NOT NULL DEFAULT 0,      -- Dashboard Pengeluaran > Farm: Pendapatan Kandang, manual
+  farm_hutang     DECIMAL(18,2) NOT NULL DEFAULT 0,      -- Dashboard Pengeluaran > Farm: Pembayaran Hutang, manual
   updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_projects_ledger (ledger_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -59,12 +59,14 @@ function relasiToDb(obj){ return {id:obj.id, kode:obj.kode, nama:obj.nama, alama
 function projectFromDb(r){
   return {id:r.id, nama:r.nama, ledgerName:r.ledger_name||'', kontrak:Number(r.kontrak)||0, rap:Number(r.rap)||0,
     progress:(r.progress===null||r.progress===undefined)?null:Number(r.progress), pemberiProyek:r.pemberi_proyek||'',
-    costCenter:Number(r.cost_center)||0, admFee:Number(r.adm_fee)||0, updatedAt:r.updated_at||null};
+    costCenter:Number(r.cost_center)||0, admFee:Number(r.adm_fee)||0, status:r.status||'Belum',
+    farmPendapatan:Number(r.farm_pendapatan)||0, farmHutang:Number(r.farm_hutang)||0, updatedAt:r.updated_at||null};
 }
 function projectToDb(obj){
   return {id:obj.id, nama:obj.nama, ledger_name:obj.ledgerName||'', kontrak:obj.kontrak||0, rap:obj.rap||0,
     progress:(obj.progress===null||obj.progress===undefined)?null:obj.progress,
     pemberi_proyek:obj.pemberiProyek||'', cost_center:obj.costCenter||0, adm_fee:obj.admFee||0,
+    status:obj.status||'Belum', farm_pendapatan:obj.farmPendapatan||0, farm_hutang:obj.farmHutang||0,
     _expected_updated_at:obj.updatedAt||null};
 }
 function jurnalFromDb(r){
