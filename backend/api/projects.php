@@ -3,7 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/resource_crud.php';
 handle_resource_crud('projects', [
     'id', 'nama', 'ledger_name', 'kontrak', 'rap', 'progress', 'pemberi_proyek', 'cost_center', 'adm_fee',
-    'status', 'farm_pendapatan', 'farm_hutang',
+    'status', 'farm_pendapatan', 'farm_hutang', 'rap_percent',
 ], 'id', [], [
     'id' => ['type' => 'string', 'max' => 40, 'required' => true],
     'nama' => ['type' => 'string', 'max' => 255],
@@ -17,4 +17,5 @@ handle_resource_crud('projects', [
     'status' => ['type' => 'string', 'max' => 20],
     'farm_pendapatan' => ['type' => 'number'],
     'farm_hutang' => ['type' => 'number'],
+    'rap_percent' => ['type' => 'number'],
 ]);

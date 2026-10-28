@@ -3444,6 +3444,7 @@ function masterPage(cfg){
           obj[f.key]=(f.type==='number')?(parseFloat(v.replace(/[^\d.-]/g,''))||0):
             (f.type==='currency')?fnumC('f_'+f.key):v;
         }
+        if(cfg.beforeSave) cfg.beforeSave(obj);
         if(!id) DB[cfg.coll].push(obj);
         saveDB(); syncUpsert(cfg.coll, obj); closeModal(); refresh();
         toast(id?'Data berhasil diperbarui.':'Data baru ditambahkan.','success');
@@ -3457,6 +3458,7 @@ function masterPage(cfg){
           bindCurrencyInput('f_'+f.key);
         }
       });
+      if(cfg.afterFormRender) cfg.afterFormRender();
     }
 
     function del(id){
@@ -4259,18 +4261,42 @@ function registerPages(){
             {key:'pemberiProyek',label:'Pemberi Proyek',type:'combo',options:PEMBERI_PROYEK_LIST},
             {key:'ledgerName',label:'Nama di Transaksi Kas/Bank/Jurnal (kosongkan jika sama)'},
             {key:'kontrak',label:'Nilai Kontrak (Rp)',type:'currency'},
-            {key:'rap',label:'Nilai RAP (Rp)',type:'currency'},
+            {key:'rapPercent',label:'RAP (% dari Kontrak — kosongkan jika isi Nilai RAP manual di bawah)',type:'number'},
+            {key:'rap',label:'Nilai RAP (Rp) — otomatis terisi kalau % di atas diisi',type:'currency'},
             {key:'costCenter',label:'Cost Center / Overhead (Rp)',type:'currency'},
             {key:'admFee',label:'Adm Fee (Rp)',type:'currency'},
             {key:'progress',label:'Progress Lapangan (0–1, mis. 0.6)',type:'number'},
             {key:'status',label:'Status Proyek',type:'select',options:['Belum','Selesai']}],
+    // Nilai RAP (Rp) is still the single number every dashboard reads
+    // (computeProjectProgressRows() at the top of this file) -- RAP (%)
+    // is just a convenience that fills it in for you, so the 65%
+    // fallback / per-project override logic there never has to know
+    // percent entry exists. Kept out of masterPage()'s generic onSave
+    // via the beforeSave hook so Customer/Vendor forms are untouched.
+    beforeSave:function(obj){
+      if(obj.rapPercent>0 && obj.kontrak>0) obj.rap=Math.round(obj.kontrak*obj.rapPercent/100);
+    },
+    afterFormRender:function(){
+      var pctEl=document.getElementById('f_rapPercent');
+      if(!pctEl) return;
+      function sync(){
+        var pct=parseFloat(pctEl.value);
+        if(!(pct>0)) return;
+        var kontrak=fnumC('f_kontrak');
+        if(kontrak>0) document.getElementById('f_rap').value=formatThousands(Math.round(kontrak*pct/100));
+      }
+      pctEl.oninput=sync;
+      document.getElementById('f_kontrak').addEventListener('input', sync);
+      sync();
+    },
     searchFn:function(r){ return r.nama+' '+(r.pemberiProyek||''); },
     columns:[
       {key:'nama',label:'Nama Project',cls:'wrap',render:function(r){ return '<b>'+esc(r.nama)+'</b>'; }},
       {key:'pemberiProyek',label:'Pemberi Proyek',render:function(r){ return r.pemberiProyek?esc(r.pemberiProyek):'<span class="faint-italic">–</span>'; }},
       {key:'kontrak',label:'Nilai Kontrak',num:true,render:function(r){ return num0(r.kontrak); },
        foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+(b.kontrak||0);},0))+'</b>'; }},
-      {key:'rap',label:'Nilai RAP',num:true,render:function(r){ return num0(r.rap); },
+      {key:'rap',label:'Nilai RAP',num:true,render:function(r){
+        return num0(r.rap)+(r.rapPercent>0?' <span class="faint-italic">('+r.rapPercent+'%)</span>':''); },
        foot:function(l){ return '<b>'+num0(l.reduce(function(a,b){return a+(b.rap||0);},0))+'</b>'; }},
       {key:'progress',label:'Progress Lapangan',num:true,render:function(r){
         return typeof r.progress==='number'?pct(r.progress):'<span class="faint-italic">Belum Lapor</span>'; }},
