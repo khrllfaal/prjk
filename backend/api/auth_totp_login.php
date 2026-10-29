@@ -18,6 +18,12 @@ if (!$userId || (time() - (int)$pendingAt) > 300) {
     json_error('Sesi login kedaluwarsa, silakan login ulang.', 401);
 }
 
+// Same IP-level counter as auth_login.php -- a 6-digit OTP is cheap to
+// brute-force across many sessions from one IP without this.
+if (check_ip_lockout() !== null) {
+    json_error('Terlalu banyak percobaan login dari alamat ini. Coba lagi beberapa menit lagi.', 429);
+}
+
 $body = read_json_body();
 $code = (string)($body['code'] ?? '');
 
@@ -42,10 +48,12 @@ if (!totp_verify($user['totp_secret'], $code)) {
     $lockUntil = $attempts >= 5 ? date('Y-m-d H:i:s', time() + 15 * 60) : null;
     db()->prepare('UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?')
         ->execute([$attempts, $lockUntil, $user['id']]);
+    record_ip_failure();
     json_error('Kode OTP salah.', 401);
 }
 
 db()->prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?')->execute([$user['id']]);
+clear_ip_failures();
 unset($_SESSION['pending_totp_user_id'], $_SESSION['pending_totp_at']);
 session_regenerate_id(true);
 $_SESSION['user'] = ['id' => $user['id'], 'email' => $user['email'], 'nama' => $user['nama'], 'role' => $user['role']];

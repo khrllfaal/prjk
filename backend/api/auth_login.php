@@ -11,6 +11,14 @@ $email = trim(strtolower((string)($body['email'] ?? '')));
 $password = (string)($body['password'] ?? '');
 if ($email === '' || $password === '') json_error('Email dan password wajib diisi.', 422);
 
+// IP-level check first, before even looking up the account — this is
+// what catches credential stuffing (many different accounts tried from
+// one IP), which users.locked_until below never sees since it only
+// counts failures against one account at a time.
+if (check_ip_lockout() !== null) {
+    json_error('Terlalu banyak percobaan login dari alamat ini. Coba lagi beberapa menit lagi.', 429);
+}
+
 $stmt = db()->prepare('SELECT * FROM users WHERE email = ?');
 $stmt->execute([$email]);
 $user = $stmt->fetch();
@@ -19,6 +27,7 @@ $generic_error = 'Email atau password salah.';
 
 if (!$user) {
     // Don't reveal whether the email exists at all.
+    record_ip_failure();
     json_error($generic_error, 401);
 }
 
@@ -31,12 +40,14 @@ if (!password_verify($password, $user['password_hash'])) {
     $lockUntil = $attempts >= 5 ? date('Y-m-d H:i:s', time() + 15 * 60) : null;
     $upd = db()->prepare('UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?');
     $upd->execute([$attempts, $lockUntil, $user['id']]);
+    record_ip_failure();
     json_error($generic_error, 401);
 }
 
 // password correct — reset lockout state, rotate session id (session
 // fixation defence) either way, since the password itself was right.
 db()->prepare('UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?')->execute([$user['id']]);
+clear_ip_failures();
 start_session();
 session_regenerate_id(true);
 

@@ -248,3 +248,76 @@ function audit(string $action, string $entity, string $entityId, string $detail 
         substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255) ?: null,
     ]);
 }
+
+// Per-IP login rate limit (see login_rate_limits in schema.sql) — a
+// second, independent layer alongside users.failed_attempts/locked_until.
+// That per-account lockout never trips on credential stuffing (many
+// accounts, each tried just a few times from one IP), so this counts
+// failures by REMOTE_ADDR regardless of which account was targeted.
+// 20 fails within a rolling hour locks that IP for 30 minutes; the
+// window itself resets after an hour of inactivity so one noisy IP
+// (e.g. a shared office connection with ordinary typos) doesn't stay
+// counted forever. Same REMOTE_ADDR convention as audit() above —
+// deliberately not trusting X-Forwarded-For, which a client can send
+// with any value unless the host's proxy is known to overwrite it.
+const IP_RATE_LIMIT_MAX_ATTEMPTS = 20;
+const IP_RATE_LIMIT_WINDOW = 3600;   // 1 hour
+const IP_RATE_LIMIT_LOCKOUT = 1800;  // 30 minutes
+
+function client_ip(): string {
+    return $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+}
+
+// Call before verifying a password/OTP. Returns null when not locked,
+// or the lock's expiry (for the error message) when it is.
+function check_ip_lockout(): ?string {
+    $stmt = db()->prepare('SELECT locked_until FROM login_rate_limits WHERE ip = ?');
+    $stmt->execute([client_ip()]);
+    $row = $stmt->fetch();
+    if ($row && !empty($row['locked_until']) && strtotime($row['locked_until']) > time()) {
+        return $row['locked_until'];
+    }
+    return null;
+}
+
+// Call after a failed password/OTP check. Upserts this IP's row,
+// starting a fresh window if the previous one is stale, and locks the
+// IP once it crosses the threshold.
+function record_ip_failure(): void {
+    $ip = client_ip();
+    $now = time();
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM login_rate_limits WHERE ip = ? FOR UPDATE');
+        $stmt->execute([$ip]);
+        $row = $stmt->fetch();
+
+        if (!$row || ($now - strtotime($row['window_started'])) > IP_RATE_LIMIT_WINDOW) {
+            $attempts = 1;
+            $windowStarted = date('Y-m-d H:i:s', $now);
+        } else {
+            $attempts = (int)$row['attempts'] + 1;
+            $windowStarted = $row['window_started'];
+        }
+        $lockUntil = $attempts >= IP_RATE_LIMIT_MAX_ATTEMPTS
+            ? date('Y-m-d H:i:s', $now + IP_RATE_LIMIT_LOCKOUT) : null;
+
+        $pdo->prepare(
+            'INSERT INTO login_rate_limits (ip, attempts, window_started, locked_until) VALUES (?,?,?,?)
+             ON DUPLICATE KEY UPDATE attempts = VALUES(attempts), window_started = VALUES(window_started), locked_until = VALUES(locked_until)'
+        )->execute([$ip, $attempts, $windowStarted, $lockUntil]);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+// Call after a successful password/OTP check — the IP just proved it's
+// (at least partly) a legitimate user, so don't let unrelated past
+// failures from the same shared IP lock out the next person.
+function clear_ip_failures(): void {
+    db()->prepare('DELETE FROM login_rate_limits WHERE ip = ?')->execute([client_ip()]);
+}

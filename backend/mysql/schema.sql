@@ -25,6 +25,20 @@ CREATE TABLE IF NOT EXISTS users (
   created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Per-IP login rate limit, separate from users.failed_attempts/locked_until
+-- (which only locks after 5 fails on ONE account). This catches credential
+-- stuffing: one attacker trying many different accounts from the same IP,
+-- which never trips any single account's own counter. Shared by both
+-- auth_login.php (password) and auth_totp_login.php (OTP code) -- see
+-- check_ip_lockout()/record_ip_failure()/clear_ip_failures() in helpers.php.
+CREATE TABLE IF NOT EXISTS login_rate_limits (
+  ip              VARCHAR(45) PRIMARY KEY, -- IPv6 max length
+  attempts        INT NOT NULL DEFAULT 0,
+  window_started  DATETIME NOT NULL,
+  locked_until    DATETIME NULL,
+  updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ---------------------------------------------------------------------
 -- 2. master data
 -- ---------------------------------------------------------------------
