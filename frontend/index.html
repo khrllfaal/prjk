@@ -7069,8 +7069,16 @@ function registerPages(){
 
 </script>
 
-<script src="backend-config.js"></script>
-<script src="data-sync.js"></script>
-<script src="auth.js"></script>
+<!-- ?v=... cache-busts these 3 files on every deploy -- a plain
+     "data-sync.js" URL is a prime target for host/CDN-level static-asset
+     caching (confirmed: a user's browser and host kept serving a stale
+     data-sync.js for days after re-uploading it, because the URL never
+     changed), so each deploy that touches any of them must bump this
+     version string. Bump ALL THREE together even if only one file
+     actually changed -- keeping them in lockstep means no one has to
+     remember which file's version is stale. -->
+<script src="backend-config.js?v=20261029"></script>
+<script src="data-sync.js?v=20261029"></script>
+<script src="auth.js?v=20261029"></script>
 </body>
 </html>
