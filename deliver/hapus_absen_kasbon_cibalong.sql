@@ -10,8 +10,10 @@ UNION ALL SELECT 'pengajuan kasbon', COUNT(*) FROM kasbon_requests WHERE project
 UNION ALL SELECT 'potongan kasbon pada gaji', COUNT(*) FROM payroll_adjustments WHERE kategori = 'kasbon' AND period_id IN (SELECT id FROM payroll_periods WHERE project_id IN (SELECT id FROM projects WHERE nama = 'Bina Marga Kodim Bangun Jalan Cibalong'));
 -- Periode yang sudah disetujui/dibayar (gajinya akan menjadi 0 setelah absen dihapus; pembayarannya TETAP ada):
 SELECT tgl_mulai, tgl_akhir, status FROM payroll_periods WHERE status <> 'draft' AND project_id IN (SELECT id FROM projects WHERE nama = 'Bina Marga Kodim Bangun Jalan Cibalong');
--- Kontrak borongan di proyek ini (modul Borongan). Bila ada baris, BERHENTI dan kabari saya sebelum lanjut:
-SELECT no_kontrak, nama_pekerjaan, status FROM borongan_kontrak WHERE project_id IN (SELECT id FROM projects WHERE nama = 'Bina Marga Kodim Bangun Jalan Cibalong');
+-- Kontrak borongan (modul Borongan): jalankan baris di bawah HANYA jika tabel borongan_kontrak sudah ada (muncul setelah aplikasi versi baru diunggah dan ada yang login).
+-- Bila muncul error "Table ... borongan_kontrak doesn't exist", artinya belum ada kontrak borongan sama sekali: aman, lanjut ke bagian 2.
+-- Bila ada baris hasilnya, BERHENTI dan kabari saya sebelum lanjut.
+-- SELECT no_kontrak, nama_pekerjaan, status FROM borongan_kontrak WHERE project_id IN (SELECT id FROM projects WHERE nama = 'Bina Marga Kodim Bangun Jalan Cibalong');
 
 -- ===== 2. CADANGAN (salinan sebelum dihapus; aman dijalankan ulang) =====
 CREATE TABLE IF NOT EXISTS attendance_cadangan_cibalong AS SELECT * FROM attendance WHERE project_id IN (SELECT id FROM projects WHERE nama = 'Bina Marga Kodim Bangun Jalan Cibalong');
