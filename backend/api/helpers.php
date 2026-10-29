@@ -270,25 +270,45 @@ function client_ip(): string {
 
 // Call before verifying a password/OTP. Returns null when not locked,
 // or the lock's expiry (for the error message) when it is.
+//
+// Fails OPEN (treats it as "not locked") on any DB error, specifically
+// including login_rate_limits not existing yet -- this table's own
+// migration (add_login_rate_limit.sql) is a separate deploy step from
+// the PHP files that reference it, so a brief window where the code is
+// live but the migration hasn't run yet is expected, not exceptional.
+// A security *enhancement* must never become the single point of
+// failure that locks every legitimate user out of the whole app; the
+// pre-existing per-account lockout (users.failed_attempts/locked_until)
+// still protects login on its own either way.
 function check_ip_lockout(): ?string {
-    $stmt = db()->prepare('SELECT locked_until FROM login_rate_limits WHERE ip = ?');
-    $stmt->execute([client_ip()]);
-    $row = $stmt->fetch();
-    if ($row && !empty($row['locked_until']) && strtotime($row['locked_until']) > time()) {
-        return $row['locked_until'];
+    try {
+        $stmt = db()->prepare('SELECT locked_until FROM login_rate_limits WHERE ip = ?');
+        $stmt->execute([client_ip()]);
+        $row = $stmt->fetch();
+        if ($row && !empty($row['locked_until']) && strtotime($row['locked_until']) > time()) {
+            return $row['locked_until'];
+        }
+        return null;
+    } catch (Throwable $e) {
+        error_log('[accv2] check_ip_lockout degraded (login_rate_limits missing?): ' . $e->getMessage());
+        return null;
     }
-    return null;
 }
 
 // Call after a failed password/OTP check. Upserts this IP's row,
 // starting a fresh window if the previous one is stale, and locks the
 // IP once it crosses the threshold.
+//
+// Degrades silently (logs and returns) on any DB error -- see
+// check_ip_lockout() above for why: the caller's own json_error() for
+// the wrong password/OTP must still reach the user instead of a raw
+// 500, even while login_rate_limits doesn't exist yet.
 function record_ip_failure(): void {
     $ip = client_ip();
     $now = time();
     $pdo = db();
-    $pdo->beginTransaction();
     try {
+        $pdo->beginTransaction();
         $stmt = $pdo->prepare('SELECT * FROM login_rate_limits WHERE ip = ? FOR UPDATE');
         $stmt->execute([$ip]);
         $row = $stmt->fetch();
@@ -310,14 +330,20 @@ function record_ip_failure(): void {
 
         $pdo->commit();
     } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('[accv2] record_ip_failure degraded (login_rate_limits missing?): ' . $e->getMessage());
     }
 }
 
 // Call after a successful password/OTP check — the IP just proved it's
 // (at least partly) a legitimate user, so don't let unrelated past
-// failures from the same shared IP lock out the next person.
+// failures from the same shared IP lock out the next person. Degrades
+// silently for the same reason as the two functions above: a
+// successful login must never fail because of this table.
 function clear_ip_failures(): void {
-    db()->prepare('DELETE FROM login_rate_limits WHERE ip = ?')->execute([client_ip()]);
+    try {
+        db()->prepare('DELETE FROM login_rate_limits WHERE ip = ?')->execute([client_ip()]);
+    } catch (Throwable $e) {
+        error_log('[accv2] clear_ip_failures degraded (login_rate_limits missing?): ' . $e->getMessage());
+    }
 }
